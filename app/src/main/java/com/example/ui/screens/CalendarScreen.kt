@@ -1,0 +1,649 @@
+package com.example.ui.screens
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.R
+import com.example.data.local.entity.CalendarEventEntity
+import com.example.ui.theme.NudgyCard
+import com.example.ui.theme.NudgyCardBorder
+import com.example.ui.theme.NudgyCharcoal
+import com.example.ui.theme.NudgyLavender
+import com.example.ui.theme.NudgyMuted
+import com.example.ui.theme.NudgyPeach
+import com.example.ui.theme.NudgyPrimary
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
+
+data class DynamicDayItem(
+    val dayOfWeek: String,
+    val dayOfMonth: Int,
+    val epochMillis: Long,
+    val isToday: Boolean
+)
+
+@Composable
+fun CalendarScreen(
+    events: List<CalendarEventEntity>,
+    onBlockFocusTime: (startTime: Long, endTime: Long, title: String) -> Unit,
+    onAddEvent: (title: String, startTime: Long, endTime: Long, location: String?, type: String) -> Unit = { _, _, _, _, _ -> },
+    onDeleteEvent: (eventId: String) -> Unit = {},
+    onSelectDay: (Long) -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    var isCalendarConnected by remember { mutableStateOf(false) }
+    var hasBlockedSuggestedTime by remember { mutableStateOf(false) }
+    var showAddEventDialog by remember { mutableStateOf(false) }
+
+    val timeFormatter = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
+    val monthFormatter = remember { SimpleDateFormat("MMMM yyyy", Locale.getDefault()) }
+
+    // Dynamically compute the current 7 days of this week
+    val (headerMonth, daysList) = remember {
+        val cal = Calendar.getInstance()
+        val monthStr = monthFormatter.format(cal.time).uppercase()
+        val dayOfWeekToday = cal.get(Calendar.DAY_OF_WEEK)
+        val diffToMonday = if (dayOfWeekToday == Calendar.SUNDAY) -6 else Calendar.MONDAY - dayOfWeekToday
+        cal.add(Calendar.DAY_OF_MONTH, diffToMonday)
+
+        val days = mutableListOf<DynamicDayItem>()
+        val dayFormat = SimpleDateFormat("EEE", Locale.getDefault())
+        val todayCal = Calendar.getInstance()
+
+        for (i in 0 until 7) {
+            val isToday = cal.get(Calendar.YEAR) == todayCal.get(Calendar.YEAR) &&
+                    cal.get(Calendar.DAY_OF_YEAR) == todayCal.get(Calendar.DAY_OF_YEAR)
+            days.add(
+                DynamicDayItem(
+                    dayOfWeek = dayFormat.format(cal.time),
+                    dayOfMonth = cal.get(Calendar.DAY_OF_MONTH),
+                    epochMillis = cal.timeInMillis,
+                    isToday = isToday
+                )
+            )
+            cal.add(Calendar.DAY_OF_MONTH, 1)
+        }
+        Pair(monthStr, days)
+    }
+
+    val todayIndex = daysList.indexOfFirst { it.isToday }.coerceAtLeast(0)
+    var selectedDayIndex by remember { mutableIntStateOf(todayIndex) }
+
+    // Dynamically calculate the best free focus time gap (>= 30 mins) between events or in afternoon
+    val selectedDayMillis = daysList.getOrNull(selectedDayIndex)?.epochMillis ?: System.currentTimeMillis()
+    val suggestedSlot = remember(events, selectedDayIndex) {
+        val baseCal = Calendar.getInstance().apply { timeInMillis = selectedDayMillis }
+        val sortedEvents = events.sortedBy { it.startEpochMillis }
+
+        if (sortedEvents.isEmpty()) {
+            val startCal = (baseCal.clone() as Calendar).apply {
+                set(Calendar.HOUR_OF_DAY, 14)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            val endCal = (baseCal.clone() as Calendar).apply {
+                set(Calendar.HOUR_OF_DAY, 14)
+                set(Calendar.MINUTE, 45)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            Triple(startCal.timeInMillis, endCal.timeInMillis, 45)
+        } else {
+            var foundStart = 0L
+            var foundEnd = 0L
+            var foundDuration = 0
+
+            // Check gap after first meeting or between meetings
+            for (i in 0 until sortedEvents.size - 1) {
+                val currentEnd = sortedEvents[i].endEpochMillis
+                val nextStart = sortedEvents[i + 1].startEpochMillis
+                val gapMinutes = ((nextStart - currentEnd) / (60 * 1000L)).toInt()
+                if (gapMinutes >= 30) {
+                    foundStart = currentEnd + (5 * 60 * 1000L) // 5 min buffer
+                    val dur = minOf(gapMinutes - 5, 45)
+                    foundEnd = foundStart + (dur * 60 * 1000L)
+                    foundDuration = dur
+                    break
+                }
+            }
+
+            if (foundDuration == 0) {
+                val lastEventEnd = sortedEvents.last().endEpochMillis
+                foundStart = lastEventEnd + (15 * 60 * 1000L)
+                foundDuration = 45
+                foundEnd = foundStart + (45 * 60 * 1000L)
+            }
+
+            Triple(foundStart, foundEnd, foundDuration)
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+        // Top Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = headerMonth,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = NudgyPrimary
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Today’s schedule",
+                    style = MaterialTheme.typography.displayMedium,
+                    color = NudgyCharcoal
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(NudgyCharcoal)
+                    .clickable { showAddEventDialog = true },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Add event",
+                    tint = Color.White,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
+
+        // Horizontal Weekly Date Selector
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            daysList.forEachIndexed { index, day ->
+                val isSelected = index == selectedDayIndex
+
+                Column(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if (isSelected) NudgyCharcoal else Color.Transparent)
+                        .clickable {
+                            selectedDayIndex = index
+                            onSelectDay(day.epochMillis)
+                        }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = day.dayOfWeek,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 12.sp,
+                            color = if (isSelected) Color.White.copy(alpha = 0.8f) else NudgyMuted
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "${day.dayOfMonth}",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = if (isSelected) Color.White else NudgyCharcoal
+                        )
+                    )
+                }
+            }
+        }
+
+        // Google Calendar Connect Card (Figma Screen 2)
+        if (!isCalendarConnected) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = NudgyCard,
+                border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(1.dp, NudgyCardBorder, RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_google_logo),
+                            contentDescription = "Google Calendar",
+                            tint = Color.Unspecified,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(14.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Bring your calendar in",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = NudgyCharcoal
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Connect Google Calendar to spot conflicts and find open time.",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                            color = NudgyMuted
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    Button(
+                        onClick = { isCalendarConnected = true },
+                        shape = RoundedCornerShape(100.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary),
+                        modifier = Modifier.height(38.dp)
+                    ) {
+                        Text(
+                            text = "Connect",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        // Schedule Timeline Section
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            color = NudgyCard,
+            border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "UP NEXT",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = NudgyPrimary
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Schedule · ${events.size} items",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = NudgyCharcoal
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .border(1.dp, NudgyCardBorder, RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.CalendarMonth,
+                            contentDescription = null,
+                            tint = NudgyCharcoal,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                if (events.isEmpty()) {
+                    Text(
+                        text = "No events scheduled for this day.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = NudgyMuted,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+                } else {
+                    // Vertical Timeline Cards
+                    events.forEach { event ->
+                        val isMeeting = event.eventType == "MEETING"
+                        val cardBg = if (isMeeting) NudgyPeach else NudgyLavender
+                        val dotColor = if (isMeeting) NudgyPrimary else Color(0xFF7A68E6)
+
+                        val startTimeStr = timeFormatter.format(event.startEpochMillis)
+                        val endTimeStr = timeFormatter.format(event.endEpochMillis)
+
+                        Row(
+                            verticalAlignment = Alignment.Top,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.width(52.dp)
+                            ) {
+                                Text(
+                                    text = startTimeStr,
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                                    color = NudgyMuted
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(12.dp)
+                                        .clip(CircleShape)
+                                        .border(2.dp, dotColor, CircleShape)
+                                        .background(Color.White)
+                                )
+                            }
+
+                            Surface(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(16.dp),
+                                color = cardBg
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "$startTimeStr – $endTimeStr",
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                            color = NudgyMuted
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = event.title,
+                                            style = MaterialTheme.typography.titleMedium.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 15.sp
+                                            ),
+                                            color = NudgyCharcoal
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = event.locationOrLink ?: "Google Meet",
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                            color = NudgyMuted
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = { onDeleteEvent(event.id) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.DeleteOutline,
+                                            contentDescription = "Delete event",
+                                            tint = NudgyMuted,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Suggested Focus Time Card (Figma Screen 2)
+        val (suggestedStart, suggestedEnd, suggestedDuration) = suggestedSlot
+        val suggestedStartStr = timeFormatter.format(suggestedStart)
+        val suggestedEndStr = timeFormatter.format(suggestedEnd)
+
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            color = NudgyCard,
+            border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
+        ) {
+            Row(
+                modifier = Modifier.padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "SUGGESTED FOCUS TIME",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF2E7D32)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (hasBlockedSuggestedTime) "Blocked: $suggestedStartStr – $suggestedEndStr" else "$suggestedStartStr – $suggestedEndStr",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = NudgyCharcoal
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (hasBlockedSuggestedTime) "Focus time added to your schedule" else "$suggestedDuration minutes free in your schedule",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                        color = NudgyMuted
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Button(
+                    onClick = {
+                        hasBlockedSuggestedTime = true
+                        onBlockFocusTime(suggestedStart, suggestedEnd, "Deep focus session")
+                    },
+                    enabled = !hasBlockedSuggestedTime,
+                    shape = RoundedCornerShape(100.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (hasBlockedSuggestedTime) Color(0xFFE0E0E0) else NudgyPrimary
+                    ),
+                    modifier = Modifier.height(40.dp)
+                ) {
+                    Text(
+                        text = if (hasBlockedSuggestedTime) "Blocked" else "Block time",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = if (hasBlockedSuggestedTime) NudgyMuted else Color.White
+                        )
+                    )
+                }
+            }
+        }
+
+        // Generous bottom spacer so content isn't clipped by bottom nav or floating mascot button
+        Spacer(modifier = Modifier.height(84.dp))
+    }
+
+    if (showAddEventDialog) {
+        var eventTitle by remember { mutableStateOf("") }
+        var eventLocation by remember { mutableStateOf("Google Meet") }
+        var selectedDurationMinutes by remember { mutableIntStateOf(30) }
+        var eventType by remember { mutableStateOf("MEETING") }
+
+        AlertDialog(
+            onDismissRequest = { showAddEventDialog = false },
+            title = { Text("Schedule Event", fontWeight = FontWeight.Bold, color = NudgyCharcoal) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = eventTitle,
+                        onValueChange = { eventTitle = it },
+                        label = { Text("Event Name") },
+                        placeholder = { Text("e.g. Design review") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = NudgyPrimary,
+                            unfocusedBorderColor = NudgyCardBorder
+                        ),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = eventLocation,
+                        onValueChange = { eventLocation = it },
+                        label = { Text("Location / Link") },
+                        placeholder = { Text("Google Meet or Room 4B") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = NudgyPrimary,
+                            unfocusedBorderColor = NudgyCardBorder
+                        ),
+                        singleLine = true
+                    )
+
+                    Text("DURATION", style = MaterialTheme.typography.labelSmall, color = NudgyMuted)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(30, 45, 60).forEach { mins ->
+                            val isSelected = selectedDurationMinutes == mins
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(100.dp))
+                                    .background(if (isSelected) NudgyPrimary else Color(0xFFF3EFE6))
+                                    .clickable { selectedDurationMinutes = mins }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "$mins min",
+                                    color = if (isSelected) Color.White else NudgyCharcoal,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+
+                    Text("TYPE", style = MaterialTheme.typography.labelSmall, color = NudgyMuted)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("MEETING" to "Meeting", "FOCUS_TIME" to "Focus Time").forEach { (typeKey, typeLabel) ->
+                            val isSelected = eventType == typeKey
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(100.dp))
+                                    .background(if (isSelected) NudgyCharcoal else Color(0xFFF3EFE6))
+                                    .clickable { eventType = typeKey }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = typeLabel,
+                                    color = if (isSelected) Color.White else NudgyCharcoal,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (eventTitle.isNotBlank()) {
+                            val selectedEpoch = daysList.getOrNull(selectedDayIndex)?.epochMillis ?: System.currentTimeMillis()
+                            val eventStartCal = Calendar.getInstance().apply {
+                                timeInMillis = selectedEpoch
+                                set(Calendar.HOUR_OF_DAY, 10)
+                                set(Calendar.MINUTE, 0)
+                            }
+                            val startMillis = eventStartCal.timeInMillis
+                            val endMillis = startMillis + (selectedDurationMinutes * 60 * 1000L)
+
+                            onAddEvent(
+                                eventTitle.trim(),
+                                startMillis,
+                                endMillis,
+                                eventLocation.trim().ifEmpty { null },
+                                eventType
+                            )
+                            showAddEventDialog = false
+                        }
+                    },
+                    enabled = eventTitle.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary)
+                ) {
+                    Text("Add", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddEventDialog = false }) {
+                    Text("Cancel", color = NudgyCharcoal)
+                }
+            }
+        )
+    }
+}

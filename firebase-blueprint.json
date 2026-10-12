@@ -1,0 +1,48 @@
+{
+  "entities": {
+    "User": {
+      "path": "/users/{userId}",
+      "fields": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoUrl": { "type": "string", "optional": true },
+        "preferredLanguage": { "type": "string" },
+        "workingHoursStart": { "type": "string" },
+        "workingHoursEnd": { "type": "string" },
+        "streakCount": { "type": "number" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      }
+    },
+    "Task": {
+      "path": "/users/{userId}/tasks/{taskId}",
+      "fields": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string", "optional": true },
+        "dueDateEpochMillis": { "type": "number" },
+        "priority": { "type": "string" },
+        "category": { "type": "string" },
+        "isCompleted": { "type": "boolean" },
+        "completedAtEpochMillis": { "type": "number", "optional": true },
+        "reminderSet": { "type": "boolean" },
+        "reminderEpochMillis": { "type": "number", "optional": true },
+        "recurrenceRule": { "type": "string", "optional": true },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      }
+    },
+    "Memory": {
+      "path": "/users/{userId}/memories/{memoryId}",
+      "fields": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      }
+    }
+  }
+}

@@ -1,0 +1,55 @@
+package com.example.data.local.entity
+
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+import com.example.data.model.Priority
+import com.example.data.model.TaskCategory
+import java.util.UUID
+
+@Entity(tableName = "tasks")
+data class TaskEntity(
+    @PrimaryKey val id: String = UUID.randomUUID().toString(),
+    val userId: String,
+    val title: String,
+    val description: String? = null,
+    val dueDateEpochMillis: Long = System.currentTimeMillis(),
+    val priority: Priority = Priority.MEDIUM,
+    val category: TaskCategory = TaskCategory.WORK,
+    val isCompleted: Boolean = false,
+    val completedAtEpochMillis: Long? = null,
+    val reminderSet: Boolean = false,
+    val reminderEpochMillis: Long? = null,
+    val recurrenceRule: String? = null,
+    val isSyncedToCloud: Boolean = false,
+    val createdAtEpochMillis: Long = System.currentTimeMillis(),
+    val updatedAtEpochMillis: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "calendar_events")
+data class CalendarEventEntity(
+    @PrimaryKey val id: String = UUID.randomUUID().toString(),
+    val userId: String,
+    val title: String,
+    val startEpochMillis: Long,
+    val endEpochMillis: Long,
+    val locationOrLink: String? = null,
+    val eventType: String = "MEETING", // "MEETING", "FOCUS_TIME"
+    val isAllDay: Boolean = false
+)
+
+@Entity(tableName = "nudgy_memories")
+data class NudgyMemoryEntity(
+    @PrimaryKey val id: String = UUID.randomUUID().toString(),
+    val userId: String,
+    val content: String,
+    val createdAtEpochMillis: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "daily_briefs")
+data class DailyBriefEntity(
+    @PrimaryKey val dateString: String,
+    val userId: String,
+    val headline: String,
+    val summary: String,
+    val createdAtEpochMillis: Long = System.currentTimeMillis()
+)

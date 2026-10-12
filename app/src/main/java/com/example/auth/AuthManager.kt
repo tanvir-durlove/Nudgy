@@ -1,0 +1,296 @@
+package com.example.auth
+
+import android.app.Activity
+import android.content.Context
+import android.util.Log
+import androidx.credentials.ClearCredentialStateRequest
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import com.example.R
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+import com.google.firebase.Firebase
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.auth
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
+
+class AuthManager(private val context: Context) {
+    private val auth: FirebaseAuth = Firebase.auth
+    private val credentialManager: CredentialManager = CredentialManager.create(context)
+
+    private val _userState = MutableStateFlow<NudgyUser?>(extractUser())
+    val userState: StateFlow<NudgyUser?> = _userState.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
+    init {
+        auth.addAuthStateListener { firebaseAuth ->
+            val user = firebaseAuth.currentUser
+            if (user != null) {
+                _userState.value = NudgyUser(
+                    uid = user.uid,
+                    displayName = user.displayName ?: "Arif Rahman",
+                    email = user.email ?: "arif@example.com",
+                    photoUrl = user.photoUrl?.toString()
+                )
+            } else {
+                _userState.value = null
+            }
+        }
+    }
+
+    private fun extractUser(): NudgyUser? {
+        val user = auth.currentUser ?: return null
+        return NudgyUser(
+            uid = user.uid,
+            displayName = user.displayName ?: "Arif Rahman",
+            email = user.email ?: "arif@example.com",
+            photoUrl = user.photoUrl?.toString()
+        )
+    }
+
+    private fun getWebClientId(): String {
+        return try {
+            context.getString(R.string.default_web_client_id)
+        } catch (e: Exception) {
+            Log.e(TAG, "Missing default_web_client_id string resource", e)
+            ""
+        }
+    }
+
+    /**
+     * Continue as Guest / Offline mode for instant testing & accessibility
+     */
+    fun continueAsGuest() {
+        _userState.value = NudgyUser(
+            uid = "guest_user_demo",
+            displayName = "Guest User",
+            email = "guest@nudgy.app",
+            photoUrl = null
+        )
+    }
+
+    /**
+     * Silent Auto-Sign-In on App Startup
+     */
+    fun attemptSilentSignIn(scope: CoroutineScope) {
+        if (auth.currentUser != null) {
+            _userState.value = extractUser()
+            return
+        }
+
+        val clientId = getWebClientId()
+        if (clientId.isEmpty()) return
+
+        val googleIdOption = GetGoogleIdOption.Builder()
+            .setFilterByAuthorizedAccounts(true)
+            .setServerClientId(clientId)
+            .setAutoSelectEnabled(true)
+            .build()
+
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(googleIdOption)
+            .build()
+
+        scope.launch {
+            try {
+                val result = credentialManager.getCredential(context, request)
+                val credential = result.credential
+                if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                    val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
+                    val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
+                    val authResult = auth.signInWithCredential(authCredential).await()
+                    val user = authResult.user
+                    if (user != null) {
+                        syncUserToFirestore(user.uid, user.displayName, user.email, user.photoUrl?.toString())
+                    }
+                }
+            } catch (e: Exception) {
+                // Expected when no prior authorized account is stored on device
+                Log.d(TAG, "Silent sign-in not available: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Interactive Google Sign-In with Credential Manager
+     */
+    fun signInWithGoogle(
+        activity: Activity,
+        scope: CoroutineScope,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        val clientId = getWebClientId()
+        if (clientId.isEmpty()) {
+            val error = "Google Sign-In configuration missing: client ID not found"
+            _errorMessage.value = error
+            onError(error)
+            return
+        }
+
+        _isLoading.value = true
+        _errorMessage.value = null
+
+        val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
+        val request = GetCredentialRequest.Builder().addCredentialOption(signInOption).build()
+
+        scope.launch {
+            try {
+                val result = credentialManager.getCredential(activity, request)
+                val credential = result.credential
+                if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                    val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
+                    val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
+                    val authResult = auth.signInWithCredential(authCredential).await()
+                    val user = authResult.user
+
+                    if (user != null) {
+                        syncUserToFirestore(user.uid, user.displayName, user.email, user.photoUrl?.toString())
+                        _userState.value = NudgyUser(
+                            uid = user.uid,
+                            displayName = user.displayName ?: "Arif Rahman",
+                            email = user.email ?: "arif@example.com",
+                            photoUrl = user.photoUrl?.toString()
+                        )
+                        _isLoading.value = false
+                        withContext(Dispatchers.Main) {
+                            onSuccess()
+                        }
+                    } else {
+                        throw IllegalStateException("Firebase user was null after Google sign-in")
+                    }
+                } else {
+                    throw IllegalStateException("Unexpected credential type: ${credential.type}")
+                }
+            } catch (e: GetCredentialCancellationException) {
+                Log.w(TAG, "Google Sign-In flow cancelled or dismissed: ${e.message}", e)
+                _isLoading.value = false
+            } catch (e: Exception) {
+                Log.e(TAG, "Google Sign-In failed", e)
+                val msg = e.localizedMessage ?: "Sign in failed"
+                _errorMessage.value = msg
+                _isLoading.value = false
+                withContext(Dispatchers.Main) {
+                    onError(msg)
+                }
+            }
+        }
+    }
+
+    /**
+     * Store or update user metadata in Firestore
+     */
+    private suspend fun syncUserToFirestore(
+        uid: String,
+        displayName: String?,
+        email: String?,
+        photoUrl: String?
+    ) = withContext(Dispatchers.IO) {
+        try {
+            val dbId = context.getString(R.string.firestore_database_id)
+            val db = FirebaseFirestore.getInstance(dbId)
+            val userDoc = db.collection("users").document(uid)
+
+            val payload = hashMapOf<String, Any>(
+                "userId" to uid,
+                "displayName" to (displayName ?: "Arif Rahman"),
+                "email" to (email ?: "arif@example.com"),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            if (photoUrl != null) {
+                payload["photoUrl"] = photoUrl
+            }
+            payload["preferredLanguage"] = "en"
+            payload["workingHoursStart"] = "09:00"
+            payload["workingHoursEnd"] = "18:00"
+            payload["streakCount"] = 1
+
+            userDoc.set(payload, SetOptions.merge()).await()
+        } catch (e: Exception) {
+            Log.w(TAG, "Firestore user profile sync warning: ${e.message}")
+        }
+    }
+
+    /**
+     * Sign Out
+     */
+    fun signOut(scope: CoroutineScope, onComplete: () -> Unit = {}) {
+        auth.signOut()
+        _userState.value = null
+        scope.launch {
+            try {
+                credentialManager.clearCredentialState(ClearCredentialStateRequest())
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to clear credential state", e)
+            } finally {
+                withContext(Dispatchers.Main) {
+                    onComplete()
+                }
+            }
+        }
+    }
+
+    /**
+     * Delete Account (Google Play Policy Compliant)
+     */
+    fun deleteAccount(scope: CoroutineScope, onComplete: () -> Unit = {}, onError: (String) -> Unit = {}) {
+        val user = auth.currentUser
+        if (user == null) {
+            onComplete()
+            return
+        }
+
+        _isLoading.value = true
+        scope.launch {
+            try {
+                val uid = user.uid
+                val dbId = context.getString(R.string.firestore_database_id)
+                val db = FirebaseFirestore.getInstance(dbId)
+                db.collection("users").document(uid).delete().await()
+                user.delete().await()
+                credentialManager.clearCredentialState(ClearCredentialStateRequest())
+                _userState.value = null
+                _isLoading.value = false
+                withContext(Dispatchers.Main) {
+                    onComplete()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Account deletion failed", e)
+                val msg = e.localizedMessage ?: "Failed to delete account"
+                _errorMessage.value = msg
+                _isLoading.value = false
+                withContext(Dispatchers.Main) {
+                    onError(msg)
+                }
+            }
+        }
+    }
+
+    fun clearError() {
+        _errorMessage.value = null
+    }
+
+    companion object {
+        private const val TAG = "NudgyAuth"
+    }
+}
