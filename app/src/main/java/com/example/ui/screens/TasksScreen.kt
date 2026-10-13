@@ -125,7 +125,11 @@ fun TasksScreen(
 
         // Segmented Filter Tabs
         NudgyPillTabs(
-            tabs = listOf("Today", "Upcoming", "Completed"),
+            tabs = listOf(
+                "Today (${todayTasks.size})",
+                "Upcoming (${upcomingTasks.size})",
+                "Completed (${completedTasks.size})"
+            ),
             selectedIndex = selectedTab,
             onTabSelected = { selectedTab = it }
         )

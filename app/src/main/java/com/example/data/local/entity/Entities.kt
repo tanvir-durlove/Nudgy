@@ -34,7 +34,9 @@ data class CalendarEventEntity(
     val endEpochMillis: Long,
     val locationOrLink: String? = null,
     val eventType: String = "MEETING", // "MEETING", "FOCUS_TIME"
-    val isAllDay: Boolean = false
+    val isAllDay: Boolean = false,
+    val googleCalendarEventId: Long? = null,
+    val isFromGoogleCalendar: Boolean = false
 )
 
 @Entity(tableName = "nudgy_memories")
@@ -52,4 +54,26 @@ data class DailyBriefEntity(
     val headline: String,
     val summary: String,
     val createdAtEpochMillis: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "chat_messages")
+data class ChatMessageEntity(
+    @PrimaryKey val id: String = UUID.randomUUID().toString(),
+    val userId: String,
+    val senderIsUser: Boolean,
+    val text: String,
+    val timestampMillis: Long = System.currentTimeMillis(),
+    val actionType: String = "NONE",
+    val associatedTaskId: String? = null,
+    val associatedTaskTitle: String? = null,
+    val associatedTaskDueMillis: Long? = null,
+    val associatedEventId: String? = null,
+    val associatedEventTitle: String? = null,
+    val associatedEventStartMillis: Long? = null,
+    val associatedEventEndMillis: Long? = null,
+    val focusStartMillis: Long? = null,
+    val focusEndMillis: Long? = null,
+    val focusDurationMinutes: Int = 45,
+    val focusActionCompleted: Boolean = false,
+    val quickSuggestionsRaw: String = ""
 )

@@ -47,6 +47,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,6 +62,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.BuildApkActivity
+import com.example.ai.WakeWordForegroundService
 import com.example.auth.AuthManager
 import com.example.auth.NudgyUser
 import com.example.data.local.entity.NudgyMemoryEntity
@@ -380,11 +382,54 @@ fun YourNudgySheet(
     }
 
     if (showVoiceDialog) {
+        val isWakeWordActive by WakeWordForegroundService.isWakeWordActive.collectAsState()
+
         AlertDialog(
             onDismissRequest = { showVoiceDialog = false },
             title = { Text("Voice & Speech", fontWeight = FontWeight.Bold, color = NudgyCharcoal) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    // Always-On "Hey Nudgy" Wake Word Toggle
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = NudgyPeach,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Always-On \"Hey Nudgy\"",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = NudgyCharcoal
+                                )
+                                Text(
+                                    text = "Listen for \"Hey Nudgy\" in background to schedule tasks & calendar",
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp,
+                                    color = NudgyCharcoal.copy(alpha = 0.8f)
+                                )
+                            }
+                            Switch(
+                                checked = isWakeWordActive,
+                                onCheckedChange = { active ->
+                                    if (active) {
+                                        WakeWordForegroundService.start(context)
+                                    } else {
+                                        WakeWordForegroundService.stop(context)
+                                    }
+                                },
+                                colors = SwitchDefaults.colors(checkedTrackColor = NudgyPrimary)
+                            )
+                        }
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,

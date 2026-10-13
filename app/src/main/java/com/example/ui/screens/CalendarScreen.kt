@@ -17,18 +17,22 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.app.TimePickerDialog
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
@@ -71,13 +75,15 @@ data class DynamicDayItem(
 @Composable
 fun CalendarScreen(
     events: List<CalendarEventEntity>,
+    isCalendarConnected: Boolean = false,
+    onConnectGoogleCalendar: () -> Unit = {},
+    onSyncNow: () -> Unit = {},
     onBlockFocusTime: (startTime: Long, endTime: Long, title: String) -> Unit,
     onAddEvent: (title: String, startTime: Long, endTime: Long, location: String?, type: String) -> Unit = { _, _, _, _, _ -> },
     onDeleteEvent: (eventId: String) -> Unit = {},
     onSelectDay: (Long) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var isCalendarConnected by remember { mutableStateOf(false) }
     var hasBlockedSuggestedTime by remember { mutableStateOf(false) }
     var showAddEventDialog by remember { mutableStateOf(false) }
 
@@ -248,54 +254,71 @@ fun CalendarScreen(
             }
         }
 
-        // Google Calendar Connect Card (Figma Screen 2)
-        if (!isCalendarConnected) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                color = NudgyCard,
-                border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
+        // Google Calendar Connect & Sync Card
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            color = if (isCalendarConnected) Color(0xFFF1F8E9) else NudgyCard,
+            border = androidx.compose.foundation.BorderStroke(1.dp, if (isCalendarConnected) Color(0xFFA5D6A7) else NudgyCardBorder)
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(1.dp, if (isCalendarConnected) Color(0xFFA5D6A7) else NudgyCardBorder, RoundedCornerShape(12.dp))
+                        .background(if (isCalendarConnected) Color.White else Color.Transparent),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .border(1.dp, NudgyCardBorder, RoundedCornerShape(12.dp)),
-                        contentAlignment = Alignment.Center
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_google_logo),
+                        contentDescription = "Google Calendar",
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (isCalendarConnected) "Google Calendar Synced" else "Bring your calendar in",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = NudgyCharcoal
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (isCalendarConnected) "Events two-way synced with Google Calendar." else "Connect Google Calendar to spot conflicts and find open time.",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                        color = NudgyMuted
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                if (isCalendarConnected) {
+                    OutlinedButton(
+                        onClick = onSyncNow,
+                        shape = RoundedCornerShape(100.dp),
+                        modifier = Modifier.height(38.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF2E7D32)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2E7D32))
                     ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_google_logo),
-                            contentDescription = "Google Calendar",
-                            tint = Color.Unspecified,
-                            modifier = Modifier.size(24.dp)
+                        Text(
+                            text = "Sync now",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
                         )
                     }
-
-                    Spacer(modifier = Modifier.width(14.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Bring your calendar in",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = NudgyCharcoal
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Connect Google Calendar to spot conflicts and find open time.",
-                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
-                            color = NudgyMuted
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(12.dp))
-
+                } else {
                     Button(
-                        onClick = { isCalendarConnected = true },
+                        onClick = onConnectGoogleCalendar,
                         shape = RoundedCornerShape(100.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary),
                         modifier = Modifier.height(38.dp)
@@ -426,12 +449,24 @@ fun CalendarScreen(
                                             ),
                                             color = NudgyCharcoal
                                         )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = event.locationOrLink ?: "Google Meet",
-                                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
-                                            color = NudgyMuted
-                                        )
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = event.locationOrLink ?: "Google Meet",
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                                color = NudgyMuted
+                                            )
+                                            if (event.isFromGoogleCalendar) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = "· Google Calendar",
+                                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = Color(0xFF2E7D32)
+                                                    )
+                                                )
+                                            }
+                                        }
                                     }
 
                                     IconButton(
@@ -519,16 +554,41 @@ fun CalendarScreen(
     }
 
     if (showAddEventDialog) {
+        val context = LocalContext.current
         var eventTitle by remember { mutableStateOf("") }
         var eventLocation by remember { mutableStateOf("Google Meet") }
         var selectedDurationMinutes by remember { mutableIntStateOf(30) }
         var eventType by remember { mutableStateOf("MEETING") }
 
+        // Start time defaults: Current hour + 1 rounded to :00, or 10:00 AM
+        val now = Calendar.getInstance()
+        val defaultHour = now.get(Calendar.HOUR_OF_DAY).let { if (it in 7..21) (it + 1) % 24 else 10 }
+        var selectedHour by remember { mutableIntStateOf(defaultHour) }
+        var selectedMinute by remember { mutableIntStateOf(0) }
+
+        fun formatTimeStr(h: Int, m: Int): String {
+            val amPm = if (h < 12) "AM" else "PM"
+            val displayH = when {
+                h == 0 -> 12
+                h > 12 -> h - 12
+                else -> h
+            }
+            return String.format(Locale.getDefault(), "%d:%02d %s", displayH, m, amPm)
+        }
+
+        val totalEndMins = selectedHour * 60 + selectedMinute + selectedDurationMinutes
+        val endHour = (totalEndMins / 60) % 24
+        val endMinute = totalEndMins % 60
+        val scheduleSummary = "${formatTimeStr(selectedHour, selectedMinute)} – ${formatTimeStr(endHour, endMinute)} ($selectedDurationMinutes min)"
+
         AlertDialog(
             onDismissRequest = { showAddEventDialog = false },
             title = { Text("Schedule Event", fontWeight = FontWeight.Bold, color = NudgyCharcoal) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     OutlinedTextField(
                         value = eventTitle,
                         onValueChange = { eventTitle = it },
@@ -557,12 +617,91 @@ fun CalendarScreen(
                         singleLine = true
                     )
 
+                    // START TIME SELECTOR
+                    Text("START TIME", style = MaterialTheme.typography.labelSmall, color = NudgyMuted)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xFFF3EFE6))
+                            .border(1.dp, NudgyCardBorder, RoundedCornerShape(14.dp))
+                            .clickable {
+                                TimePickerDialog(
+                                    context,
+                                    { _, h, m ->
+                                        selectedHour = h
+                                        selectedMinute = m
+                                    },
+                                    selectedHour,
+                                    selectedMinute,
+                                    false
+                                ).show()
+                            }
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Schedule,
+                                contentDescription = "Pick Time",
+                                tint = NudgyPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = formatTimeStr(selectedHour, selectedMinute),
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = NudgyCharcoal
+                            )
+                        }
+                        Text(
+                            text = "Tap to pick",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                            color = NudgyPrimary
+                        )
+                    }
+
+                    // Quick Time Preset Chips
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(
+                            "9:00 AM" to (9 to 0),
+                            "11:00 AM" to (11 to 0),
+                            "2:00 PM" to (14 to 0),
+                            "4:00 PM" to (16 to 0)
+                        ).forEach { (label, pair) ->
+                            val isSelected = selectedHour == pair.first && selectedMinute == pair.second
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(100.dp))
+                                    .background(if (isSelected) NudgyPrimary else Color(0xFFF3EFE6))
+                                    .clickable {
+                                        selectedHour = pair.first
+                                        selectedMinute = pair.second
+                                    }
+                                    .padding(vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 10.sp,
+                                    color = if (isSelected) Color.White else NudgyCharcoal,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+
                     Text("DURATION", style = MaterialTheme.typography.labelSmall, color = NudgyMuted)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        listOf(30, 45, 60).forEach { mins ->
+                        listOf(15, 30, 45, 60).forEach { mins ->
                             val isSelected = selectedDurationMinutes == mins
                             Box(
                                 modifier = Modifier
@@ -580,6 +719,24 @@ fun CalendarScreen(
                                     fontSize = 12.sp
                                 )
                             }
+                        }
+                    }
+
+                    // Schedule Time Slot Summary
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        color = NudgyPrimary.copy(alpha = 0.08f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Slot: $scheduleSummary",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = NudgyCharcoal
+                            )
                         }
                     }
 
@@ -617,8 +774,10 @@ fun CalendarScreen(
                             val selectedEpoch = daysList.getOrNull(selectedDayIndex)?.epochMillis ?: System.currentTimeMillis()
                             val eventStartCal = Calendar.getInstance().apply {
                                 timeInMillis = selectedEpoch
-                                set(Calendar.HOUR_OF_DAY, 10)
-                                set(Calendar.MINUTE, 0)
+                                set(Calendar.HOUR_OF_DAY, selectedHour)
+                                set(Calendar.MINUTE, selectedMinute)
+                                set(Calendar.SECOND, 0)
+                                set(Calendar.MILLISECOND, 0)
                             }
                             val startMillis = eventStartCal.timeInMillis
                             val endMillis = startMillis + (selectedDurationMinutes * 60 * 1000L)

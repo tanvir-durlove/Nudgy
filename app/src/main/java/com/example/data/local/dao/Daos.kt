@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.example.data.local.entity.CalendarEventEntity
+import com.example.data.local.entity.ChatMessageEntity
 import com.example.data.local.entity.DailyBriefEntity
 import com.example.data.local.entity.NudgyMemoryEntity
 import com.example.data.local.entity.TaskEntity
@@ -18,6 +19,9 @@ interface TaskDao {
 
     @Query("SELECT * FROM tasks WHERE userId = :userId AND dueDateEpochMillis >= :startOfDay AND dueDateEpochMillis <= :endOfDay ORDER BY isCompleted ASC, dueDateEpochMillis ASC")
     fun getTasksForDayFlow(userId: String, startOfDay: Long, endOfDay: Long): Flow<List<TaskEntity>>
+
+    @Query("SELECT * FROM tasks WHERE userId = :userId AND dueDateEpochMillis >= :startOfDay AND dueDateEpochMillis <= :endOfDay ORDER BY isCompleted ASC, dueDateEpochMillis ASC")
+    suspend fun getTasksForDayOnce(userId: String, startOfDay: Long, endOfDay: Long): List<TaskEntity>
 
     @Query("SELECT * FROM tasks WHERE userId = :userId AND isCompleted = 0 ORDER BY dueDateEpochMillis ASC")
     fun getPendingTasksFlow(userId: String): Flow<List<TaskEntity>>
@@ -64,6 +68,9 @@ interface CalendarDao {
     @Query("SELECT * FROM calendar_events WHERE userId = :userId AND startEpochMillis >= :startOfDay AND startEpochMillis <= :endOfDay ORDER BY startEpochMillis ASC")
     fun getEventsForDayFlow(userId: String, startOfDay: Long, endOfDay: Long): Flow<List<CalendarEventEntity>>
 
+    @Query("SELECT * FROM calendar_events WHERE userId = :userId AND startEpochMillis >= :startOfDay AND startEpochMillis <= :endOfDay ORDER BY startEpochMillis ASC")
+    suspend fun getEventsForDayOnce(userId: String, startOfDay: Long, endOfDay: Long): List<CalendarEventEntity>
+
     @Query("SELECT * FROM calendar_events WHERE userId = :userId ORDER BY startEpochMillis ASC")
     fun getAllEventsFlow(userId: String): Flow<List<CalendarEventEntity>>
 
@@ -99,4 +106,19 @@ interface DailyBriefDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertBrief(brief: DailyBriefEntity)
+}
+
+@Dao
+interface ChatDao {
+    @Query("SELECT * FROM chat_messages WHERE userId = :userId ORDER BY timestampMillis ASC")
+    fun getMessagesFlow(userId: String): Flow<List<ChatMessageEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertMessage(message: ChatMessageEntity)
+
+    @Query("UPDATE chat_messages SET focusActionCompleted = 1 WHERE id = :messageId")
+    suspend fun markFocusActionCompleted(messageId: String)
+
+    @Query("DELETE FROM chat_messages WHERE userId = :userId")
+    suspend fun clearMessages(userId: String)
 }

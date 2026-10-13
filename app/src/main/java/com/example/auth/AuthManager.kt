@@ -32,6 +32,7 @@ import kotlinx.coroutines.withContext
 class AuthManager(private val context: Context) {
     private val auth: FirebaseAuth = Firebase.auth
     private val credentialManager: CredentialManager = CredentialManager.create(context)
+    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     private val _userState = MutableStateFlow<NudgyUser?>(extractUser())
     val userState: StateFlow<NudgyUser?> = _userState.asStateFlow()
@@ -46,26 +47,47 @@ class AuthManager(private val context: Context) {
         auth.addAuthStateListener { firebaseAuth ->
             val user = firebaseAuth.currentUser
             if (user != null) {
+                prefs.edit()
+                    .putString(KEY_ACTIVE_USER_ID, user.uid)
+                    .putBoolean(KEY_IS_GUEST, false)
+                    .apply()
                 _userState.value = NudgyUser(
                     uid = user.uid,
                     displayName = user.displayName ?: "Arif Rahman",
                     email = user.email ?: "arif@example.com",
                     photoUrl = user.photoUrl?.toString()
                 )
-            } else {
+            } else if (!prefs.getBoolean(KEY_IS_GUEST, false)) {
                 _userState.value = null
             }
         }
     }
 
     private fun extractUser(): NudgyUser? {
-        val user = auth.currentUser ?: return null
-        return NudgyUser(
-            uid = user.uid,
-            displayName = user.displayName ?: "Arif Rahman",
-            email = user.email ?: "arif@example.com",
-            photoUrl = user.photoUrl?.toString()
-        )
+        val user = auth.currentUser
+        if (user != null) {
+            prefs.edit()
+                .putString(KEY_ACTIVE_USER_ID, user.uid)
+                .putBoolean(KEY_IS_GUEST, false)
+                .apply()
+            return NudgyUser(
+                uid = user.uid,
+                displayName = user.displayName ?: "Arif Rahman",
+                email = user.email ?: "arif@example.com",
+                photoUrl = user.photoUrl?.toString()
+            )
+        }
+
+        if (prefs.getBoolean(KEY_IS_GUEST, false)) {
+            return NudgyUser(
+                uid = "guest_user_demo",
+                displayName = "Guest User",
+                email = "guest@nudgy.app",
+                photoUrl = null
+            )
+        }
+
+        return null
     }
 
     private fun getWebClientId(): String {
@@ -81,6 +103,10 @@ class AuthManager(private val context: Context) {
      * Continue as Guest / Offline mode for instant testing & accessibility
      */
     fun continueAsGuest() {
+        prefs.edit()
+            .putBoolean(KEY_IS_GUEST, true)
+            .putString(KEY_ACTIVE_USER_ID, "guest_user_demo")
+            .apply()
         _userState.value = NudgyUser(
             uid = "guest_user_demo",
             displayName = "Guest User",
@@ -236,6 +262,7 @@ class AuthManager(private val context: Context) {
      */
     fun signOut(scope: CoroutineScope, onComplete: () -> Unit = {}) {
         auth.signOut()
+        prefs.edit().clear().apply()
         _userState.value = null
         scope.launch {
             try {
@@ -256,6 +283,8 @@ class AuthManager(private val context: Context) {
     fun deleteAccount(scope: CoroutineScope, onComplete: () -> Unit = {}, onError: (String) -> Unit = {}) {
         val user = auth.currentUser
         if (user == null) {
+            prefs.edit().clear().apply()
+            _userState.value = null
             onComplete()
             return
         }
@@ -269,6 +298,7 @@ class AuthManager(private val context: Context) {
                 db.collection("users").document(uid).delete().await()
                 user.delete().await()
                 credentialManager.clearCredentialState(ClearCredentialStateRequest())
+                prefs.edit().clear().apply()
                 _userState.value = null
                 _isLoading.value = false
                 withContext(Dispatchers.Main) {
@@ -292,5 +322,15 @@ class AuthManager(private val context: Context) {
 
     companion object {
         private const val TAG = "NudgyAuth"
+        const val PREFS_NAME = "nudgy_auth_prefs"
+        const val KEY_IS_GUEST = "is_guest"
+        const val KEY_ACTIVE_USER_ID = "active_user_id"
+
+        fun getActiveUserId(context: Context): String {
+            val auth = Firebase.auth
+            auth.currentUser?.uid?.let { return it }
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return prefs.getString(KEY_ACTIVE_USER_ID, "guest_user_demo") ?: "guest_user_demo"
+        }
     }
 }

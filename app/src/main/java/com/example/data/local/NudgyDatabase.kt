@@ -6,10 +6,12 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.example.data.local.dao.CalendarDao
+import com.example.data.local.dao.ChatDao
 import com.example.data.local.dao.DailyBriefDao
 import com.example.data.local.dao.MemoryDao
 import com.example.data.local.dao.TaskDao
 import com.example.data.local.entity.CalendarEventEntity
+import com.example.data.local.entity.ChatMessageEntity
 import com.example.data.local.entity.DailyBriefEntity
 import com.example.data.local.entity.NudgyMemoryEntity
 import com.example.data.local.entity.TaskEntity
@@ -19,9 +21,10 @@ import com.example.data.local.entity.TaskEntity
         TaskEntity::class,
         CalendarEventEntity::class,
         NudgyMemoryEntity::class,
-        DailyBriefEntity::class
+        DailyBriefEntity::class,
+        ChatMessageEntity::class
     ],
-    version = 1,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -30,6 +33,7 @@ abstract class NudgyDatabase : RoomDatabase() {
     abstract fun calendarDao(): CalendarDao
     abstract fun memoryDao(): MemoryDao
     abstract fun dailyBriefDao(): DailyBriefDao
+    abstract fun chatDao(): ChatDao
 
     companion object {
         @Volatile

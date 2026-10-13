@@ -46,6 +46,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,7 +61,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.example.ai.WakeWordForegroundService
 import com.example.auth.NudgyUser
+import com.example.data.local.entity.CalendarEventEntity
 import com.example.data.local.entity.TaskEntity
 import com.example.ui.components.MascotMood
 import com.example.ui.components.NudgyMascot
@@ -78,6 +81,7 @@ import java.util.Locale
 enum class ChatActionType {
     NONE,
     TASK_PREVIEW,
+    EVENT_CREATED,
     FOCUS_TIME_PROPOSAL,
     DAILY_PLAN
 }
@@ -89,6 +93,7 @@ data class ChatMessage(
     val timestampMillis: Long = System.currentTimeMillis(),
     val actionType: ChatActionType = ChatActionType.NONE,
     val associatedTask: TaskEntity? = null,
+    val associatedEvent: CalendarEventEntity? = null,
     val focusStartMillis: Long? = null,
     val focusEndMillis: Long? = null,
     val focusDurationMinutes: Int = 45,
@@ -217,6 +222,50 @@ fun ChatScreen(
                         )
 
                         Spacer(modifier = Modifier.height(18.dp))
+
+                        // Always-On "Hey Nudgy" Wake Word Status Pill
+                        val isWakeWordActive by WakeWordForegroundService.isWakeWordActive.collectAsState()
+                        Surface(
+                            shape = RoundedCornerShape(100.dp),
+                            color = if (isWakeWordActive) Color(0xFFE8F5E9) else Color(0xFFF3EFE6),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (isWakeWordActive) Color(0xFF81C784) else Color(0xFFDCD6CA)
+                            ),
+                            modifier = Modifier.clickable {
+                                val permissionCheck = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+                                if (permissionCheck == PackageManager.PERMISSION_GRANTED) {
+                                    if (isWakeWordActive) {
+                                        WakeWordForegroundService.stop(context)
+                                    } else {
+                                        WakeWordForegroundService.start(context)
+                                    }
+                                } else {
+                                    permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                            }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isWakeWordActive) Color(0xFF2E7D32) else NudgyMuted)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = if (isWakeWordActive) "Always-On \"Hey Nudgy\" Active" else "Tap to Enable \"Hey Nudgy\"",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isWakeWordActive) Color(0xFF1B5E20) else NudgyCharcoal
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
 
                         // Quick Prompt Pills
                         FlowRow(
@@ -365,6 +414,69 @@ fun ChatScreen(
                                                     modifier = Modifier.padding(start = 8.dp)
                                                 ) {
                                                     Text("View Task", fontSize = 12.sp, color = Color.White)
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Action Card 1b: Event Preview Card
+                                    if (message.actionType == ChatActionType.EVENT_CREATED && message.associatedEvent != null) {
+                                        val event = message.associatedEvent
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Surface(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            shape = RoundedCornerShape(16.dp),
+                                            color = NudgyPeach,
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, NudgyPrimary.copy(alpha = 0.3f))
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(14.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Schedule,
+                                                            contentDescription = null,
+                                                            tint = NudgyPrimary,
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                        Text(
+                                                            text = event.title,
+                                                            style = MaterialTheme.typography.titleMedium.copy(
+                                                                fontWeight = FontWeight.Bold,
+                                                                fontSize = 15.sp
+                                                            ),
+                                                            color = NudgyCharcoal
+                                                        )
+                                                    }
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    Text(
+                                                        text = "${timeFormat.format(event.startEpochMillis)} – ${timeFormat.format(event.endEpochMillis)} • ${event.locationOrLink ?: "Google Meet"}",
+                                                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                                        color = NudgyMuted
+                                                    )
+                                                }
+
+                                                Surface(
+                                                    shape = RoundedCornerShape(100.dp),
+                                                    color = Color(0xFFE8F5E9)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Check,
+                                                            contentDescription = null,
+                                                            tint = Color(0xFF2E7D32),
+                                                            modifier = Modifier.size(14.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(4.dp))
+                                                        Text("Scheduled", color = Color(0xFF2E7D32), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                                    }
                                                 }
                                             }
                                         }

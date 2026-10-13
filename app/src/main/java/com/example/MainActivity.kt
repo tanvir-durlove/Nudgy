@@ -38,7 +38,10 @@ import com.example.analytics.RemoteConfigValues
 import com.example.auth.AuthManager
 import com.example.auth.NudgyUser
 import com.example.auth.SignInScreen
+import com.example.data.model.Priority
+import com.example.data.model.TaskCategory
 import com.example.data.repository.CalendarRepository
+import com.example.data.repository.ChatRepository
 import com.example.data.repository.DailyTaskStats
 import com.example.data.repository.MemoryRepository
 import com.example.data.repository.TaskRepository
@@ -68,6 +71,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var taskRepository: TaskRepository
     private lateinit var calendarRepository: CalendarRepository
     private lateinit var memoryRepository: MemoryRepository
+    private lateinit var chatRepository: ChatRepository
     private lateinit var preFilter: ClientIntentPreFilter
     private lateinit var geminiClient: GeminiClient
     private lateinit var voiceAssistantManager: VoiceAssistantManager
@@ -83,6 +87,7 @@ class MainActivity : ComponentActivity() {
         taskRepository = TaskRepository(this)
         calendarRepository = CalendarRepository(this)
         memoryRepository = MemoryRepository(this)
+        chatRepository = ChatRepository(this)
         reminderManager = ReminderManager(this)
         analytics = NudgyAnalytics(this)
         remoteConfig = NudgyRemoteConfig()
@@ -100,6 +105,7 @@ class MainActivity : ComponentActivity() {
                     taskRepository = taskRepository,
                     calendarRepository = calendarRepository,
                     memoryRepository = memoryRepository,
+                    chatRepository = chatRepository,
                     reminderManager = reminderManager,
                     preFilter = preFilter,
                     geminiClient = geminiClient,
@@ -123,6 +129,7 @@ fun NudgyMainFlow(
     taskRepository: TaskRepository,
     calendarRepository: CalendarRepository,
     memoryRepository: MemoryRepository,
+    chatRepository: ChatRepository,
     reminderManager: ReminderManager,
     preFilter: ClientIntentPreFilter,
     geminiClient: GeminiClient,
@@ -167,6 +174,7 @@ fun NudgyMainFlow(
             taskRepository.checkAndSeedInitialData(currentUser.uid)
             calendarRepository.checkAndSeedInitialEvents(currentUser.uid)
             memoryRepository.checkAndSeedInitialMemory(currentUser.uid)
+            chatRepository.checkAndSeedWelcomeMessage(currentUser.uid, currentUser.displayName)
         }
 
         NudgyAppScaffold(
@@ -175,6 +183,7 @@ fun NudgyMainFlow(
             taskRepository = taskRepository,
             calendarRepository = calendarRepository,
             memoryRepository = memoryRepository,
+            chatRepository = chatRepository,
             reminderManager = reminderManager,
             preFilter = preFilter,
             geminiClient = geminiClient,
@@ -192,6 +201,7 @@ fun NudgyAppScaffold(
     taskRepository: TaskRepository,
     calendarRepository: CalendarRepository,
     memoryRepository: MemoryRepository,
+    chatRepository: ChatRepository,
     reminderManager: ReminderManager,
     preFilter: ClientIntentPreFilter,
     geminiClient: GeminiClient,
@@ -208,6 +218,27 @@ fun NudgyAppScaffold(
     var selectedCalendarDayMillis by remember { mutableStateOf(System.currentTimeMillis()) }
     var showFloatingBubbleDialog by remember { mutableStateOf(false) }
     var isThinking by remember { mutableStateOf(false) }
+    var isCalendarConnected by remember { mutableStateOf(calendarRepository.hasCalendarPermissions()) }
+
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val readGranted = permissions[Manifest.permission.READ_CALENDAR] == true
+        val writeGranted = permissions[Manifest.permission.WRITE_CALENDAR] == true
+        isCalendarConnected = readGranted && writeGranted
+        if (isCalendarConnected) {
+            scope.launch {
+                calendarRepository.syncGoogleCalendar(user.uid, taskRepository)
+            }
+        }
+    }
+
+    LaunchedEffect(user.uid) {
+        if (calendarRepository.hasCalendarPermissions()) {
+            isCalendarConnected = true
+            calendarRepository.syncGoogleCalendar(user.uid, taskRepository)
+        }
+    }
 
     val todayTasks by taskRepository.observeTodayTasks(user.uid).collectAsStateWithLifecycle(emptyList())
     val upcomingTasks by taskRepository.observeUpcomingTasks(user.uid).collectAsStateWithLifecycle(emptyList())
@@ -220,22 +251,15 @@ fun NudgyAppScaffold(
     val isSpeaking by voiceAssistantManager.isSpeaking.collectAsStateWithLifecycle()
     val remoteConfigValues by remoteConfig.configState.collectAsStateWithLifecycle(RemoteConfigValues())
 
-    val chatMessages = remember {
-        mutableStateListOf(
-            ChatMessage(
-                id = "welcome_msg",
-                senderIsUser = false,
-                text = "Hi ${user.displayName.split(" ").firstOrNull() ?: "Arif"}! What can I help you get done today?",
-                quickSuggestions = listOf("Plan my day", "Show today's tasks", "Find free time", "What do you remember?")
-            )
-        )
-    }
+    val chatMessages by chatRepository.observeMessages(user.uid).collectAsStateWithLifecycle(emptyList())
 
     fun handleUserChat(prompt: String) {
-        chatMessages.add(ChatMessage(UUID.randomUUID().toString(), true, prompt))
+        val userMsg = ChatMessage(UUID.randomUUID().toString(), true, prompt)
         isThinking = true
 
         scope.launch {
+            chatRepository.addMessage(user.uid, userMsg)
+
             val preFilterResult = preFilter.tryHandle(
                 userId = user.uid,
                 userPrompt = prompt,
@@ -261,12 +285,13 @@ fun NudgyAppScaffold(
                         text = preFilterResult.responseText,
                         actionType = preFilterResult.actionType,
                         associatedTask = preFilterResult.createdTask,
+                        associatedEvent = preFilterResult.createdEvent,
                         focusStartMillis = preFilterResult.focusStartMillis,
                         focusEndMillis = preFilterResult.focusEndMillis,
                         focusDurationMinutes = preFilterResult.focusDurationMinutes,
                         quickSuggestions = preFilterResult.quickSuggestions
                     )
-                    chatMessages.add(handledMsg)
+                    chatRepository.addMessage(user.uid, handledMsg)
                     isThinking = false
                     voiceAssistantManager.speak(preFilterResult.responseText)
                 }
@@ -284,7 +309,7 @@ fun NudgyAppScaffold(
                         text = responseText,
                         quickSuggestions = listOf("Plan my day", "Show today's tasks", "Find free time")
                     )
-                    chatMessages.add(geminiMsg)
+                    chatRepository.addMessage(user.uid, geminiMsg)
                     isThinking = false
                     voiceAssistantManager.speak(responseText)
                 }
@@ -377,6 +402,14 @@ fun NudgyAppScaffold(
                             onBlockFocusTime = { start, end, title ->
                                 scope.launch {
                                     calendarRepository.blockFocusTime(user.uid, start, end, title)
+                                    taskRepository.createTask(
+                                        userId = user.uid,
+                                        title = title,
+                                        dueEpochMillis = start,
+                                        priority = Priority.HIGH,
+                                        category = TaskCategory.WORK,
+                                        reminderSet = true
+                                    )
                                     analytics.logFocusTimeBlocked(45)
                                 }
                             }
@@ -403,15 +436,43 @@ fun NudgyAppScaffold(
                     NudgyNavDestination.CALENDAR -> {
                         CalendarScreen(
                             events = events,
+                            isCalendarConnected = isCalendarConnected,
+                            onConnectGoogleCalendar = {
+                                calendarPermissionLauncher.launch(
+                                    arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
+                                )
+                            },
+                            onSyncNow = {
+                                scope.launch {
+                                    calendarRepository.syncGoogleCalendar(user.uid, taskRepository)
+                                }
+                            },
                             onBlockFocusTime = { start, end, title ->
                                 scope.launch {
                                     calendarRepository.blockFocusTime(user.uid, start, end, title)
+                                    taskRepository.createTask(
+                                        userId = user.uid,
+                                        title = title,
+                                        dueEpochMillis = start,
+                                        priority = Priority.HIGH,
+                                        category = TaskCategory.WORK,
+                                        reminderSet = true
+                                    )
                                     analytics.logFocusTimeBlocked(45)
                                 }
                             },
                             onAddEvent = { title, start, end, loc, type ->
                                 scope.launch {
                                     calendarRepository.addEvent(user.uid, title, start, end, loc, type)
+                                    taskRepository.createTask(
+                                        userId = user.uid,
+                                        title = title,
+                                        description = "Calendar Event ($type)",
+                                        dueEpochMillis = start,
+                                        priority = Priority.HIGH,
+                                        category = TaskCategory.WORK,
+                                        reminderSet = true
+                                    )
                                 }
                             },
                             onDeleteEvent = { eventId ->

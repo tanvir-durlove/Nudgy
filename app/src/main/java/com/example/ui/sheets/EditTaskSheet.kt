@@ -17,12 +17,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -42,6 +46,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -74,11 +79,13 @@ fun EditTaskSheet(
     onToggleComplete: (TaskEntity) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var title by remember { mutableStateOf(task.title) }
     var description by remember { mutableStateOf(task.description ?: "") }
     var priority by remember { mutableStateOf(task.priority) }
     var category by remember { mutableStateOf(task.category) }
+    var currentDueDateMillis by remember { mutableLongStateOf(task.dueDateEpochMillis) }
     var reminderSet by remember { mutableStateOf(task.reminderSet) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
 
@@ -178,25 +185,71 @@ fun EditTaskSheet(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Due Date Display
+            // Due Date Display & Editor
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
                     .background(Color(0xFFF3EFE6))
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .border(1.dp, NudgyCardBorder, RoundedCornerShape(14.dp))
+                    .clickable {
+                        val cal = Calendar.getInstance().apply { timeInMillis = currentDueDateMillis }
+                        DatePickerDialog(
+                            context,
+                            { _, y, m, d ->
+                                TimePickerDialog(
+                                    context,
+                                    { _, hourOfDay, minute ->
+                                        val newCal = Calendar.getInstance().apply {
+                                            set(Calendar.YEAR, y)
+                                            set(Calendar.MONTH, m)
+                                            set(Calendar.DAY_OF_MONTH, d)
+                                            set(Calendar.HOUR_OF_DAY, hourOfDay)
+                                            set(Calendar.MINUTE, minute)
+                                            set(Calendar.SECOND, 0)
+                                            set(Calendar.MILLISECOND, 0)
+                                        }
+                                        currentDueDateMillis = newCal.timeInMillis
+                                    },
+                                    cal.get(Calendar.HOUR_OF_DAY),
+                                    cal.get(Calendar.MINUTE),
+                                    false
+                                ).show()
+                            },
+                            cal.get(Calendar.YEAR),
+                            cal.get(Calendar.MONTH),
+                            cal.get(Calendar.DAY_OF_MONTH)
+                        ).show()
+                    }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Schedule,
+                        contentDescription = "Edit due time",
+                        tint = NudgyPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Due Date & Time",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = NudgyMuted
+                        )
+                        Text(
+                            text = dateFormatter.format(currentDueDateMillis),
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = NudgyCharcoal
+                        )
+                    }
+                }
                 Text(
-                    text = "Due",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = NudgyMuted
-                )
-                Text(
-                    text = dateFormatter.format(task.dueDateEpochMillis),
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                    color = NudgyCharcoal
+                    text = "Change",
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = NudgyPrimary
                 )
             }
 
@@ -337,6 +390,7 @@ fun EditTaskSheet(
                         val updated = task.copy(
                             title = title.trim(),
                             description = if (description.isNotBlank()) description.trim() else null,
+                            dueDateEpochMillis = currentDueDateMillis,
                             priority = priority,
                             category = category,
                             reminderSet = reminderSet

@@ -17,9 +17,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import android.app.TimePickerDialog
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.ui.platform.LocalContext
+import java.util.Locale
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -69,6 +73,7 @@ fun CreateTaskSheet(
     ) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
@@ -76,7 +81,20 @@ fun CreateTaskSheet(
     var category by remember { mutableStateOf(TaskCategory.WORK) }
     var selectedDayOption by remember { mutableIntStateOf(0) } // 0: Today, 1: Tomorrow, 2: In 2 Days
     var selectedTimeOption by remember { mutableIntStateOf(1) } // 0: 9 AM, 1: 2 PM, 2: 7 PM
+    var customHour by remember { mutableIntStateOf(14) }
+    var customMinute by remember { mutableIntStateOf(0) }
+    var hasCustomTime by remember { mutableStateOf(false) }
     var reminderSet by remember { mutableStateOf(true) }
+
+    fun formatCustomTime(h: Int, m: Int): String {
+        val amPm = if (h < 12) "AM" else "PM"
+        val displayH = when {
+            h == 0 -> 12
+            h > 12 -> h - 12
+            else -> h
+        }
+        return String.format(Locale.getDefault(), "%d:%02d %s", displayH, m, amPm)
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -181,19 +199,28 @@ fun CreateTaskSheet(
             Spacer(modifier = Modifier.height(12.dp))
 
             // TIME OF DAY SELECTOR
+            Text(
+                text = "WHEN SHOULD IT BE DONE?",
+                style = MaterialTheme.typography.labelSmall,
+                color = NudgyMuted
+            )
+            Spacer(modifier = Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 val timeOptions = listOf("Morning (9 AM)", "Afternoon (2 PM)", "Evening (7 PM)")
                 timeOptions.forEachIndexed { index, label ->
-                    val isSelected = selectedTimeOption == index
+                    val isSelected = !hasCustomTime && selectedTimeOption == index
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(100.dp))
                             .background(if (isSelected) NudgyPrimary else Color(0xFFF3EFE6))
-                            .clickable { selectedTimeOption = index }
+                            .clickable {
+                                hasCustomTime = false
+                                selectedTimeOption = index
+                            }
                             .padding(vertical = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {
@@ -205,6 +232,55 @@ fun CreateTaskSheet(
                         )
                     }
                 }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Custom Exact Time Picker Row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (hasCustomTime) NudgyPrimary.copy(alpha = 0.12f) else Color(0xFFF3EFE6))
+                    .border(1.dp, if (hasCustomTime) NudgyPrimary else NudgyCardBorder, RoundedCornerShape(14.dp))
+                    .clickable {
+                        TimePickerDialog(
+                            context,
+                            { _, h, m ->
+                                customHour = h
+                                customMinute = m
+                                hasCustomTime = true
+                            },
+                            if (hasCustomTime) customHour else 14,
+                            if (hasCustomTime) customMinute else 0,
+                            false
+                        ).show()
+                    }
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Schedule,
+                        contentDescription = "Pick custom time",
+                        tint = if (hasCustomTime) NudgyPrimary else NudgyCharcoal,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (hasCustomTime) "Custom Time: ${formatCustomTime(customHour, customMinute)}" else "Set Exact Time (e.g. 10:30 AM)",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = if (hasCustomTime) FontWeight.Bold else FontWeight.Normal,
+                            color = if (hasCustomTime) NudgyPrimary else NudgyCharcoal
+                        )
+                    )
+                }
+                Text(
+                    text = if (hasCustomTime) "Change" else "Pick",
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = NudgyPrimary
+                )
             }
 
             Spacer(modifier = Modifier.height(18.dp))
@@ -343,13 +419,17 @@ fun CreateTaskSheet(
                     if (title.isNotBlank()) {
                         val calendar = Calendar.getInstance()
                         calendar.add(Calendar.DAY_OF_YEAR, selectedDayOption)
-                        val hour = when (selectedTimeOption) {
-                            0 -> 9
-                            1 -> 14
-                            else -> 19
+                        val (finalHour, finalMinute) = if (hasCustomTime) {
+                            customHour to customMinute
+                        } else {
+                            when (selectedTimeOption) {
+                                0 -> 9 to 0
+                                1 -> 14 to 0
+                                else -> 19 to 0
+                            }
                         }
-                        calendar.set(Calendar.HOUR_OF_DAY, hour)
-                        calendar.set(Calendar.MINUTE, 0)
+                        calendar.set(Calendar.HOUR_OF_DAY, finalHour)
+                        calendar.set(Calendar.MINUTE, finalMinute)
                         calendar.set(Calendar.SECOND, 0)
                         calendar.set(Calendar.MILLISECOND, 0)
 
