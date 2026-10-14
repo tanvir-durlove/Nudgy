@@ -8,11 +8,12 @@ import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.analytics.analytics
 
 class NudgyAnalytics(context: Context) {
-    private val analytics: FirebaseAnalytics = try {
+    // Nullable: Firebase is unavailable when google-services.json is absent (e.g. CI builds).
+    private val analytics: FirebaseAnalytics? = try {
         Firebase.analytics
     } catch (e: Exception) {
-        Log.w(TAG, "Firebase Analytics init fallback: ${e.message}")
-        FirebaseAnalytics.getInstance(context)
+        Log.w(TAG, "Firebase Analytics unavailable: ${e.message}")
+        null
     }
 
     fun logTaskCreated(title: String, priority: String, category: String, hasReminder: Boolean) {
@@ -22,7 +23,7 @@ class NudgyAnalytics(context: Context) {
             putString("category", category)
             putBoolean("has_reminder", hasReminder)
         }
-        analytics.logEvent("nudgy_task_created", bundle)
+        analytics?.logEvent("nudgy_task_created", bundle)
     }
 
     fun logTaskCompleted(taskId: String, streakCount: Int) {
@@ -30,50 +31,50 @@ class NudgyAnalytics(context: Context) {
             putString("task_id", taskId)
             putInt("streak_count", streakCount)
         }
-        analytics.logEvent("nudgy_task_completed", bundle)
+        analytics?.logEvent("nudgy_task_completed", bundle)
     }
 
     fun logVoiceUsed(language: String) {
         val bundle = Bundle().apply {
             putString("language", language)
         }
-        analytics.logEvent("nudgy_voice_command_executed", bundle)
+        analytics?.logEvent("nudgy_voice_command_executed", bundle)
     }
 
     fun logCalendarConnected() {
-        analytics.logEvent("nudgy_calendar_connected", Bundle())
+        analytics?.logEvent("nudgy_calendar_connected", Bundle())
     }
 
     fun logFocusTimeBlocked(durationMinutes: Int) {
         val bundle = Bundle().apply {
             putInt("duration_minutes", durationMinutes)
         }
-        analytics.logEvent("nudgy_focus_time_blocked", bundle)
+        analytics?.logEvent("nudgy_focus_time_blocked", bundle)
     }
 
     fun logMorningBriefViewed() {
-        analytics.logEvent("nudgy_morning_brief_viewed", Bundle())
+        analytics?.logEvent("nudgy_morning_brief_viewed", Bundle())
     }
 
     fun logPromoCardClicked(headline: String) {
         val bundle = Bundle().apply {
             putString("promo_headline", headline)
         }
-        analytics.logEvent("nudgy_promo_card_clicked", bundle)
+        analytics?.logEvent("nudgy_promo_card_clicked", bundle)
     }
 
     fun logScreenViewed(screenName: String) {
         val bundle = Bundle().apply {
             putString("screen_name", screenName)
         }
-        analytics.logEvent("nudgy_screen_viewed", bundle)
+        analytics?.logEvent("nudgy_screen_viewed", bundle)
     }
 
     fun logNudgeInteracted(action: String) {
         val bundle = Bundle().apply {
             putString("action", action)
         }
-        analytics.logEvent("nudgy_nudge_interacted", bundle)
+        analytics?.logEvent("nudgy_nudge_interacted", bundle)
     }
 
     companion object {

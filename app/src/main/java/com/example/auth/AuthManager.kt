@@ -33,7 +33,13 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
 class AuthManager(private val context: Context) {
-    private val auth: FirebaseAuth = Firebase.auth
+    // Nullable: Firebase is unavailable when google-services.json is absent (e.g. CI builds).
+    private val auth: FirebaseAuth? = try {
+        Firebase.auth
+    } catch (e: Exception) {
+        Log.w(TAG, "FirebaseAuth unavailable: ${e.message}")
+        null
+    }
     private val credentialManager: CredentialManager = CredentialManager.create(context)
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -47,7 +53,7 @@ class AuthManager(private val context: Context) {
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     init {
-        auth.addAuthStateListener { firebaseAuth ->
+        auth?.addAuthStateListener { firebaseAuth ->
             val user = firebaseAuth.currentUser
             if (user != null) {
                 prefs.edit()
@@ -68,7 +74,7 @@ class AuthManager(private val context: Context) {
     }
 
     private fun extractUser(): NudgyUser? {
-        val user = auth.currentUser
+        val user = auth?.currentUser
         if (user != null) {
             prefs.edit()
                 .putString(KEY_ACTIVE_USER_ID, user.uid)
@@ -130,7 +136,7 @@ class AuthManager(private val context: Context) {
      * Silent Auto-Sign-In on App Startup
      */
     fun attemptSilentSignIn(scope: CoroutineScope) {
-        if (auth.currentUser != null) {
+        if (auth?.currentUser != null) {
             _userState.value = extractUser()
             return
         }
@@ -154,6 +160,8 @@ class AuthManager(private val context: Context) {
             .addCredentialOption(googleIdOption)
             .build()
 
+        val firebaseAuth = auth ?: return
+
         scope.launch {
             try {
                 val result = credentialManager.getCredential(context, request)
@@ -161,7 +169,7 @@ class AuthManager(private val context: Context) {
                 if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                     val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
                     val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
-                    val authResult = auth.signInWithCredential(authCredential).await()
+                    val authResult = firebaseAuth.signInWithCredential(authCredential).await()
                     val user = authResult.user
                     if (user != null) {
                         prefs.edit().putBoolean(KEY_EXPLICITLY_SIGNED_OUT, false).apply()
@@ -198,6 +206,13 @@ class AuthManager(private val context: Context) {
         val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
         val request = GetCredentialRequest.Builder().addCredentialOption(signInOption).build()
 
+        val firebaseAuth = auth ?: run {
+            val error = "Google Sign-In unavailable: Firebase is not configured"
+            _errorMessage.value = error
+            onError(error)
+            return
+        }
+
         scope.launch {
             try {
                 val result = credentialManager.getCredential(activity, request)
@@ -205,7 +220,7 @@ class AuthManager(private val context: Context) {
                 if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                     val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
                     val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
-                    val authResult = auth.signInWithCredential(authCredential).await()
+                    val authResult = firebaseAuth.signInWithCredential(authCredential).await()
                     val user = authResult.user
 
                     if (user != null) {
@@ -284,7 +299,7 @@ class AuthManager(private val context: Context) {
      */
     fun signOut(scope: CoroutineScope, onComplete: () -> Unit = {}) {
         WakeWordForegroundService.stop(context)
-        auth.signOut()
+        auth?.signOut()
         prefs.edit()
             .clear()
             .putBoolean(KEY_EXPLICITLY_SIGNED_OUT, true)
@@ -310,7 +325,7 @@ class AuthManager(private val context: Context) {
      */
     fun deleteAccount(scope: CoroutineScope, onComplete: () -> Unit = {}, onError: (String) -> Unit = {}) {
         WakeWordForegroundService.stop(context)
-        val user = auth.currentUser
+        val user = auth?.currentUser
         if (user == null) {
             val uid = getActiveUserId(context)
             scope.launch(Dispatchers.IO) {
@@ -419,8 +434,8 @@ class AuthManager(private val context: Context) {
         }
 
         fun getActiveUserId(context: Context): String {
-            val auth = Firebase.auth
-            auth.currentUser?.uid?.let { return it }
+            val firebaseAuth = try { Firebase.auth } catch (e: Exception) { null }
+            firebaseAuth?.currentUser?.uid?.let { return it }
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             return prefs.getString(KEY_ACTIVE_USER_ID, "guest_user_demo") ?: "guest_user_demo"
         }

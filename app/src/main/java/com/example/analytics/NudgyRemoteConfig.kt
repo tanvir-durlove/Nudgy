@@ -19,22 +19,24 @@ data class RemoteConfigValues(
 )
 
 class NudgyRemoteConfig {
-    private val remoteConfig: FirebaseRemoteConfig = try {
+    // Nullable: Firebase is unavailable when google-services.json is absent (e.g. CI builds).
+    private val remoteConfig: FirebaseRemoteConfig? = try {
         Firebase.remoteConfig
     } catch (e: Exception) {
-        Log.w(TAG, "RemoteConfig fallback: ${e.message}")
-        FirebaseRemoteConfig.getInstance()
+        Log.w(TAG, "RemoteConfig unavailable: ${e.message}")
+        null
     }
 
     private val _configState = MutableStateFlow(RemoteConfigValues())
     val configState: StateFlow<RemoteConfigValues> = _configState.asStateFlow()
 
     init {
+        val rc = remoteConfig ?: return
         try {
             val configSettings = remoteConfigSettings {
                 minimumFetchIntervalInSeconds = 3600
             }
-            remoteConfig.setConfigSettingsAsync(configSettings)
+            rc.setConfigSettingsAsync(configSettings)
 
             val defaults = mapOf<String, Any>(
                 KEY_ADS_ENABLED to false,
@@ -44,17 +46,17 @@ class NudgyRemoteConfig {
                 KEY_PROMO_SUBTITLE to "Share daily rhythms & achieve streaks together.",
                 KEY_MODEL_VERSION to "gemini-2.5-flash"
             )
-            remoteConfig.setDefaultsAsync(defaults)
+            rc.setDefaultsAsync(defaults)
 
-            remoteConfig.fetchAndActivate().addOnCompleteListener { task ->
+            rc.fetchAndActivate().addOnCompleteListener { task ->
                 if (task.isSuccessful) {
                     _configState.value = RemoteConfigValues(
-                        adsEnabled = remoteConfig.getBoolean(KEY_ADS_ENABLED),
-                        adFrequencyTasks = remoteConfig.getLong(KEY_AD_FREQUENCY),
-                        promoCardEnabled = remoteConfig.getBoolean(KEY_PROMO_CARD_ENABLED),
-                        promoHeadline = remoteConfig.getString(KEY_PROMO_HEADLINE).ifEmpty { "Invite friends to Nudgy" },
-                        promoSubtitle = remoteConfig.getString(KEY_PROMO_SUBTITLE).ifEmpty { "Share daily rhythms & achieve streaks together." },
-                        geminiModelVersion = remoteConfig.getString(KEY_MODEL_VERSION).ifEmpty { "gemini-2.5-flash" }
+                        adsEnabled = rc.getBoolean(KEY_ADS_ENABLED),
+                        adFrequencyTasks = rc.getLong(KEY_AD_FREQUENCY),
+                        promoCardEnabled = rc.getBoolean(KEY_PROMO_CARD_ENABLED),
+                        promoHeadline = rc.getString(KEY_PROMO_HEADLINE).ifEmpty { "Invite friends to Nudgy" },
+                        promoSubtitle = rc.getString(KEY_PROMO_SUBTITLE).ifEmpty { "Share daily rhythms & achieve streaks together." },
+                        geminiModelVersion = rc.getString(KEY_MODEL_VERSION).ifEmpty { "gemini-2.5-flash" }
                     )
                 }
             }
