@@ -95,4 +95,5 @@ jobs:
           - Fully signed with debug keystore.
           - Compatible with Android 7.0+ (API 24 to 36)." \
             --draft=false \
-            --prerelease=false || echo "Release already exists or skipped."
+            --prerelease=false || gh release upload "$TAG_NAME" build-apks/nudgy.apk build-apks/nudgy-debug.apk --clobber || true
+

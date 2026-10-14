@@ -239,9 +239,8 @@ class CalendarRepository(
         event
     }
 
-    suspend fun deleteEvent(eventId: String) = withContext(Dispatchers.IO) {
-        val allEvents = calendarDao.getAllEventsFlow("").first()
-        val target = allEvents.firstOrNull { it.id == eventId }
+    suspend fun deleteEvent(eventId: String, userId: String? = null) = withContext(Dispatchers.IO) {
+        val target = calendarDao.getEventById(eventId)
         target?.googleCalendarEventId?.let { gId ->
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) == PackageManager.PERMISSION_GRANTED) {
                 try {
@@ -252,7 +251,12 @@ class CalendarRepository(
                 }
             }
         }
-        calendarDao.deleteEventById(eventId)
+        val effectiveUserId = userId ?: target?.userId
+        if (effectiveUserId != null) {
+            calendarDao.deleteEventByIdForUser(effectiveUserId, eventId)
+        } else {
+            calendarDao.deleteEventById(eventId)
+        }
     }
 
     suspend fun blockFocusTime(

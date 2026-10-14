@@ -13,7 +13,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
+import android.util.Log
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -26,6 +28,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.example.ai.ClientIntentPreFilter
@@ -64,6 +69,7 @@ import com.example.ui.sheets.YourNudgySheet
 import com.example.ui.theme.NudgyCanvas
 import com.example.ui.theme.NudgyTheme
 import kotlinx.coroutines.launch
+import java.util.Locale
 import java.util.UUID
 
 class MainActivity : ComponentActivity() {
@@ -240,6 +246,19 @@ fun NudgyAppScaffold(
         }
     }
 
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, user.uid) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                taskRepository.syncDirtyTasksToCloud(user.uid, scope)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     val todayTasks by taskRepository.observeTodayTasks(user.uid).collectAsStateWithLifecycle(emptyList())
     val upcomingTasks by taskRepository.observeUpcomingTasks(user.uid).collectAsStateWithLifecycle(emptyList())
     val completedTasks by taskRepository.observeCompletedTasks(user.uid).collectAsStateWithLifecycle(emptyList())
@@ -258,61 +277,71 @@ fun NudgyAppScaffold(
         isThinking = true
 
         scope.launch {
-            chatRepository.addMessage(user.uid, userMsg)
+            try {
+                chatRepository.addMessage(user.uid, userMsg)
 
-            val preFilterResult = preFilter.tryHandle(
-                userId = user.uid,
-                userPrompt = prompt,
-                todayTasks = todayTasks,
-                events = events
-            )
+                val preFilterResult = preFilter.tryHandle(
+                    userId = user.uid,
+                    userPrompt = prompt,
+                    todayTasks = todayTasks,
+                    events = events
+                )
 
-            when (preFilterResult) {
-                is PreFilterResult.Handled -> {
-                    preFilterResult.createdTask?.let { created ->
-                        analytics.logTaskCreated(created.title, created.priority.name, created.category.name, created.reminderSet)
-                        if (created.reminderSet) {
-                            reminderManager.scheduleReminder(
-                                taskId = created.id,
-                                taskTitle = created.title,
-                                triggerEpochMillis = created.dueDateEpochMillis
-                            )
+                when (preFilterResult) {
+                    is PreFilterResult.Handled -> {
+                        preFilterResult.createdTask?.let { created ->
+                            analytics.logTaskCreated(created.title, created.priority.name, created.category.name, created.reminderSet)
+                            if (created.reminderSet) {
+                                reminderManager.scheduleReminder(
+                                    taskId = created.id,
+                                    taskTitle = created.title,
+                                    triggerEpochMillis = created.dueDateEpochMillis
+                                )
+                            }
                         }
+                        val handledMsg = ChatMessage(
+                            id = UUID.randomUUID().toString(),
+                            senderIsUser = false,
+                            text = preFilterResult.responseText,
+                            actionType = preFilterResult.actionType,
+                            associatedTask = preFilterResult.createdTask,
+                            associatedEvent = preFilterResult.createdEvent,
+                            focusStartMillis = preFilterResult.focusStartMillis,
+                            focusEndMillis = preFilterResult.focusEndMillis,
+                            focusDurationMinutes = preFilterResult.focusDurationMinutes,
+                            quickSuggestions = preFilterResult.quickSuggestions
+                        )
+                        chatRepository.addMessage(user.uid, handledMsg)
+                        voiceAssistantManager.speak(preFilterResult.responseText)
                     }
-                    val handledMsg = ChatMessage(
-                        id = UUID.randomUUID().toString(),
-                        senderIsUser = false,
-                        text = preFilterResult.responseText,
-                        actionType = preFilterResult.actionType,
-                        associatedTask = preFilterResult.createdTask,
-                        associatedEvent = preFilterResult.createdEvent,
-                        focusStartMillis = preFilterResult.focusStartMillis,
-                        focusEndMillis = preFilterResult.focusEndMillis,
-                        focusDurationMinutes = preFilterResult.focusDurationMinutes,
-                        quickSuggestions = preFilterResult.quickSuggestions
-                    )
-                    chatRepository.addMessage(user.uid, handledMsg)
-                    isThinking = false
-                    voiceAssistantManager.speak(preFilterResult.responseText)
+                    is PreFilterResult.Unhandled -> {
+                        val history = chatMessages.map { Pair(it.text, it.senderIsUser) }
+                        val responseText = geminiClient.generateNudgyResponse(
+                            userMessage = prompt,
+                            recentHistory = history,
+                            userMemories = memories.map { it.content },
+                            modelVersion = remoteConfigValues.geminiModelVersion
+                        )
+                        val geminiMsg = ChatMessage(
+                            id = UUID.randomUUID().toString(),
+                            senderIsUser = false,
+                            text = responseText,
+                            quickSuggestions = listOf("Plan my day", "Show today's tasks", "Find free time")
+                        )
+                        chatRepository.addMessage(user.uid, geminiMsg)
+                        voiceAssistantManager.speak(responseText)
+                    }
                 }
-                is PreFilterResult.Unhandled -> {
-                    val history = chatMessages.map { Pair(it.text, it.senderIsUser) }
-                    val responseText = geminiClient.generateNudgyResponse(
-                        userMessage = prompt,
-                        recentHistory = history,
-                        userMemories = memories.map { it.content },
-                        modelVersion = remoteConfigValues.geminiModelVersion
-                    )
-                    val geminiMsg = ChatMessage(
-                        id = UUID.randomUUID().toString(),
-                        senderIsUser = false,
-                        text = responseText,
-                        quickSuggestions = listOf("Plan my day", "Show today's tasks", "Find free time")
-                    )
-                    chatRepository.addMessage(user.uid, geminiMsg)
-                    isThinking = false
-                    voiceAssistantManager.speak(responseText)
-                }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Error processing chat prompt", e)
+                val errorMsg = ChatMessage(
+                    id = UUID.randomUUID().toString(),
+                    senderIsUser = false,
+                    text = "Sorry, I had trouble processing that. Please try again."
+                )
+                chatRepository.addMessage(user.uid, errorMsg)
+            } finally {
+                isThinking = false
             }
         }
     }
@@ -392,8 +421,10 @@ fun NudgyAppScaffold(
                             onSendMessage = { prompt -> handleUserChat(prompt) },
                             onStartVoice = {
                                 analytics.logVoiceUsed("voice_input")
+                                val deviceLocale = Locale.getDefault()
+                                val speechLanguage = if (deviceLocale.language == "bn") "bn-BD" else deviceLocale.toLanguageTag()
                                 voiceAssistantManager.startListening(
-                                    languageCode = if (user.displayName.any { it in '\u0980'..'\u09FF' }) "bn-BD" else "en-US",
+                                    languageCode = speechLanguage,
                                     onResult = { voiceText -> handleUserChat(voiceText) }
                                 )
                             },
@@ -477,7 +508,7 @@ fun NudgyAppScaffold(
                             },
                             onDeleteEvent = { eventId ->
                                 scope.launch {
-                                    calendarRepository.deleteEvent(eventId)
+                                    calendarRepository.deleteEvent(eventId, user.uid)
                                 }
                             },
                             onSelectDay = { dayMillis ->
@@ -564,7 +595,7 @@ fun NudgyAppScaffold(
                 },
                 onDeleteMemory = { memoryId ->
                     scope.launch {
-                        memoryRepository.deleteMemory(memoryId)
+                        memoryRepository.deleteMemory(user.uid, memoryId)
                     }
                 },
                 onDismiss = { showProfileSheet = false },
@@ -619,7 +650,7 @@ fun NudgyAppScaffold(
                 },
                 onDeleteTask = { taskId ->
                     scope.launch {
-                        taskRepository.deleteTask(taskId)
+                        taskRepository.deleteTask(user.uid, taskId)
                         reminderManager.cancelReminder(taskId)
                     }
                 },

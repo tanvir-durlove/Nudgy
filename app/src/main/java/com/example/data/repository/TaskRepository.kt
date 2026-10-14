@@ -34,6 +34,8 @@ class TaskRepository(
     private val database: NudgyDatabase = NudgyDatabase.getInstance(context)
 ) {
     private val taskDao = database.taskDao()
+    private val reminderManager = com.example.reminders.ReminderManager(context)
+    private val repoScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
 
     fun observeAllTasks(userId: String): Flow<List<TaskEntity>> =
         taskDao.getAllTasksFlow(userId)
@@ -93,18 +95,35 @@ class TaskRepository(
             updatedAtEpochMillis = System.currentTimeMillis()
         )
         taskDao.insertTask(task)
+        if (task.reminderSet) {
+            val trigger = task.reminderEpochMillis ?: task.dueDateEpochMillis
+            if (trigger > System.currentTimeMillis()) {
+                reminderManager.scheduleReminder(task.id, task.title, trigger)
+            }
+        }
+        syncDirtyTasksToCloud(userId)
         task
     }
 
     suspend fun toggleTaskCompletion(task: TaskEntity) = withContext(Dispatchers.IO) {
         val newStatus = !task.isCompleted
         val completedAt = if (newStatus) System.currentTimeMillis() else null
-        taskDao.setTaskCompletion(
+        taskDao.setTaskCompletionForUser(
+            userId = task.userId,
             id = task.id,
             isCompleted = newStatus,
             completedAt = completedAt,
             now = System.currentTimeMillis()
         )
+        if (newStatus) {
+            reminderManager.cancelReminder(task.id)
+        } else if (task.reminderSet) {
+            val trigger = task.reminderEpochMillis ?: task.dueDateEpochMillis
+            if (trigger > System.currentTimeMillis()) {
+                reminderManager.scheduleReminder(task.id, task.title, trigger)
+            }
+        }
+        syncDirtyTasksToCloud(task.userId)
     }
 
     suspend fun getTaskById(taskId: String): TaskEntity? = withContext(Dispatchers.IO) {
@@ -118,14 +137,45 @@ class TaskRepository(
                 isSyncedToCloud = false
             )
         )
+        if (task.reminderSet && !task.isCompleted) {
+            val trigger = task.reminderEpochMillis ?: task.dueDateEpochMillis
+            if (trigger > System.currentTimeMillis()) {
+                reminderManager.scheduleReminder(task.id, task.title, trigger)
+            } else {
+                reminderManager.cancelReminder(task.id)
+            }
+        } else {
+            reminderManager.cancelReminder(task.id)
+        }
+        syncDirtyTasksToCloud(task.userId)
+    }
+
+    suspend fun deleteTask(userId: String, taskId: String) = withContext(Dispatchers.IO) {
+        reminderManager.cancelReminder(taskId)
+        taskDao.deleteTaskByIdForUser(userId, taskId)
+        deleteTaskFromFirestore(userId, taskId)
     }
 
     suspend fun deleteTask(taskId: String) = withContext(Dispatchers.IO) {
+        reminderManager.cancelReminder(taskId)
         taskDao.deleteTaskById(taskId)
+    }
+
+    private fun deleteTaskFromFirestore(userId: String, taskId: String) {
+        repoScope.launch {
+            try {
+                val dbId = context.getString(R.string.firestore_database_id)
+                val firestore = FirebaseFirestore.getInstance(dbId)
+                firestore.collection("users").document(userId).collection("tasks").document(taskId).delete().await()
+            } catch (e: Exception) {
+                Log.w("TaskRepository", "Failed to delete task from cloud: ${e.message}")
+            }
+        }
     }
 
     suspend fun clearCompletedTasks(userId: String) = withContext(Dispatchers.IO) {
         taskDao.deleteCompletedTasks(userId)
+        syncDirtyTasksToCloud(userId)
     }
 
     /**
@@ -185,13 +235,17 @@ class TaskRepository(
                 )
             )
             taskDao.insertTasks(sampleTasks)
+            if (task2Time > System.currentTimeMillis()) {
+                reminderManager.scheduleReminder("seed_task_2", "Call John about the launch", task2Time)
+            }
+            syncDirtyTasksToCloud(userId)
         }
     }
 
     /**
      * Debounced Cloud Sync to Firestore (Minimizes server writes)
      */
-    fun syncDirtyTasksToCloud(userId: String, scope: CoroutineScope) {
+    fun syncDirtyTasksToCloud(userId: String, scope: CoroutineScope = repoScope) {
         scope.launch(Dispatchers.IO) {
             try {
                 val unsynced = taskDao.getUnsyncedTasks(userId)

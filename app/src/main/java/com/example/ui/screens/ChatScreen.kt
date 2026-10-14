@@ -48,6 +48,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -126,6 +127,14 @@ fun ChatScreen(
     ) { isGranted ->
         if (isGranted) {
             onStartVoice()
+        }
+    }
+
+    val wakeWordPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            WakeWordForegroundService.start(context)
         }
     }
 
@@ -224,7 +233,7 @@ fun ChatScreen(
                         Spacer(modifier = Modifier.height(18.dp))
 
                         // Always-On "Hey Nudgy" Wake Word Status Pill
-                        val isWakeWordActive by WakeWordForegroundService.isWakeWordActive.collectAsState()
+                        val isWakeWordActive by WakeWordForegroundService.isWakeWordActive.collectAsStateWithLifecycle()
                         Surface(
                             shape = RoundedCornerShape(100.dp),
                             color = if (isWakeWordActive) Color(0xFFE8F5E9) else Color(0xFFF3EFE6),
@@ -241,7 +250,7 @@ fun ChatScreen(
                                         WakeWordForegroundService.start(context)
                                     }
                                 } else {
-                                    permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    wakeWordPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 }
                             }
                         ) {

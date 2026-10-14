@@ -1,6 +1,13 @@
 package com.example.ui.sheets
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -382,7 +389,16 @@ fun YourNudgySheet(
     }
 
     if (showVoiceDialog) {
-        val isWakeWordActive by WakeWordForegroundService.isWakeWordActive.collectAsState()
+        val isWakeWordActive by WakeWordForegroundService.isWakeWordActive.collectAsStateWithLifecycle()
+        val micPermissionLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.RequestPermission()
+        ) { isGranted ->
+            if (isGranted) {
+                WakeWordForegroundService.start(context)
+            } else {
+                Toast.makeText(context, "Microphone permission is required for 'Hey Nudgy'", Toast.LENGTH_SHORT).show()
+            }
+        }
 
         AlertDialog(
             onDismissRequest = { showVoiceDialog = false },
@@ -420,7 +436,16 @@ fun YourNudgySheet(
                                 checked = isWakeWordActive,
                                 onCheckedChange = { active ->
                                     if (active) {
-                                        WakeWordForegroundService.start(context)
+                                        val hasPermission = ContextCompat.checkSelfPermission(
+                                            context,
+                                            Manifest.permission.RECORD_AUDIO
+                                        ) == PackageManager.PERMISSION_GRANTED
+
+                                        if (hasPermission) {
+                                            WakeWordForegroundService.start(context)
+                                        } else {
+                                            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        }
                                     } else {
                                         WakeWordForegroundService.stop(context)
                                     }

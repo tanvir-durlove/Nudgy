@@ -9,6 +9,8 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import com.example.R
+import com.example.ai.WakeWordForegroundService
+import com.example.data.local.NudgyDatabase
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -17,6 +19,7 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.auth
+import com.google.firebase.firestore.CollectionReference
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
@@ -50,11 +53,12 @@ class AuthManager(private val context: Context) {
                 prefs.edit()
                     .putString(KEY_ACTIVE_USER_ID, user.uid)
                     .putBoolean(KEY_IS_GUEST, false)
+                    .putBoolean(KEY_EXPLICITLY_SIGNED_OUT, false)
                     .apply()
                 _userState.value = NudgyUser(
                     uid = user.uid,
-                    displayName = user.displayName ?: "Arif Rahman",
-                    email = user.email ?: "arif@example.com",
+                    displayName = resolveDisplayName(user.displayName, user.email),
+                    email = resolveEmail(user.email),
                     photoUrl = user.photoUrl?.toString()
                 )
             } else if (!prefs.getBoolean(KEY_IS_GUEST, false)) {
@@ -72,8 +76,8 @@ class AuthManager(private val context: Context) {
                 .apply()
             return NudgyUser(
                 uid = user.uid,
-                displayName = user.displayName ?: "Arif Rahman",
-                email = user.email ?: "arif@example.com",
+                displayName = resolveDisplayName(user.displayName, user.email),
+                email = resolveEmail(user.email),
                 photoUrl = user.photoUrl?.toString()
             )
         }
@@ -106,6 +110,7 @@ class AuthManager(private val context: Context) {
         prefs.edit()
             .putBoolean(KEY_IS_GUEST, true)
             .putString(KEY_ACTIVE_USER_ID, "guest_user_demo")
+            .putBoolean(KEY_EXPLICITLY_SIGNED_OUT, false)
             .apply()
         _userState.value = NudgyUser(
             uid = "guest_user_demo",
@@ -121,6 +126,12 @@ class AuthManager(private val context: Context) {
     fun attemptSilentSignIn(scope: CoroutineScope) {
         if (auth.currentUser != null) {
             _userState.value = extractUser()
+            return
+        }
+
+        val explicitlySignedOut = prefs.getBoolean(KEY_EXPLICITLY_SIGNED_OUT, false)
+        if (explicitlySignedOut) {
+            Log.d(TAG, "Silent sign-in skipped: user explicitly signed out")
             return
         }
 
@@ -147,6 +158,7 @@ class AuthManager(private val context: Context) {
                     val authResult = auth.signInWithCredential(authCredential).await()
                     val user = authResult.user
                     if (user != null) {
+                        prefs.edit().putBoolean(KEY_EXPLICITLY_SIGNED_OUT, false).apply()
                         syncUserToFirestore(user.uid, user.displayName, user.email, user.photoUrl?.toString())
                     }
                 }
@@ -191,11 +203,12 @@ class AuthManager(private val context: Context) {
                     val user = authResult.user
 
                     if (user != null) {
+                        prefs.edit().putBoolean(KEY_EXPLICITLY_SIGNED_OUT, false).apply()
                         syncUserToFirestore(user.uid, user.displayName, user.email, user.photoUrl?.toString())
                         _userState.value = NudgyUser(
                             uid = user.uid,
-                            displayName = user.displayName ?: "Arif Rahman",
-                            email = user.email ?: "arif@example.com",
+                            displayName = resolveDisplayName(user.displayName, user.email),
+                            email = resolveEmail(user.email),
                             photoUrl = user.photoUrl?.toString()
                         )
                         _isLoading.value = false
@@ -237,10 +250,13 @@ class AuthManager(private val context: Context) {
             val db = FirebaseFirestore.getInstance(dbId)
             val userDoc = db.collection("users").document(uid)
 
+            val resolvedName = resolveDisplayName(displayName, email)
+            val resolvedEmail = resolveEmail(email)
+
             val payload = hashMapOf<String, Any>(
                 "userId" to uid,
-                "displayName" to (displayName ?: "Arif Rahman"),
-                "email" to (email ?: "arif@example.com"),
+                "displayName" to resolvedName,
+                "email" to resolvedEmail,
                 "updatedAt" to FieldValue.serverTimestamp()
             )
             if (photoUrl != null) {
@@ -261,8 +277,12 @@ class AuthManager(private val context: Context) {
      * Sign Out
      */
     fun signOut(scope: CoroutineScope, onComplete: () -> Unit = {}) {
+        WakeWordForegroundService.stop(context)
         auth.signOut()
-        prefs.edit().clear().apply()
+        prefs.edit()
+            .clear()
+            .putBoolean(KEY_EXPLICITLY_SIGNED_OUT, true)
+            .apply()
         _userState.value = null
         scope.launch {
             try {
@@ -279,13 +299,22 @@ class AuthManager(private val context: Context) {
 
     /**
      * Delete Account (Google Play Policy Compliant)
+     * Performs a full coordinated purge across Firestore subcollections, local Room database,
+     * and voice/audio file caches.
      */
     fun deleteAccount(scope: CoroutineScope, onComplete: () -> Unit = {}, onError: (String) -> Unit = {}) {
+        WakeWordForegroundService.stop(context)
         val user = auth.currentUser
         if (user == null) {
-            prefs.edit().clear().apply()
-            _userState.value = null
-            onComplete()
+            val uid = getActiveUserId(context)
+            scope.launch(Dispatchers.IO) {
+                purgeLocalData(uid)
+                withContext(Dispatchers.Main) {
+                    prefs.edit().clear().putBoolean(KEY_EXPLICITLY_SIGNED_OUT, true).apply()
+                    _userState.value = null
+                    onComplete()
+                }
+            }
             return
         }
 
@@ -295,10 +324,23 @@ class AuthManager(private val context: Context) {
                 val uid = user.uid
                 val dbId = context.getString(R.string.firestore_database_id)
                 val db = FirebaseFirestore.getInstance(dbId)
-                db.collection("users").document(uid).delete().await()
+                val userDocRef = db.collection("users").document(uid)
+
+                withContext(Dispatchers.IO) {
+                    purgeFirestoreSubcollection(userDocRef.collection("tasks"))
+                    purgeFirestoreSubcollection(userDocRef.collection("memories"))
+                    purgeFirestoreSubcollection(userDocRef.collection("chats"))
+                    try {
+                        userDocRef.delete().await()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "User doc delete error: ${e.message}")
+                    }
+                    purgeLocalData(uid)
+                }
+
                 user.delete().await()
                 credentialManager.clearCredentialState(ClearCredentialStateRequest())
-                prefs.edit().clear().apply()
+                prefs.edit().clear().putBoolean(KEY_EXPLICITLY_SIGNED_OUT, true).apply()
                 _userState.value = null
                 _isLoading.value = false
                 withContext(Dispatchers.Main) {
@@ -316,6 +358,39 @@ class AuthManager(private val context: Context) {
         }
     }
 
+    private suspend fun purgeFirestoreSubcollection(collection: CollectionReference) {
+        try {
+            val snapshot = collection.get().await()
+            for (doc in snapshot.documents) {
+                doc.reference.delete().await()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Subcollection purge error (${collection.path}): ${e.message}")
+        }
+    }
+
+    private suspend fun purgeLocalData(userId: String) = withContext(Dispatchers.IO) {
+        try {
+            val db = NudgyDatabase.getInstance(context)
+            db.taskDao().clearTasksForUser(userId)
+            db.calendarDao().clearEventsForUser(userId)
+            db.memoryDao().clearMemoriesForUser(userId)
+            db.chatDao().clearMessages(userId)
+            db.dailyBriefDao().clearBriefsForUser(userId)
+        } catch (e: Exception) {
+            Log.w(TAG, "Local DB purge error: ${e.message}")
+        }
+        try {
+            context.cacheDir.listFiles()?.forEach { file ->
+                if (file.name.endsWith(".pcm") || file.name.endsWith(".wav") || file.name.contains("audio") || file.name.contains("voice")) {
+                    file.delete()
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Audio cache purge error: ${e.message}")
+        }
+    }
+
     fun clearError() {
         _errorMessage.value = null
     }
@@ -325,6 +400,17 @@ class AuthManager(private val context: Context) {
         const val PREFS_NAME = "nudgy_auth_prefs"
         const val KEY_IS_GUEST = "is_guest"
         const val KEY_ACTIVE_USER_ID = "active_user_id"
+        const val KEY_EXPLICITLY_SIGNED_OUT = "nudgy_explicitly_signed_out"
+
+        fun resolveDisplayName(displayName: String?, email: String?): String {
+            return displayName?.takeIf { it.isNotBlank() }
+                ?: email?.substringBefore("@")?.takeIf { it.isNotBlank() }
+                ?: "User"
+        }
+
+        fun resolveEmail(email: String?): String {
+            return email ?: ""
+        }
 
         fun getActiveUserId(context: Context): String {
             val auth = Firebase.auth

@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -86,7 +87,16 @@ class WakeWordForegroundService : Service() {
         if (!isRunning) {
             isRunning = true
             _isWakeWordActive.value = true
-            startForeground(NOTIFICATION_ID, buildForegroundNotification("Listening for \"Hey Nudgy\"..."))
+            val notification = buildForegroundNotification("Listening for \"Hey Nudgy\"...")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
             startAcousticWakeWordLoop()
         }
 

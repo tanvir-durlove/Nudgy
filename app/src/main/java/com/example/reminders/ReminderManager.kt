@@ -35,22 +35,38 @@ class ReminderManager(private val context: Context) {
         taskId: String,
         taskTitle: String,
         triggerEpochMillis: Long
-    ) {
+    ): Boolean {
         val intent = Intent(context, ReminderReceiver::class.java).apply {
             action = ACTION_TRIGGER_REMINDER
             putExtra(EXTRA_TASK_ID, taskId)
             putExtra(EXTRA_TASK_TITLE, taskTitle)
         }
 
+        val requestCode = getRequestCode(taskId)
         val pendingIntent = PendingIntent.getBroadcast(
             context,
-            taskId.hashCode(),
+            requestCode,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (alarmManager.canScheduleExactAlarms()) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerEpochMillis,
+                        pendingIntent
+                    )
+                } else {
+                    Log.w("ReminderManager", "Exact alarms disallowed; using setAndAllowWhileIdle fallback")
+                    alarmManager.setAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerEpochMillis,
+                        pendingIntent
+                    )
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 alarmManager.setExactAndAllowWhileIdle(
                     AlarmManager.RTC_WAKEUP,
                     triggerEpochMillis,
@@ -64,8 +80,28 @@ class ReminderManager(private val context: Context) {
                 )
             }
             Log.d("ReminderManager", "Scheduled reminder for '$taskTitle' at $triggerEpochMillis")
+            return true
         } catch (e: SecurityException) {
-            Log.w("ReminderManager", "Exact alarm permission restricted: ${e.message}")
+            Log.w("ReminderManager", "Exact alarm permission restricted: ${e.message}, executing fallback")
+            return try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    alarmManager.setAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerEpochMillis,
+                        pendingIntent
+                    )
+                } else {
+                    alarmManager.set(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerEpochMillis,
+                        pendingIntent
+                    )
+                }
+                true
+            } catch (fallbackEx: Exception) {
+                Log.e("ReminderManager", "Fallback alarm scheduling failed", fallbackEx)
+                false
+            }
         }
     }
 
@@ -73,9 +109,10 @@ class ReminderManager(private val context: Context) {
         val intent = Intent(context, ReminderReceiver::class.java).apply {
             action = ACTION_TRIGGER_REMINDER
         }
+        val requestCode = getRequestCode(taskId)
         val pendingIntent = PendingIntent.getBroadcast(
             context,
-            taskId.hashCode(),
+            requestCode,
             intent,
             PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
         )
@@ -92,5 +129,13 @@ class ReminderManager(private val context: Context) {
         const val ACTION_SNOOZE_30M = "com.example.nudgy.ACTION_SNOOZE_30M"
         const val EXTRA_TASK_ID = "extra_task_id"
         const val EXTRA_TASK_TITLE = "extra_task_title"
+
+        /**
+         * Generates a deterministic positive 31-bit request code to avoid negative PendingIntent IDs
+         * and prevent cross-task collision overwrites.
+         */
+        fun getRequestCode(taskId: String): Int {
+            return taskId.hashCode() and 0x7FFFFFFF
+        }
     }
 }

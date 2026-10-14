@@ -35,8 +35,14 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE userId = :userId AND isSyncedToCloud = 0")
     suspend fun getUnsyncedTasks(userId: String): List<TaskEntity>
 
+    @Query("SELECT * FROM tasks WHERE isCompleted = 0 AND reminderSet = 1 AND (reminderEpochMillis > :now OR (reminderEpochMillis IS NULL AND dueDateEpochMillis > :now))")
+    suspend fun getPendingTasksWithReminders(now: Long): List<TaskEntity>
+
     @Query("SELECT * FROM tasks WHERE id = :id LIMIT 1")
     suspend fun getTaskById(id: String): TaskEntity?
+
+    @Query("SELECT * FROM tasks WHERE id = :id AND userId = :userId LIMIT 1")
+    suspend fun getTaskByIdForUser(userId: String, id: String): TaskEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTask(task: TaskEntity)
@@ -50,8 +56,14 @@ interface TaskDao {
     @Query("UPDATE tasks SET isCompleted = :isCompleted, completedAtEpochMillis = :completedAt, isSyncedToCloud = 0, updatedAtEpochMillis = :now WHERE id = :id")
     suspend fun setTaskCompletion(id: String, isCompleted: Boolean, completedAt: Long?, now: Long)
 
+    @Query("UPDATE tasks SET isCompleted = :isCompleted, completedAtEpochMillis = :completedAt, isSyncedToCloud = 0, updatedAtEpochMillis = :now WHERE id = :id AND userId = :userId")
+    suspend fun setTaskCompletionForUser(userId: String, id: String, isCompleted: Boolean, completedAt: Long?, now: Long)
+
     @Query("UPDATE tasks SET isSyncedToCloud = 1 WHERE id = :id")
     suspend fun markTaskSynced(id: String)
+
+    @Query("DELETE FROM tasks WHERE id = :id AND userId = :userId")
+    suspend fun deleteTaskByIdForUser(userId: String, id: String)
 
     @Query("DELETE FROM tasks WHERE id = :id")
     suspend fun deleteTaskById(id: String)
@@ -74,11 +86,20 @@ interface CalendarDao {
     @Query("SELECT * FROM calendar_events WHERE userId = :userId ORDER BY startEpochMillis ASC")
     fun getAllEventsFlow(userId: String): Flow<List<CalendarEventEntity>>
 
+    @Query("SELECT * FROM calendar_events WHERE id = :id LIMIT 1")
+    suspend fun getEventById(id: String): CalendarEventEntity?
+
+    @Query("SELECT * FROM calendar_events WHERE id = :id AND userId = :userId LIMIT 1")
+    suspend fun getEventByIdForUser(userId: String, id: String): CalendarEventEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEvents(events: List<CalendarEventEntity>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEvent(event: CalendarEventEntity)
+
+    @Query("DELETE FROM calendar_events WHERE id = :id AND userId = :userId")
+    suspend fun deleteEventByIdForUser(userId: String, id: String)
 
     @Query("DELETE FROM calendar_events WHERE id = :id")
     suspend fun deleteEventById(id: String)
@@ -95,8 +116,14 @@ interface MemoryDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMemory(memory: NudgyMemoryEntity)
 
+    @Query("DELETE FROM nudgy_memories WHERE id = :id AND userId = :userId")
+    suspend fun deleteMemoryByIdForUser(userId: String, id: String)
+
     @Query("DELETE FROM nudgy_memories WHERE id = :id")
     suspend fun deleteMemoryById(id: String)
+
+    @Query("DELETE FROM nudgy_memories WHERE userId = :userId")
+    suspend fun clearMemoriesForUser(userId: String)
 }
 
 @Dao
@@ -106,6 +133,9 @@ interface DailyBriefDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertBrief(brief: DailyBriefEntity)
+
+    @Query("DELETE FROM daily_briefs WHERE userId = :userId")
+    suspend fun clearBriefsForUser(userId: String)
 }
 
 @Dao

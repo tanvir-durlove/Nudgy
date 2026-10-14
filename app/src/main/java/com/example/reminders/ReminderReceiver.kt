@@ -26,7 +26,8 @@ class ReminderReceiver : BroadcastReceiver() {
             }
 
             ReminderManager.ACTION_MARK_DONE -> {
-                notificationManager.cancel(taskId.hashCode())
+                val notifId = ReminderManager.getRequestCode(taskId)
+                notificationManager.cancel(notifId)
                 // Mark completed directly in Room DB
                 CoroutineScope(Dispatchers.IO).launch {
                     val db = NudgyDatabase.getInstance(context)
@@ -40,7 +41,8 @@ class ReminderReceiver : BroadcastReceiver() {
             }
 
             ReminderManager.ACTION_SNOOZE_30M -> {
-                notificationManager.cancel(taskId.hashCode())
+                val notifId = ReminderManager.getRequestCode(taskId)
+                notificationManager.cancel(notifId)
                 val reminderManager = ReminderManager(context)
                 val snoozeTime = System.currentTimeMillis() + (30 * 60 * 1000L)
                 reminderManager.scheduleReminder(taskId, taskTitle, snoozeTime)
@@ -54,13 +56,15 @@ class ReminderReceiver : BroadcastReceiver() {
         taskId: String,
         taskTitle: String
     ) {
+        val notifId = ReminderManager.getRequestCode(taskId)
+
         // Tap to open app
         val contentIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val contentPendingIntent = PendingIntent.getActivity(
             context,
-            taskId.hashCode(),
+            notifId,
             contentIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -72,7 +76,7 @@ class ReminderReceiver : BroadcastReceiver() {
         }
         val donePendingIntent = PendingIntent.getBroadcast(
             context,
-            (taskId + "_done").hashCode(),
+            ReminderManager.getRequestCode(taskId + "_done"),
             doneIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -85,7 +89,7 @@ class ReminderReceiver : BroadcastReceiver() {
         }
         val snoozePendingIntent = PendingIntent.getBroadcast(
             context,
-            (taskId + "_snooze").hashCode(),
+            ReminderManager.getRequestCode(taskId + "_snooze"),
             snoozeIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -101,6 +105,6 @@ class ReminderReceiver : BroadcastReceiver() {
             .addAction(0, "Snooze 30m", snoozePendingIntent)
             .build()
 
-        notificationManager.notify(taskId.hashCode(), notification)
+        notificationManager.notify(notifId, notification)
     }
 }

@@ -27,6 +27,10 @@ class MemoryRepository(
         memoryDao.insertMemory(memory)
     }
 
+    suspend fun deleteMemory(userId: String, memoryId: String) = withContext(Dispatchers.IO) {
+        memoryDao.deleteMemoryByIdForUser(userId, memoryId)
+    }
+
     suspend fun deleteMemory(memoryId: String) = withContext(Dispatchers.IO) {
         memoryDao.deleteMemoryById(memoryId)
     }
