@@ -96,7 +96,13 @@ class AuthManager(private val context: Context) {
 
     private fun getWebClientId(): String {
         return try {
-            context.getString(R.string.default_web_client_id)
+            // getIdentifier() instead of R.string.default_web_client_id so the app
+            // still compiles when google-services.json is absent (e.g. CI builds);
+            // the resource exists normally once google-services.json is present.
+            val resId = context.resources.getIdentifier(
+                "default_web_client_id", "string", context.packageName
+            )
+            if (resId != 0) context.getString(resId) else ""
         } catch (e: Exception) {
             Log.e(TAG, "Missing default_web_client_id string resource", e)
             ""
