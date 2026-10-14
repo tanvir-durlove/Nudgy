@@ -31,37 +31,39 @@ class NudgyRemoteConfig {
     val configState: StateFlow<RemoteConfigValues> = _configState.asStateFlow()
 
     init {
-        val rc = remoteConfig ?: return
-        try {
-            val configSettings = remoteConfigSettings {
-                minimumFetchIntervalInSeconds = 3600
-            }
-            rc.setConfigSettingsAsync(configSettings)
-
-            val defaults = mapOf<String, Any>(
-                KEY_ADS_ENABLED to false,
-                KEY_AD_FREQUENCY to 5L,
-                KEY_PROMO_CARD_ENABLED to true,
-                KEY_PROMO_HEADLINE to "Invite friends to Nudgy",
-                KEY_PROMO_SUBTITLE to "Share daily rhythms & achieve streaks together.",
-                KEY_MODEL_VERSION to "gemini-2.5-flash"
-            )
-            rc.setDefaultsAsync(defaults)
-
-            rc.fetchAndActivate().addOnCompleteListener { task ->
-                if (task.isSuccessful) {
-                    _configState.value = RemoteConfigValues(
-                        adsEnabled = rc.getBoolean(KEY_ADS_ENABLED),
-                        adFrequencyTasks = rc.getLong(KEY_AD_FREQUENCY),
-                        promoCardEnabled = rc.getBoolean(KEY_PROMO_CARD_ENABLED),
-                        promoHeadline = rc.getString(KEY_PROMO_HEADLINE).ifEmpty { "Invite friends to Nudgy" },
-                        promoSubtitle = rc.getString(KEY_PROMO_SUBTITLE).ifEmpty { "Share daily rhythms & achieve streaks together." },
-                        geminiModelVersion = rc.getString(KEY_MODEL_VERSION).ifEmpty { "gemini-2.5-flash" }
-                    )
+        // If Firebase is unavailable (no google-services.json), keep the default values.
+        remoteConfig?.let { rc ->
+            try {
+                val configSettings = remoteConfigSettings {
+                    minimumFetchIntervalInSeconds = 3600
                 }
+                rc.setConfigSettingsAsync(configSettings)
+
+                val defaults = mapOf<String, Any>(
+                    KEY_ADS_ENABLED to false,
+                    KEY_AD_FREQUENCY to 5L,
+                    KEY_PROMO_CARD_ENABLED to true,
+                    KEY_PROMO_HEADLINE to "Invite friends to Nudgy",
+                    KEY_PROMO_SUBTITLE to "Share daily rhythms & achieve streaks together.",
+                    KEY_MODEL_VERSION to "gemini-2.5-flash"
+                )
+                rc.setDefaultsAsync(defaults)
+
+                rc.fetchAndActivate().addOnCompleteListener { task ->
+                    if (task.isSuccessful) {
+                        _configState.value = RemoteConfigValues(
+                            adsEnabled = rc.getBoolean(KEY_ADS_ENABLED),
+                            adFrequencyTasks = rc.getLong(KEY_AD_FREQUENCY),
+                            promoCardEnabled = rc.getBoolean(KEY_PROMO_CARD_ENABLED),
+                            promoHeadline = rc.getString(KEY_PROMO_HEADLINE).ifEmpty { "Invite friends to Nudgy" },
+                            promoSubtitle = rc.getString(KEY_PROMO_SUBTITLE).ifEmpty { "Share daily rhythms & achieve streaks together." },
+                            geminiModelVersion = rc.getString(KEY_MODEL_VERSION).ifEmpty { "gemini-2.5-flash" }
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Remote Config initialization warning: ${e.message}")
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Remote Config initialization warning: ${e.message}")
         }
     }
 
