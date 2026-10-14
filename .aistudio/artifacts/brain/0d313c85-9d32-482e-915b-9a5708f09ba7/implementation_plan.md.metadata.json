@@ -1,6 +1,0 @@
-{
-  "summary": "Complete, coordinated implementation plan resolving all 18 Critical, Major, and Minor bugs across Android 14+ background microphone crashes, authentication & sign-out lifecycle, exact alarm scheduling & device reboot recovery, Google Calendar deletion sync, Firestore subcollection purging, Room database migration & user scoping, and Compose UI performance.",
-  "updatedAt": "2026-10-14T08:27:31.920735010Z",
-  "requestFeedback": true,
-  "userFacing": true
-}

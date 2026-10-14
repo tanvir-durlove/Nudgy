@@ -1,18 +1,29 @@
 *.iml
-.gradle
-.kotlin
+.gradle/
+.kotlin/
 /local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
 local.properties
+.idea/
+.DS_Store
+
+# Build folders
+build/
+*/build/
+app/build/
+.build-outputs/
+.aistudio/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Environment secrets and keystores
 .env
+.env.local
 debug.keystore
+
+# Built binaries
+*.apk
+*.aab
+*.jks
+!debug.keystore.base64
+
