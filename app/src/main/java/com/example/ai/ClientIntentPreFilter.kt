@@ -239,37 +239,46 @@ class ClientIntentPreFilter(
         if (lower.contains("free time") || lower.contains("open time") || lower.contains("focus slot") ||
             cleaned.contains("ফাঁকা সময়") || cleaned.contains("ফ্রি সময়")
         ) {
-            val cal = Calendar.getInstance()
-            cal.set(Calendar.HOUR_OF_DAY, 12)
-            cal.set(Calendar.MINUTE, 15)
-            cal.set(Calendar.SECOND, 0)
-            val startMillis = cal.timeInMillis
-
-            cal.set(Calendar.HOUR_OF_DAY, 13)
-            cal.set(Calendar.MINUTE, 0)
-            val endMillis = cal.timeInMillis
+            val suggestedSlot = calendarRepository.findSuggestedFocusSlot(userId, System.currentTimeMillis())
+            val startMillis = suggestedSlot?.startEpochMillis ?: run {
+                val cal = Calendar.getInstance().apply {
+                    add(Calendar.HOUR_OF_DAY, 1)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                cal.timeInMillis
+            }
+            val durationMinutes = suggestedSlot?.durationMinutes ?: 45
+            val endMillis = suggestedSlot?.endEpochMillis ?: (startMillis + (durationMinutes * 60 * 1000L))
+            val timeRangeText = "${timeFormat.format(java.util.Date(startMillis))} – ${timeFormat.format(java.util.Date(endMillis))}"
+            val reason = suggestedSlot?.reason ?: "$durationMinutes minutes free in your schedule"
 
             return PreFilterResult.Handled(
-                responseText = "You have 45 minutes of free focus time from 12:15 to 1:00 PM right after your morning sync.",
+                responseText = "You have $durationMinutes minutes of free focus time from $timeRangeText ($reason).",
                 actionType = ChatActionType.FOCUS_TIME_PROPOSAL,
                 focusStartMillis = startMillis,
                 focusEndMillis = endMillis,
-                focusDurationMinutes = 45,
-                quickSuggestions = listOf("Block 45m focus", "Plan my day", "Show today's tasks")
+                focusDurationMinutes = durationMinutes,
+                quickSuggestions = listOf("Block ${durationMinutes}m focus", "Plan my day", "Show today's tasks")
             )
         }
 
         // 7. English: "Block focus time" / "Block 45m focus" / "Schedule focus" / "ফোকাস টাইম যোগ করো"
         if (lower.contains("block focus") || lower.contains("block 45m") || lower.contains("schedule focus") || cleaned.contains("ফোকাস")) {
-            val cal = Calendar.getInstance()
-            cal.set(Calendar.HOUR_OF_DAY, 12)
-            cal.set(Calendar.MINUTE, 15)
-            cal.set(Calendar.SECOND, 0)
-            val startMillis = cal.timeInMillis
-
-            cal.set(Calendar.HOUR_OF_DAY, 13)
-            cal.set(Calendar.MINUTE, 0)
-            val endMillis = cal.timeInMillis
+            val suggestedSlot = calendarRepository.findSuggestedFocusSlot(userId, System.currentTimeMillis())
+            val startMillis = suggestedSlot?.startEpochMillis ?: run {
+                val cal = Calendar.getInstance().apply {
+                    add(Calendar.HOUR_OF_DAY, 1)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                cal.timeInMillis
+            }
+            val durationMinutes = suggestedSlot?.durationMinutes ?: 45
+            val endMillis = suggestedSlot?.endEpochMillis ?: (startMillis + (durationMinutes * 60 * 1000L))
+            val timeRangeText = "${timeFormat.format(java.util.Date(startMillis))} – ${timeFormat.format(java.util.Date(endMillis))}"
 
             val event = calendarRepository.blockFocusTime(userId, startMillis, endMillis, "Focus Time (Deep Work)")
             val task = taskRepository.createTask(
@@ -281,7 +290,7 @@ class ClientIntentPreFilter(
                 reminderSet = true
             )
             return PreFilterResult.Handled(
-                responseText = "Done! Reserved 45 minutes of Deep Work on your calendar and task list (12:15 PM – 1:00 PM). Let's stay in the zone! 🎯",
+                responseText = "Done! Reserved $durationMinutes minutes of Deep Work on your calendar and task list ($timeRangeText). Let's stay in the zone! 🎯",
                 createdTask = task,
                 createdEvent = event,
                 quickSuggestions = listOf("Plan my day", "Show today's tasks", "What do you remember?")
@@ -294,26 +303,32 @@ class ClientIntentPreFilter(
             val firstTaskTitle = pending.firstOrNull()?.title ?: "Review product proposal"
             val meetingText = if (events.isNotEmpty()) {
                 val firstEvent = events.first()
-                "sync at ${timeFormat.format(firstEvent.startEpochMillis)}"
+                "meeting '${firstEvent.title}' at ${timeFormat.format(firstEvent.startEpochMillis)}"
             } else {
                 "no conflicting meetings"
             }
 
-            val cal = Calendar.getInstance()
-            cal.set(Calendar.HOUR_OF_DAY, 12)
-            cal.set(Calendar.MINUTE, 15)
-            val startFocus = cal.timeInMillis
-            cal.set(Calendar.HOUR_OF_DAY, 13)
-            cal.set(Calendar.MINUTE, 0)
-            val endFocus = cal.timeInMillis
+            val suggestedSlot = calendarRepository.findSuggestedFocusSlot(userId, System.currentTimeMillis())
+            val startFocus = suggestedSlot?.startEpochMillis ?: run {
+                val cal = Calendar.getInstance().apply {
+                    add(Calendar.HOUR_OF_DAY, 1)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                cal.timeInMillis
+            }
+            val durationMinutes = suggestedSlot?.durationMinutes ?: 45
+            val endFocus = suggestedSlot?.endEpochMillis ?: (startFocus + (durationMinutes * 60 * 1000L))
+            val focusRangeText = "${timeFormat.format(java.util.Date(startFocus))} – ${timeFormat.format(java.util.Date(endFocus))}"
 
             return PreFilterResult.Handled(
-                responseText = "Here is your plan today: Start with '$firstTaskTitle' this morning. You have $meetingText, and an open 45-minute focus window at 12:15 PM.",
+                responseText = "Here is your plan today: Start with '$firstTaskTitle'. You have $meetingText, and an open $durationMinutes-minute focus window ($focusRangeText).",
                 actionType = ChatActionType.FOCUS_TIME_PROPOSAL,
                 focusStartMillis = startFocus,
                 focusEndMillis = endFocus,
-                focusDurationMinutes = 45,
-                quickSuggestions = listOf("Block 45m focus", "Show today's tasks", "Clear completed tasks")
+                focusDurationMinutes = durationMinutes,
+                quickSuggestions = listOf("Block ${durationMinutes}m focus", "Show today's tasks", "Clear completed tasks")
             )
         }
 

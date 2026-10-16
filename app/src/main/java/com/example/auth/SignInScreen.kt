@@ -189,37 +189,11 @@ fun SignInScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Continue as Guest / Instant Preview Button
-            OutlinedButton(
-                onClick = {
-                    authManager.continueAsGuest()
-                    onSignInSuccess()
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-                shape = RoundedCornerShape(100.dp),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = NudgyCharcoal
-                ),
-                border = androidx.compose.foundation.BorderStroke(1.2.dp, NudgyCardBorder)
-            ) {
-                Text(
-                    text = "Continue as Guest / Offline Preview",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 15.sp
-                    )
-                )
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
             Text(
-                text = "Secure login · Fast guest mode available",
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 11.sp),
+                text = "Secure sign-in · Sync across devices with Google",
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
                 color = NudgyMuted,
                 textAlign = TextAlign.Center
             )

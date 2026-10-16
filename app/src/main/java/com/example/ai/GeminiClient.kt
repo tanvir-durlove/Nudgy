@@ -25,7 +25,7 @@ class GeminiClient {
         userMessage: String,
         recentHistory: List<Pair<String, Boolean>> = emptyList(), // Pair(text, isUser)
         userMemories: List<String> = emptyList(),
-        modelVersion: String = "gemini-1.5-flash"
+        modelVersion: String = "gemini-3.5-flash"
     ): String = withContext(Dispatchers.IO) {
         val apiKey = try {
             BuildConfig.GEMINI_API_KEY
@@ -39,7 +39,10 @@ class GeminiClient {
         }
 
         try {
-            val sanitizedModel = modelVersion.ifBlank { "gemini-1.5-flash" }
+            val sanitizedModel = when {
+                modelVersion.isBlank() || modelVersion.contains("1.5") || modelVersion.contains("2.0") -> "gemini-3.5-flash"
+                else -> modelVersion
+            }
             val url = "https://generativelanguage.googleapis.com/v1beta/models/$sanitizedModel:generateContent?key=$apiKey"
 
             val contentsArray = JSONArray()

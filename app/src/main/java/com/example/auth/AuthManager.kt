@@ -87,49 +87,24 @@ class AuthManager(private val context: Context) {
                 photoUrl = user.photoUrl?.toString()
             )
         }
-
-        if (prefs.getBoolean(KEY_IS_GUEST, false)) {
-            return NudgyUser(
-                uid = "guest_user_demo",
-                displayName = "Guest User",
-                email = "guest@nudgy.app",
-                photoUrl = null
-            )
-        }
-
         return null
     }
 
     private fun getWebClientId(): String {
         return try {
-            // getIdentifier() instead of R.string.default_web_client_id so the app
-            // still compiles when google-services.json is absent (e.g. CI builds);
-            // the resource exists normally once google-services.json is present.
             val resId = context.resources.getIdentifier(
                 "default_web_client_id", "string", context.packageName
             )
-            if (resId != 0) context.getString(resId) else ""
+            if (resId != 0) {
+                context.getString(resId)
+            } else {
+                // Direct fallback to provisioned OAuth Web Client ID from google-services.json
+                "55985970746-jcg96ghtodpq0c448p7gi1fpqt8hrqac.apps.googleusercontent.com"
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Missing default_web_client_id string resource", e)
-            ""
+            "55985970746-jcg96ghtodpq0c448p7gi1fpqt8hrqac.apps.googleusercontent.com"
         }
-    }
-
-    /**
-     * Continue as Guest / Offline mode for instant testing & accessibility
-     */
-    fun continueAsGuest() {
-        prefs.edit()
-            .putBoolean(KEY_IS_GUEST, true)
-            .putString(KEY_ACTIVE_USER_ID, "guest_user_demo")
-            .putBoolean(KEY_EXPLICITLY_SIGNED_OUT, false)
-            .apply()
-        _userState.value = NudgyUser(
-            uid = "guest_user_demo",
-            displayName = "Guest User",
-            email = "guest@nudgy.app",
-            photoUrl = null
-        )
     }
 
     /**
@@ -438,7 +413,7 @@ class AuthManager(private val context: Context) {
             val firebaseAuth = try { Firebase.auth } catch (e: Exception) { null }
             firebaseAuth?.currentUser?.uid?.let { return it }
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            return prefs.getString(KEY_ACTIVE_USER_ID, "guest_user_demo") ?: "guest_user_demo"
+            return prefs.getString(KEY_ACTIVE_USER_ID, "") ?: ""
         }
     }
 }

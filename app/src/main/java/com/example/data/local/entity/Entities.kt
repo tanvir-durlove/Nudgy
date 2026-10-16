@@ -47,10 +47,13 @@ data class NudgyMemoryEntity(
     val createdAtEpochMillis: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "daily_briefs")
+@Entity(
+    tableName = "daily_briefs",
+    primaryKeys = ["userId", "dateString"]
+)
 data class DailyBriefEntity(
-    @PrimaryKey val dateString: String,
     val userId: String,
+    val dateString: String,
     val headline: String,
     val summary: String,
     val createdAtEpochMillis: Long = System.currentTimeMillis()
