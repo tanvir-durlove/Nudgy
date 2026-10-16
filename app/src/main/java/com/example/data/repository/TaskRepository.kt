@@ -7,12 +7,14 @@ import com.example.data.local.NudgyDatabase
 import com.example.data.local.entity.TaskEntity
 import com.example.data.model.Priority
 import com.example.data.model.TaskCategory
-import com.google.firebase.Firebase
+import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -35,7 +37,8 @@ class TaskRepository(
 ) {
     private val taskDao = database.taskDao()
     private val reminderManager = com.example.reminders.ReminderManager(context)
-    private val repoScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+    private val repoScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var snapshotListener: ListenerRegistration? = null
 
     fun observeAllTasks(userId: String): Flow<List<TaskEntity>> =
         taskDao.getAllTasksFlow(userId)
@@ -158,7 +161,28 @@ class TaskRepository(
 
     suspend fun deleteTask(taskId: String) = withContext(Dispatchers.IO) {
         reminderManager.cancelReminder(taskId)
-        taskDao.deleteTaskById(taskId)
+        val task = taskDao.getTaskById(taskId)
+        if (task != null) {
+            taskDao.deleteTaskByIdForUser(task.userId, taskId)
+            deleteTaskFromFirestore(task.userId, taskId)
+        } else {
+            taskDao.deleteTaskById(taskId)
+        }
+    }
+
+    suspend fun snoozeTask(taskId: String, snoozeEpochMillis: Long) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        taskDao.snoozeTask(
+            id = taskId,
+            dueDate = snoozeEpochMillis,
+            reminderDate = snoozeEpochMillis,
+            now = now
+        )
+        val task = taskDao.getTaskById(taskId)
+        if (task != null) {
+            reminderManager.scheduleReminder(task.id, task.title, snoozeEpochMillis)
+            syncDirtyTasksToCloud(task.userId)
+        }
     }
 
     private fun deleteTaskFromFirestore(userId: String, taskId: String) {
@@ -174,72 +198,185 @@ class TaskRepository(
     }
 
     suspend fun clearCompletedTasks(userId: String) = withContext(Dispatchers.IO) {
+        val completed = taskDao.getCompletedTasksOnce(userId)
+        if (completed.isNotEmpty()) {
+            repoScope.launch {
+                try {
+                    val dbId = context.getString(R.string.firestore_database_id)
+                    val firestore = FirebaseFirestore.getInstance(dbId)
+                    val tasksColl = firestore.collection("users").document(userId).collection("tasks")
+                    for (task in completed) {
+                        tasksColl.document(task.id).delete().await()
+                    }
+                } catch (e: Exception) {
+                    Log.w("TaskRepository", "Cloud completed tasks purge warning: ${e.message}")
+                }
+            }
+        }
         taskDao.deleteCompletedTasks(userId)
-        syncDirtyTasksToCloud(userId)
+    }
+
+    fun startCloudSync(userId: String) {
+        snapshotListener?.remove()
+        try {
+            val dbId = context.getString(R.string.firestore_database_id)
+            val firestore = FirebaseFirestore.getInstance(dbId)
+            snapshotListener = firestore.collection("users")
+                .document(userId)
+                .collection("tasks")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.w("TaskRepository", "Tasks cloud sync listener error: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null) {
+                        repoScope.launch {
+                            for (dc in snapshot.documentChanges) {
+                                when (dc.type) {
+                                    DocumentChange.Type.ADDED, DocumentChange.Type.MODIFIED -> {
+                                        val doc = dc.document
+                                        val localTask = taskDao.getTaskById(doc.id)
+                                        if (localTask != null && !localTask.isSyncedToCloud) {
+                                            // Local changes take precedence until uploaded
+                                            continue
+                                        }
+                                        val title = doc.getString("title") ?: continue
+                                        val dueDate = doc.getLong("dueDateEpochMillis") ?: System.currentTimeMillis()
+                                        val priorityStr = doc.getString("priority") ?: Priority.MEDIUM.name
+                                        val categoryStr = doc.getString("category") ?: TaskCategory.WORK.name
+                                        val isCompleted = doc.getBoolean("isCompleted") ?: false
+                                        val completedAt = doc.getLong("completedAtEpochMillis")
+                                        val reminderSet = doc.getBoolean("reminderSet") ?: false
+                                        val reminderEpoch = doc.getLong("reminderEpochMillis")
+                                        val description = doc.getString("description")
+                                        val recurrence = doc.getString("recurrenceRule")
+
+                                        val priority = try { Priority.valueOf(priorityStr) } catch (e: Exception) { Priority.MEDIUM }
+                                        val category = try { TaskCategory.valueOf(categoryStr) } catch (e: Exception) { TaskCategory.WORK }
+
+                                        val entity = TaskEntity(
+                                            id = doc.id,
+                                            userId = userId,
+                                            title = title,
+                                            description = description,
+                                            dueDateEpochMillis = dueDate,
+                                            priority = priority,
+                                            category = category,
+                                            isCompleted = isCompleted,
+                                            completedAtEpochMillis = completedAt,
+                                            reminderSet = reminderSet,
+                                            reminderEpochMillis = reminderEpoch,
+                                            recurrenceRule = recurrence,
+                                            isSyncedToCloud = true
+                                        )
+                                        taskDao.insertTask(entity)
+                                    }
+                                    DocumentChange.Type.REMOVED -> {
+                                        taskDao.deleteTaskByIdForUser(userId, dc.document.id)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+        } catch (e: Exception) {
+            Log.w("TaskRepository", "Could not start tasks cloud sync: ${e.message}")
+        }
+    }
+
+    fun stopCloudSync() {
+        snapshotListener?.remove()
+        snapshotListener = null
     }
 
     /**
-     * Seeds initial tasks matching Figma designs on first launch
+     * Seeds initial tasks matching Figma designs on first launch only if both
+     * local Room and remote Firestore are empty.
      */
     suspend fun checkAndSeedInitialData(userId: String) = withContext(Dispatchers.IO) {
         val currentTasks = taskDao.getAllTasksFlow(userId).first()
-        if (currentTasks.isEmpty()) {
-            val calendar = Calendar.getInstance()
+        if (currentTasks.isNotEmpty()) return@withContext
 
-            // 1. Review product proposal (9:30 AM today, High priority)
-            calendar.set(Calendar.HOUR_OF_DAY, 9)
-            calendar.set(Calendar.MINUTE, 30)
-            val task1Time = calendar.timeInMillis
+        // Verify if remote Firestore already has existing tasks for this account
+        try {
+            val dbId = context.getString(R.string.firestore_database_id)
+            val firestore = FirebaseFirestore.getInstance(dbId)
+            val remoteDocs = firestore.collection("users")
+                .document(userId)
+                .collection("tasks")
+                .limit(5)
+                .get()
+                .await()
 
-            // 2. Call John about the launch (3:00 PM today, Reminder set)
-            calendar.set(Calendar.HOUR_OF_DAY, 15)
-            calendar.set(Calendar.MINUTE, 0)
-            val task2Time = calendar.timeInMillis
-
-            // 3. Practice Bangla vocabulary (7:00 PM today, Daily habit, Completed)
-            calendar.set(Calendar.HOUR_OF_DAY, 19)
-            calendar.set(Calendar.MINUTE, 0)
-            val task3Time = calendar.timeInMillis
-
-            val sampleTasks = listOf(
-                TaskEntity(
-                    id = "seed_task_1",
-                    userId = userId,
-                    title = "Review product proposal",
-                    dueDateEpochMillis = task1Time,
-                    priority = Priority.HIGH,
-                    category = TaskCategory.WORK,
-                    isCompleted = false
-                ),
-                TaskEntity(
-                    id = "seed_task_2",
-                    userId = userId,
-                    title = "Call John about the launch",
-                    dueDateEpochMillis = task2Time,
-                    priority = Priority.MEDIUM,
-                    category = TaskCategory.WORK,
-                    reminderSet = true,
-                    reminderEpochMillis = task2Time,
-                    isCompleted = false
-                ),
-                TaskEntity(
-                    id = "seed_task_3",
-                    userId = userId,
-                    title = "Practice Bangla vocabulary",
-                    dueDateEpochMillis = task3Time,
-                    priority = Priority.LOW,
-                    category = TaskCategory.HABIT,
-                    recurrenceRule = "DAILY",
-                    isCompleted = true,
-                    completedAtEpochMillis = System.currentTimeMillis()
-                )
-            )
-            taskDao.insertTasks(sampleTasks)
-            if (task2Time > System.currentTimeMillis()) {
-                reminderManager.scheduleReminder("seed_task_2", "Call John about the launch", task2Time)
+            if (!remoteDocs.isEmpty) {
+                // Cloud already has user tasks; don't seed dummy data
+                return@withContext
             }
-            syncDirtyTasksToCloud(userId)
+        } catch (e: Exception) {
+            Log.d("TaskRepository", "Remote check skipped: ${e.message}")
         }
+
+        val calendar = Calendar.getInstance()
+
+        // 1. Review product proposal (9:30 AM today, High priority)
+        calendar.set(Calendar.HOUR_OF_DAY, 9)
+        calendar.set(Calendar.MINUTE, 30)
+        calendar.set(Calendar.SECOND, 0)
+        calendar.set(Calendar.MILLISECOND, 0)
+        val task1Time = calendar.timeInMillis
+
+        // 2. Call John about the launch (3:00 PM today, Reminder set)
+        calendar.set(Calendar.HOUR_OF_DAY, 15)
+        calendar.set(Calendar.MINUTE, 0)
+        calendar.set(Calendar.SECOND, 0)
+        calendar.set(Calendar.MILLISECOND, 0)
+        val task2Time = calendar.timeInMillis
+
+        // 3. Practice Bangla vocabulary (7:00 PM today, Daily habit, Completed)
+        calendar.set(Calendar.HOUR_OF_DAY, 19)
+        calendar.set(Calendar.MINUTE, 0)
+        calendar.set(Calendar.SECOND, 0)
+        calendar.set(Calendar.MILLISECOND, 0)
+        val task3Time = calendar.timeInMillis
+
+        val sampleTasks = listOf(
+            TaskEntity(
+                id = "seed_task_1",
+                userId = userId,
+                title = "Review product proposal",
+                dueDateEpochMillis = task1Time,
+                priority = Priority.HIGH,
+                category = TaskCategory.WORK,
+                isCompleted = false
+            ),
+            TaskEntity(
+                id = "seed_task_2",
+                userId = userId,
+                title = "Call John about the launch",
+                dueDateEpochMillis = task2Time,
+                priority = Priority.MEDIUM,
+                category = TaskCategory.WORK,
+                reminderSet = true,
+                reminderEpochMillis = task2Time,
+                isCompleted = false
+            ),
+            TaskEntity(
+                id = "seed_task_3",
+                userId = userId,
+                title = "Practice Bangla vocabulary",
+                dueDateEpochMillis = task3Time,
+                priority = Priority.LOW,
+                category = TaskCategory.HABIT,
+                recurrenceRule = "DAILY",
+                isCompleted = true,
+                completedAtEpochMillis = System.currentTimeMillis()
+            )
+        )
+        taskDao.insertTasks(sampleTasks)
+        if (task2Time > System.currentTimeMillis()) {
+            reminderManager.scheduleReminder("seed_task_2", "Call John about the launch", task2Time)
+        }
+        syncDirtyTasksToCloud(userId)
     }
 
     /**
@@ -269,6 +406,7 @@ class TaskRepository(
                     )
                     if (task.description != null) payload["description"] = task.description
                     if (task.completedAtEpochMillis != null) payload["completedAtEpochMillis"] = task.completedAtEpochMillis
+                    if (task.reminderEpochMillis != null) payload["reminderEpochMillis"] = task.reminderEpochMillis
                     if (task.recurrenceRule != null) payload["recurrenceRule"] = task.recurrenceRule
 
                     tasksCollection.document(task.id).set(payload, SetOptions.merge()).await()

@@ -29,6 +29,8 @@ import com.example.reminders.ReminderManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -51,7 +53,9 @@ import kotlin.math.sqrt
 class WakeWordForegroundService : Service() {
 
     private val serviceScope = CoroutineScope(Dispatchers.Default + Job())
+    @Volatile
     private var isRunning = false
+    private val audioLock = Any()
     private var audioRecord: AudioRecord? = null
     private var speechRecognizer: SpeechRecognizer? = null
     private var isRecognizing = false
@@ -191,7 +195,9 @@ class WakeWordForegroundService : Service() {
                         continue
                     }
 
-                    val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
+                    val read = synchronized(audioLock) {
+                        if (!isRunning) 0 else audioRecord?.read(buffer, 0, buffer.size) ?: 0
+                    }
                     if (read > 0) {
                         var sum = 0.0
                         for (i in 0 until read) {
@@ -220,10 +226,12 @@ class WakeWordForegroundService : Service() {
     private fun pauseAudioRecordAndRecognize() {
         isRecognizing = true
         serviceScope.launch(Dispatchers.Main) {
-            try {
-                audioRecord?.stop()
-            } catch (e: Exception) {
-                Log.d(TAG, "AudioRecord pause: ${e.message}")
+            synchronized(audioLock) {
+                try {
+                    audioRecord?.stop()
+                } catch (e: Exception) {
+                    Log.d(TAG, "AudioRecord pause: ${e.message}")
+                }
             }
 
             recognizeUtterance()
@@ -286,12 +294,14 @@ class WakeWordForegroundService : Service() {
     private fun resumeAudioRecord() {
         serviceScope.launch(Dispatchers.IO) {
             delay(400)
-            try {
-                if (isRunning && audioRecord?.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
-                    audioRecord?.startRecording()
+            synchronized(audioLock) {
+                try {
+                    if (isRunning && audioRecord?.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                        audioRecord?.startRecording()
+                    }
+                } catch (e: Exception) {
+                    Log.d(TAG, "Resume AudioRecord: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.d(TAG, "Resume AudioRecord: ${e.message}")
             }
         }
     }
@@ -401,7 +411,6 @@ class WakeWordForegroundService : Service() {
                         dueEpochMillis = taskCal.timeInMillis,
                         reminderSet = true
                     )
-                    reminderManager.scheduleReminder(newTask.id, newTask.title, newTask.dueDateEpochMillis)
                     val reply = "Got it! Added task '${newTask.title}' to your schedule."
                     val fallbackMsg = com.example.ui.screens.ChatMessage(
                         id = java.util.UUID.randomUUID().toString(),
@@ -420,18 +429,25 @@ class WakeWordForegroundService : Service() {
     }
 
     private fun releaseAudioRecord() {
-        try {
-            audioRecord?.stop()
-            audioRecord?.release()
-        } catch (e: Exception) {
-            Log.d(TAG, "AudioRecord release: ${e.message}")
+        synchronized(audioLock) {
+            try {
+                audioRecord?.stop()
+                audioRecord?.release()
+            } catch (e: Exception) {
+                Log.d(TAG, "AudioRecord release: ${e.message}")
+            }
+            audioRecord = null
         }
-        audioRecord = null
     }
 
     private fun stopForegroundService() {
         isRunning = false
         _isWakeWordActive.value = false
+        try {
+            serviceScope.coroutineContext.cancelChildren()
+        } catch (e: Exception) {
+            Log.d(TAG, "Coroutine cancellation: ${e.message}")
+        }
         releaseAudioRecord()
         try {
             speechRecognizer?.destroy()
@@ -447,6 +463,11 @@ class WakeWordForegroundService : Service() {
         super.onDestroy()
         stopForegroundService()
         voiceManager.destroy()
+        try {
+            serviceScope.cancel()
+        } catch (e: Exception) {
+            Log.d(TAG, "ServiceScope cancel: ${e.message}")
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -462,21 +483,30 @@ class WakeWordForegroundService : Service() {
         val isWakeWordActive: StateFlow<Boolean> = _isWakeWordActive.asStateFlow()
 
         fun start(context: Context) {
-            val intent = Intent(context, WakeWordForegroundService::class.java).apply {
-                action = ACTION_START
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                val intent = Intent(context, WakeWordForegroundService::class.java).apply {
+                    action = ACTION_START
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not start wake word foreground service: ${e.message}")
+                _isWakeWordActive.value = false
             }
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, WakeWordForegroundService::class.java).apply {
-                action = ACTION_STOP
+            try {
+                val intent = Intent(context, WakeWordForegroundService::class.java).apply {
+                    action = ACTION_STOP
+                }
+                context.startService(intent)
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not stop wake word service: ${e.message}")
             }
-            context.startService(intent)
         }
     }
 }

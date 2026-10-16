@@ -40,8 +40,6 @@ fun NudgyTheme(
         SideEffect {
             val window = (view.context as? Activity)?.window
             if (window != null) {
-                window.statusBarColor = NudgyCanvas.toArgb()
-                window.navigationBarColor = NudgyCanvas.toArgb()
                 val insetsController = WindowCompat.getInsetsController(window, view)
                 insetsController.isAppearanceLightStatusBars = true
                 insetsController.isAppearanceLightNavigationBars = true

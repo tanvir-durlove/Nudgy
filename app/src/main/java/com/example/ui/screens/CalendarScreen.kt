@@ -84,14 +84,14 @@ fun CalendarScreen(
     onSelectDay: (Long) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var hasBlockedSuggestedTime by remember { mutableStateOf(false) }
+    var blockedDayIndices by remember { mutableStateOf(setOf<Int>()) }
     var showAddEventDialog by remember { mutableStateOf(false) }
 
     val timeFormatter = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
     val monthFormatter = remember { SimpleDateFormat("MMMM yyyy", Locale.getDefault()) }
 
     // Dynamically compute the current 7 days of this week
-    val (headerMonth, daysList) = remember {
+    val (_, daysList) = remember {
         val cal = Calendar.getInstance()
         val monthStr = monthFormatter.format(cal.time).uppercase()
         val dayOfWeekToday = cal.get(Calendar.DAY_OF_WEEK)
@@ -121,8 +121,16 @@ fun CalendarScreen(
     val todayIndex = daysList.indexOfFirst { it.isToday }.coerceAtLeast(0)
     var selectedDayIndex by remember { mutableIntStateOf(todayIndex) }
 
-    // Dynamically calculate the best free focus time gap (>= 30 mins) between events or in afternoon
     val selectedDayMillis = daysList.getOrNull(selectedDayIndex)?.epochMillis ?: System.currentTimeMillis()
+    val headerMonth = remember(selectedDayMillis) {
+        val cal = Calendar.getInstance().apply { timeInMillis = selectedDayMillis }
+        monthFormatter.format(cal.time).uppercase()
+    }
+
+    val hasFocusEventToday = remember(events) {
+        events.any { it.eventType == "FOCUS_TIME" || it.title.contains("focus", ignoreCase = true) }
+    }
+    val hasBlockedSuggestedTime = hasFocusEventToday || blockedDayIndices.contains(selectedDayIndex)
     val suggestedSlot = remember(events, selectedDayIndex) {
         val baseCal = Calendar.getInstance().apply { timeInMillis = selectedDayMillis }
         val sortedEvents = events.sortedBy { it.startEpochMillis }
@@ -190,9 +198,14 @@ fun CalendarScreen(
                     style = MaterialTheme.typography.labelSmall,
                     color = NudgyPrimary
                 )
-                Spacer(modifier = Modifier.height(2.dp))
+                val isSelectedDayToday = daysList.getOrNull(selectedDayIndex)?.isToday == true
+                val scheduleTitle = if (isSelectedDayToday) {
+                    "Today’s schedule"
+                } else {
+                    "${daysList.getOrNull(selectedDayIndex)?.dayOfWeek ?: "Day"}’s schedule"
+                }
                 Text(
-                    text = "Today’s schedule",
+                    text = scheduleTitle,
                     style = MaterialTheme.typography.displayMedium,
                     color = NudgyCharcoal
                 )
@@ -528,7 +541,7 @@ fun CalendarScreen(
 
                 Button(
                     onClick = {
-                        hasBlockedSuggestedTime = true
+                        blockedDayIndices = blockedDayIndices + selectedDayIndex
                         onBlockFocusTime(suggestedStart, suggestedEnd, "Deep focus session")
                     },
                     enabled = !hasBlockedSuggestedTime,

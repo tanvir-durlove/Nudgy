@@ -391,6 +391,7 @@ fun EditTaskSheet(
                             title = title.trim(),
                             description = if (description.isNotBlank()) description.trim() else null,
                             dueDateEpochMillis = currentDueDateMillis,
+                            reminderEpochMillis = if (reminderSet) currentDueDateMillis else null,
                             priority = priority,
                             category = category,
                             reminderSet = reminderSet

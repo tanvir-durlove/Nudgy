@@ -25,7 +25,7 @@ class GeminiClient {
         userMessage: String,
         recentHistory: List<Pair<String, Boolean>> = emptyList(), // Pair(text, isUser)
         userMemories: List<String> = emptyList(),
-        modelVersion: String = "gemini-2.5-flash"
+        modelVersion: String = "gemini-1.5-flash"
     ): String = withContext(Dispatchers.IO) {
         val apiKey = try {
             BuildConfig.GEMINI_API_KEY
@@ -39,14 +39,35 @@ class GeminiClient {
         }
 
         try {
-            val sanitizedModel = modelVersion.ifBlank { "gemini-2.5-flash" }
+            val sanitizedModel = modelVersion.ifBlank { "gemini-1.5-flash" }
             val url = "https://generativelanguage.googleapis.com/v1beta/models/$sanitizedModel:generateContent?key=$apiKey"
 
             val contentsArray = JSONArray()
 
-            // Sliding context window: only take last 4 messages to minimize token usage
-            val window = recentHistory.takeLast(4)
-            for ((text, isUser) in window) {
+            // Sliding context window: normalize history so it strictly alternates (user -> model)
+            // and starts with a user turn.
+            val sanitizedHistory = mutableListOf<Pair<String, Boolean>>()
+            val rawWindow = recentHistory.takeLast(6)
+            for (item in rawWindow) {
+                if (sanitizedHistory.isEmpty()) {
+                    if (item.second) { // must start with user
+                        sanitizedHistory.add(item)
+                    }
+                } else {
+                    // Only add if role alternates from the last entry
+                    val lastIsUser = sanitizedHistory.last().second
+                    if (item.second != lastIsUser) {
+                        sanitizedHistory.add(item)
+                    }
+                }
+            }
+
+            // Ensure history ends with a model turn before appending the new user message
+            if (sanitizedHistory.isNotEmpty() && sanitizedHistory.last().second) {
+                sanitizedHistory.removeAt(sanitizedHistory.size - 1)
+            }
+
+            for ((text, isUser) in sanitizedHistory) {
                 val turn = JSONObject().apply {
                     put("role", if (isUser) "user" else "model")
                     put("parts", JSONArray().put(JSONObject().put("text", text)))
@@ -54,7 +75,7 @@ class GeminiClient {
                 contentsArray.put(turn)
             }
 
-            // Append current prompt
+            // Append current prompt as user role
             contentsArray.put(
                 JSONObject().apply {
                     put("role", "user")
@@ -84,11 +105,12 @@ class GeminiClient {
                 .post(payload.toString().toRequestBody(jsonMediaType))
                 .build()
 
-            val response = client.newCall(request).execute()
-            val responseBody = response.body?.string() ?: ""
+            val (isSuccess, responseCode, responseBody) = client.newCall(request).execute().use { response ->
+                Triple(response.isSuccessful, response.code, response.body?.string() ?: "")
+            }
 
-            if (!response.isSuccessful) {
-                Log.w("GeminiClient", "Gemini HTTP error ${response.code}: $responseBody")
+            if (!isSuccess) {
+                Log.w("GeminiClient", "Gemini HTTP error $responseCode: $responseBody")
                 return@withContext getLocalFallback(userMessage)
             }
 

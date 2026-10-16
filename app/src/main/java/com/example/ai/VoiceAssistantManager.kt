@@ -3,6 +3,8 @@ package com.example.ai
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -64,7 +66,20 @@ class VoiceAssistantManager(private val context: Context) : TextToSpeech.OnInitL
         onResult: (String) -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post {
+                startListening(languageCode, onResult, onError)
+            }
+            return
+        }
+
         stopSpeaking()
+        try {
+            tts?.stop()
+        } catch (e: Exception) {
+            Log.d(TAG, "TTS stop: ${e.message}")
+        }
+
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             onError("Speech recognition not available on this device.")
             return
@@ -125,6 +140,13 @@ class VoiceAssistantManager(private val context: Context) : TextToSpeech.OnInitL
     }
 
     fun stopListening() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post {
+                stopListening()
+            }
+            return
+        }
+
         try {
             speechRecognizer?.stopListening()
         } catch (e: Exception) {
@@ -142,7 +164,7 @@ class VoiceAssistantManager(private val context: Context) : TextToSpeech.OnInitL
 
         val isBengali = text.any { it in '\u0980'..'\u09FF' }
         val locale = if (isBengali) {
-            Locale("bn", "BD")
+            Locale.forLanguageTag("bn-BD")
         } else {
             Locale.US
         }
@@ -163,10 +185,22 @@ class VoiceAssistantManager(private val context: Context) : TextToSpeech.OnInitL
     }
 
     fun destroy() {
-        speechRecognizer?.destroy()
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post { destroy() }
+            return
+        }
+        try {
+            speechRecognizer?.destroy()
+        } catch (e: Exception) {
+            Log.d(TAG, "SpeechRecognizer destroy error: ${e.message}")
+        }
         speechRecognizer = null
-        tts?.stop()
-        tts?.shutdown()
+        try {
+            tts?.stop()
+            tts?.shutdown()
+        } catch (e: Exception) {
+            Log.d(TAG, "TTS shutdown error: ${e.message}")
+        }
         tts = null
     }
 

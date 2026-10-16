@@ -43,6 +43,21 @@
         "createdAt": { "type": "timestamp" },
         "updatedAt": { "type": "timestamp" }
       }
+    },
+    "Event": {
+      "path": "/users/{userId}/events/{eventId}",
+      "fields": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "startEpochMillis": { "type": "number" },
+        "endEpochMillis": { "type": "number" },
+        "locationOrLink": { "type": "string", "optional": true },
+        "eventType": { "type": "string" },
+        "isAllDay": { "type": "boolean", "optional": true },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      }
     }
   }
 }

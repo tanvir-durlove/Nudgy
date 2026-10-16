@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -150,24 +151,39 @@ fun TasksScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.Bottom
                     ) {
-                        Text(
-                            text = "${dailyStats.completed}/${dailyStats.total}",
-                            fontSize = 36.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Text(
-                            text = "tasks complete",
-                            fontSize = 13.sp,
-                            color = Color.White.copy(alpha = 0.9f),
-                            modifier = Modifier.padding(bottom = 6.dp)
-                        )
+                        if (dailyStats.total == 0) {
+                            Text(
+                                text = "All clear!",
+                                fontSize = 32.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "No tasks scheduled today",
+                                fontSize = 13.sp,
+                                color = Color.White.copy(alpha = 0.9f),
+                                modifier = Modifier.padding(bottom = 6.dp)
+                            )
+                        } else {
+                            Text(
+                                text = "${dailyStats.completed}/${dailyStats.total}",
+                                fontSize = 36.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = if (dailyStats.completed == dailyStats.total) "all done today! 🎉" else "tasks complete",
+                                fontSize = 13.sp,
+                                color = Color.White.copy(alpha = 0.9f),
+                                modifier = Modifier.padding(bottom = 6.dp)
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
 
                     NudgyProgressBar(
-                        progress = dailyStats.percentage,
+                        progress = if (dailyStats.total == 0) 1.0f else dailyStats.percentage,
                         height = 7.dp,
                         trackColor = Color.White.copy(alpha = 0.35f),
                         progressColor = Color.White
@@ -195,12 +211,39 @@ fun TasksScreen(
                     color = NudgyCard,
                     border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
                 ) {
-                    Text(
-                        text = "No tasks in this list.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = NudgyMuted,
-                        modifier = Modifier.padding(20.dp)
-                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Checklist,
+                            contentDescription = null,
+                            tint = NudgyPrimary.copy(alpha = 0.7f),
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Text(
+                            text = when (selectedTab) {
+                                0 -> "No tasks due today"
+                                1 -> "No upcoming tasks scheduled"
+                                else -> "No completed tasks yet"
+                            },
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = NudgyCharcoal
+                        )
+                        Text(
+                            text = when (selectedTab) {
+                                0 -> "Enjoy your free time or tap + above to schedule a task."
+                                1 -> "Plan ahead by tapping + above to add future priorities."
+                                else -> "Completed tasks will show up here as you check them off."
+                            },
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                            color = NudgyMuted,
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 }
             }
         } else {

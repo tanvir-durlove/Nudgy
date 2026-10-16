@@ -36,6 +36,11 @@ class ReminderManager(private val context: Context) {
         taskTitle: String,
         triggerEpochMillis: Long
     ): Boolean {
+        if (triggerEpochMillis <= System.currentTimeMillis()) {
+            Log.w("ReminderManager", "Cannot schedule reminder for past timestamp ($triggerEpochMillis <= ${System.currentTimeMillis()})")
+            return false
+        }
+
         val intent = Intent(context, ReminderReceiver::class.java).apply {
             action = ACTION_TRIGGER_REMINDER
             putExtra(EXTRA_TASK_ID, taskId)

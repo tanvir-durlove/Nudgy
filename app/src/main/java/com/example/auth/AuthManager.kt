@@ -350,6 +350,7 @@ class AuthManager(private val context: Context) {
                 withContext(Dispatchers.IO) {
                     purgeFirestoreSubcollection(userDocRef.collection("tasks"))
                     purgeFirestoreSubcollection(userDocRef.collection("memories"))
+                    purgeFirestoreSubcollection(userDocRef.collection("events"))
                     purgeFirestoreSubcollection(userDocRef.collection("chats"))
                     try {
                         userDocRef.delete().await()

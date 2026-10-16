@@ -30,6 +30,13 @@ service cloud.firestore {
              data.content.size() > 0;
     }
 
+    function isValidEvent(data) {
+      return data.userId == request.auth.uid &&
+             data.title is string &&
+             data.title.size() > 0 &&
+             data.title.size() <= 200;
+    }
+
     match /users/{userId} {
       allow read, delete: if isOwner(userId);
       allow create, update: if isOwner(userId) && isValidUser(request.resource.data);
@@ -42,6 +49,11 @@ service cloud.firestore {
       match /memories/{memoryId} {
         allow read, delete: if isOwner(userId);
         allow create, update: if isOwner(userId) && isValidMemory(request.resource.data);
+      }
+
+      match /events/{eventId} {
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidEvent(request.resource.data);
       }
     }
   }

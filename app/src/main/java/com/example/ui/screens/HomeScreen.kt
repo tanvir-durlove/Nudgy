@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CheckCircleOutline
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +45,7 @@ import com.example.analytics.RemoteConfigValues
 import com.example.auth.NudgyUser
 import com.example.data.local.entity.CalendarEventEntity
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Locale
 import com.example.data.local.entity.TaskEntity
 import com.example.data.model.Priority
@@ -107,9 +109,18 @@ fun HomeScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Top
         ) {
+            val currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+            val greetingPrefix = when (currentHour) {
+                in 5..11 -> "GOOD MORNING"
+                in 12..16 -> "GOOD AFTERNOON"
+                in 17..21 -> "GOOD EVENING"
+                else -> "HELLO"
+            }
+            val firstName = user.displayName.split(" ").firstOrNull { it.isNotBlank() }?.uppercase() ?: "FRIEND"
+
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "GOOD MORNING, ${user.displayName.split(" ").firstOrNull()?.uppercase() ?: "ARIF"}",
+                    text = "$greetingPrefix, $firstName",
                     style = MaterialTheme.typography.labelSmall,
                     color = NudgyPrimary
                 )
@@ -120,8 +131,15 @@ fun HomeScreen(
                     color = NudgyCharcoal
                 )
                 Spacer(modifier = Modifier.height(6.dp))
+                val contextSubtitle = when {
+                    dailyStats.total == 0 -> "Your schedule is clear. A great time to plan or relax."
+                    dailyStats.completed == dailyStats.total -> "All tasks completed! Fantastic job today."
+                    currentHour in 5..11 -> "You have a clear window this morning. A good time to focus."
+                    currentHour in 12..16 -> "Keep up the great momentum this afternoon."
+                    else -> "Wrap up your priorities or wind down for the night."
+                }
                 Text(
-                    text = "You have a clear window this morning. A good time to focus.",
+                    text = contextSubtitle,
                     style = MaterialTheme.typography.bodyMedium,
                     color = NudgyMuted
                 )
@@ -149,7 +167,12 @@ fun HomeScreen(
             NudgyCelebrationCard()
         }
 
-        // Coral Gradient Hero Card ("Nudgy's Morning Brief")
+        // Coral Gradient Hero Card ("Nudgy's Brief")
+        val briefLabel = when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
+            in 12..16 -> "NUDGY'S AFTERNOON BRIEF"
+            in 17..23, in 0..4 -> "NUDGY'S EVENING BRIEF"
+            else -> "NUDGY'S MORNING BRIEF"
+        }
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(24.dp),
@@ -174,7 +197,7 @@ fun HomeScreen(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "NUDGY'S MORNING BRIEF",
+                            text = briefLabel,
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = Color.White.copy(alpha = 0.85f),
                                 letterSpacing = 1.2.sp
@@ -313,34 +336,64 @@ fun HomeScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    todayTasks.take(3).forEach { task ->
+                    if (todayTasks.isEmpty()) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp)
+                                .clickable { onAddTaskClick() }
                         ) {
-                            NudgyCheckbox(
-                                checked = task.isCompleted,
-                                onCheckedChange = { onToggleTask(task) }
+                            Icon(
+                                imageVector = Icons.Default.CheckCircleOutline,
+                                contentDescription = null,
+                                tint = NudgyPrimary,
+                                modifier = Modifier.size(24.dp)
                             )
-
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable { onTaskClick(task) }
-                            ) {
+                            Column {
                                 Text(
-                                    text = task.title,
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None
-                                    ),
-                                    color = if (task.isCompleted) NudgyMuted else NudgyCharcoal
+                                    text = "No tasks left for today!",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = NudgyCharcoal
                                 )
                                 Text(
-                                    text = if (task.priority == Priority.HIGH) "High priority" else if (task.reminderSet) "Reminder set" else "Daily habit",
+                                    text = "Tap here or the + button above to add a task.",
                                     style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
                                     color = NudgyMuted
                                 )
+                            }
+                        }
+                    } else {
+                        todayTasks.take(3).forEach { task ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                NudgyCheckbox(
+                                    checked = task.isCompleted,
+                                    onCheckedChange = { onToggleTask(task) }
+                                )
+
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { onTaskClick(task) }
+                                ) {
+                                    Text(
+                                        text = task.title,
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None
+                                        ),
+                                        color = if (task.isCompleted) NudgyMuted else NudgyCharcoal
+                                    )
+                                    Text(
+                                        text = if (task.priority == Priority.HIGH) "High priority" else if (task.reminderSet) "Reminder set" else "Daily habit",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                        color = NudgyMuted
+                                    )
+                                }
                             }
                         }
                     }
@@ -390,27 +443,44 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
                     NudgyProgressRing(
-                        percentage = dailyStats.percentage,
+                        percentage = if (dailyStats.total == 0) 1.0f else dailyStats.percentage,
                         size = 94.dp,
                         ringColor = Color(0xFF2E7D32),
                         trackColor = Color(0xFFC7E7D3)
                     )
 
                     Column {
-                        Text(
-                            text = "${dailyStats.completed} of ${dailyStats.total} tasks",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp
-                            ),
-                            color = NudgyCharcoal
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "${dailyStats.remaining} remaining today",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = NudgyMuted
-                        )
+                        if (dailyStats.total == 0) {
+                            Text(
+                                text = "All clear today",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp
+                                ),
+                                color = NudgyCharcoal
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "No tasks on schedule",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = NudgyMuted
+                            )
+                        } else {
+                            Text(
+                                text = "${dailyStats.completed} of ${dailyStats.total} tasks",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp
+                                ),
+                                color = NudgyCharcoal
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = if (dailyStats.remaining == 0) "All done today!" else "${dailyStats.remaining} remaining today",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = NudgyMuted
+                            )
+                        }
                     }
                 }
             }

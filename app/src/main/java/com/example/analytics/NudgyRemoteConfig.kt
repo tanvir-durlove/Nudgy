@@ -15,7 +15,7 @@ data class RemoteConfigValues(
     val promoCardEnabled: Boolean = true,
     val promoHeadline: String = "Invite friends to Nudgy",
     val promoSubtitle: String = "Share daily rhythms & achieve streaks together.",
-    val geminiModelVersion: String = "gemini-2.5-flash"
+    val geminiModelVersion: String = "gemini-1.5-flash"
 )
 
 class NudgyRemoteConfig {
@@ -45,7 +45,7 @@ class NudgyRemoteConfig {
                     KEY_PROMO_CARD_ENABLED to true,
                     KEY_PROMO_HEADLINE to "Invite friends to Nudgy",
                     KEY_PROMO_SUBTITLE to "Share daily rhythms & achieve streaks together.",
-                    KEY_MODEL_VERSION to "gemini-2.5-flash"
+                    KEY_MODEL_VERSION to "gemini-1.5-flash"
                 )
                 rc.setDefaultsAsync(defaults)
 
@@ -57,7 +57,7 @@ class NudgyRemoteConfig {
                             promoCardEnabled = rc.getBoolean(KEY_PROMO_CARD_ENABLED),
                             promoHeadline = rc.getString(KEY_PROMO_HEADLINE).ifEmpty { "Invite friends to Nudgy" },
                             promoSubtitle = rc.getString(KEY_PROMO_SUBTITLE).ifEmpty { "Share daily rhythms & achieve streaks together." },
-                            geminiModelVersion = rc.getString(KEY_MODEL_VERSION).ifEmpty { "gemini-2.5-flash" }
+                            geminiModelVersion = rc.getString(KEY_MODEL_VERSION).ifEmpty { "gemini-1.5-flash" }
                         )
                     }
                 }

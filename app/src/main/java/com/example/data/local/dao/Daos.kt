@@ -68,6 +68,12 @@ interface TaskDao {
     @Query("DELETE FROM tasks WHERE id = :id")
     suspend fun deleteTaskById(id: String)
 
+    @Query("UPDATE tasks SET dueDateEpochMillis = :dueDate, reminderEpochMillis = :reminderDate, reminderSet = 1, isSyncedToCloud = 0, updatedAtEpochMillis = :now WHERE id = :id")
+    suspend fun snoozeTask(id: String, dueDate: Long, reminderDate: Long, now: Long)
+
+    @Query("SELECT * FROM tasks WHERE userId = :userId AND isCompleted = 1")
+    suspend fun getCompletedTasksOnce(userId: String): List<TaskEntity>
+
     @Query("DELETE FROM tasks WHERE userId = :userId AND isCompleted = 1")
     suspend fun deleteCompletedTasks(userId: String)
 

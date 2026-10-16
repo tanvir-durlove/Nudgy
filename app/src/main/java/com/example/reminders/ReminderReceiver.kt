@@ -28,24 +28,48 @@ class ReminderReceiver : BroadcastReceiver() {
             ReminderManager.ACTION_MARK_DONE -> {
                 val notifId = ReminderManager.getRequestCode(taskId)
                 notificationManager.cancel(notifId)
-                // Mark completed directly in Room DB
+                val pendingResult = goAsync()
                 CoroutineScope(Dispatchers.IO).launch {
-                    val db = NudgyDatabase.getInstance(context)
-                    db.taskDao().setTaskCompletion(
-                        id = taskId,
-                        isCompleted = true,
-                        completedAt = System.currentTimeMillis(),
-                        now = System.currentTimeMillis()
-                    )
+                    try {
+                        val repository = com.example.data.repository.TaskRepository(context)
+                        val task = repository.getTaskById(taskId)
+                        if (task != null) {
+                            repository.toggleTaskCompletion(task.copy(isCompleted = false)) // sets to true and syncs
+                        } else {
+                            val db = NudgyDatabase.getInstance(context)
+                            db.taskDao().setTaskCompletion(
+                                id = taskId,
+                                isCompleted = true,
+                                completedAt = System.currentTimeMillis(),
+                                now = System.currentTimeMillis()
+                            )
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("ReminderReceiver", "Error marking task done: ${e.message}")
+                    } finally {
+                        pendingResult.finish()
+                    }
                 }
             }
 
             ReminderManager.ACTION_SNOOZE_30M -> {
                 val notifId = ReminderManager.getRequestCode(taskId)
                 notificationManager.cancel(notifId)
-                val reminderManager = ReminderManager(context)
                 val snoozeTime = System.currentTimeMillis() + (30 * 60 * 1000L)
-                reminderManager.scheduleReminder(taskId, taskTitle, snoozeTime)
+                val pendingResult = goAsync()
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val repository = com.example.data.repository.TaskRepository(context)
+                        repository.snoozeTask(taskId, snoozeTime)
+                    } catch (e: Exception) {
+                        android.util.Log.w("ReminderReceiver", "Error snoozing task: ${e.message}")
+                        // Fallback purely via ReminderManager
+                        val reminderManager = ReminderManager(context)
+                        reminderManager.scheduleReminder(taskId, taskTitle, snoozeTime)
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
             }
         }
     }

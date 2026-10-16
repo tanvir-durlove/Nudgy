@@ -181,6 +181,17 @@ fun NudgyMainFlow(
             calendarRepository.checkAndSeedInitialEvents(currentUser.uid)
             memoryRepository.checkAndSeedInitialMemory(currentUser.uid)
             chatRepository.checkAndSeedWelcomeMessage(currentUser.uid, currentUser.displayName)
+            taskRepository.startCloudSync(currentUser.uid)
+            memoryRepository.startCloudSync(currentUser.uid)
+            calendarRepository.startCloudSync(currentUser.uid)
+        }
+
+        DisposableEffect(currentUser.uid) {
+            onDispose {
+                taskRepository.stopCloudSync()
+                calendarRepository.stopCloudSync()
+                memoryRepository.stopCloudSync()
+            }
         }
 
         NudgyAppScaffold(
@@ -291,13 +302,6 @@ fun NudgyAppScaffold(
                     is PreFilterResult.Handled -> {
                         preFilterResult.createdTask?.let { created ->
                             analytics.logTaskCreated(created.title, created.priority.name, created.category.name, created.reminderSet)
-                            if (created.reminderSet) {
-                                reminderManager.scheduleReminder(
-                                    taskId = created.id,
-                                    taskTitle = created.title,
-                                    triggerEpochMillis = created.dueDateEpochMillis
-                                )
-                            }
                         }
                         val handledMsg = ChatMessage(
                             id = UUID.randomUUID().toString(),
@@ -618,13 +622,6 @@ fun NudgyAppScaffold(
                             reminderSet = reminderSet
                         )
                         analytics.logTaskCreated(title, priority.name, category.name, reminderSet)
-                        if (reminderSet) {
-                            reminderManager.scheduleReminder(
-                                taskId = task.id,
-                                taskTitle = task.title,
-                                triggerEpochMillis = task.dueDateEpochMillis
-                            )
-                        }
                     }
                 }
             )
@@ -637,29 +634,16 @@ fun NudgyAppScaffold(
                 onUpdateTask = { updated ->
                     scope.launch {
                         taskRepository.updateTask(updated)
-                        if (updated.reminderSet && !updated.isCompleted) {
-                            reminderManager.scheduleReminder(
-                                taskId = updated.id,
-                                taskTitle = updated.title,
-                                triggerEpochMillis = updated.dueDateEpochMillis
-                            )
-                        } else {
-                            reminderManager.cancelReminder(updated.id)
-                        }
                     }
                 },
                 onDeleteTask = { taskId ->
                     scope.launch {
                         taskRepository.deleteTask(user.uid, taskId)
-                        reminderManager.cancelReminder(taskId)
                     }
                 },
                 onToggleComplete = { toggledTask ->
                     scope.launch {
                         taskRepository.toggleTaskCompletion(toggledTask)
-                        if (!toggledTask.isCompleted) {
-                            reminderManager.cancelReminder(toggledTask.id)
-                        }
                     }
                 }
             )
