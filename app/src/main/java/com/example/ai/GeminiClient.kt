@@ -25,7 +25,7 @@ class GeminiClient {
         userMessage: String,
         recentHistory: List<Pair<String, Boolean>> = emptyList(), // Pair(text, isUser)
         userMemories: List<String> = emptyList(),
-        modelVersion: String = "gemini-3.5-flash"
+        modelVersion: String = "gemini-3.1-flash-lite-preview"
     ): String = withContext(Dispatchers.IO) {
         val apiKey = try {
             BuildConfig.GEMINI_API_KEY
@@ -40,10 +40,10 @@ class GeminiClient {
 
         try {
             val sanitizedModel = when {
-                modelVersion.isBlank() || modelVersion.contains("1.5") || modelVersion.contains("2.0") -> "gemini-3.5-flash"
+                modelVersion.isBlank() || modelVersion.contains("1.5") || modelVersion.contains("2.0") -> "gemini-3.1-flash-lite-preview"
                 else -> modelVersion
             }
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$sanitizedModel:generateContent?key=$apiKey"
+            val primaryUrl = "https://generativelanguage.googleapis.com/v1beta/models/$sanitizedModel:generateContent?key=$apiKey"
 
             val contentsArray = JSONArray()
 
@@ -103,13 +103,31 @@ class GeminiClient {
                 })
             }
 
+            val requestBody = payload.toString().toRequestBody(jsonMediaType)
             val request = Request.Builder()
-                .url(url)
-                .post(payload.toString().toRequestBody(jsonMediaType))
+                .url(primaryUrl)
+                .post(requestBody)
                 .build()
 
-            val (isSuccess, responseCode, responseBody) = client.newCall(request).execute().use { response ->
+            var (isSuccess, responseCode, responseBody) = client.newCall(request).execute().use { response ->
                 Triple(response.isSuccessful, response.code, response.body?.string() ?: "")
+            }
+
+            // If the lowest-cost preview model fails (e.g. 404), fall back to gemini-3.5-flash
+            if (!isSuccess && sanitizedModel != "gemini-3.5-flash") {
+                Log.w("GeminiClient", "Primary model $sanitizedModel returned $responseCode, trying gemini-3.5-flash fallback")
+                val fallbackUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=$apiKey"
+                val fallbackReq = Request.Builder()
+                    .url(fallbackUrl)
+                    .post(payload.toString().toRequestBody(jsonMediaType))
+                    .build()
+                val fallbackRes = client.newCall(fallbackReq).execute().use { response ->
+                    Triple(response.isSuccessful, response.code, response.body?.string() ?: "")
+                }
+                if (fallbackRes.first) {
+                    isSuccess = fallbackRes.first
+                    responseBody = fallbackRes.third
+                }
             }
 
             if (!isSuccess) {
@@ -143,7 +161,7 @@ class GeminiClient {
             lower.contains("help") ->
                 "I can organize your tasks, schedule meetings, find open focus blocks, and nudge you on time."
             else ->
-                "Got it! I've noted that down. Let's make today count!"
+                "I'm here to help you stay on track! Ask me to plan your day, schedule a task, or find open focus time."
         }
     }
 }

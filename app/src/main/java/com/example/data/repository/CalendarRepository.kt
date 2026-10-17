@@ -202,17 +202,6 @@ class CalendarRepository(
                         )
                         calendarDao.insertEvent(newEntity)
                         syncEventToFirestore(userId, newEntity)
-
-                        // Also mirror to tasks for immediate visibility on Tasks tab
-                        taskRepository?.createTask(
-                            userId = userId,
-                            title = rawTitle,
-                            description = "Google Calendar (${loc ?: "Meeting"})",
-                            dueEpochMillis = start,
-                            priority = Priority.HIGH,
-                            category = TaskCategory.WORK,
-                            reminderSet = true
-                        )
                         syncedCount++
                     }
                 }
@@ -338,69 +327,8 @@ class CalendarRepository(
     }
 
     suspend fun checkAndSeedInitialEvents(userId: String) = withContext(Dispatchers.IO) {
-        val currentEvents = calendarDao.getAllEventsFlow(userId).first()
-        if (currentEvents.isNotEmpty()) return@withContext
-
-        try {
-            val dbId = context.getString(R.string.firestore_database_id)
-            val firestore = FirebaseFirestore.getInstance(dbId)
-            val remoteDocs = firestore.collection("users")
-                .document(userId)
-                .collection("events")
-                .limit(5)
-                .get()
-                .await()
-            if (!remoteDocs.isEmpty) {
-                return@withContext
-            }
-        } catch (e: Exception) {
-            Log.d(TAG, "Remote events check skipped: ${e.message}")
-        }
-
-        val calendar = Calendar.getInstance()
-
-            // 1. Design team sync (11:30 - 12:00)
-            calendar.set(Calendar.HOUR_OF_DAY, 11)
-            calendar.set(Calendar.MINUTE, 30)
-            calendar.set(Calendar.SECOND, 0)
-            val meetStart = calendar.timeInMillis
-            calendar.set(Calendar.HOUR_OF_DAY, 12)
-            calendar.set(Calendar.MINUTE, 0)
-            val meetEnd = calendar.timeInMillis
-
-            // 2. Deep work session (2:00 PM - 3:00 PM)
-            calendar.set(Calendar.HOUR_OF_DAY, 14)
-            calendar.set(Calendar.MINUTE, 0)
-            val deepStart = calendar.timeInMillis
-            calendar.set(Calendar.HOUR_OF_DAY, 15)
-            calendar.set(Calendar.MINUTE, 0)
-            val deepEnd = calendar.timeInMillis
-
-            val sampleEvents = listOf(
-                CalendarEventEntity(
-                    id = "seed_event_1",
-                    userId = userId,
-                    title = "Design team sync",
-                    startEpochMillis = meetStart,
-                    endEpochMillis = meetEnd,
-                    locationOrLink = "Google Meet",
-                    eventType = "MEETING"
-                ),
-                CalendarEventEntity(
-                    id = "seed_event_2",
-                    userId = userId,
-                    title = "Deep work session",
-                    startEpochMillis = deepStart,
-                    endEpochMillis = deepEnd,
-                    locationOrLink = "Focus time",
-                    eventType = "FOCUS_TIME"
-                )
-            )
-            calendarDao.insertEvents(sampleEvents)
-            for (ev in sampleEvents) {
-                syncEventToFirestore(userId, ev)
-            }
-        }
+        // Production: New users start with a clean schedule; events sync from real Google Calendar or manual creation.
+    }
 
     suspend fun findSuggestedFocusSlot(userId: String, dayMillis: Long): FocusTimeSlot? = withContext(Dispatchers.IO) {
         val (startOfDay, endOfDay) = getDayBounds(dayMillis)

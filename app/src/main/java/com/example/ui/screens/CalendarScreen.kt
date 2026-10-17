@@ -84,14 +84,15 @@ fun CalendarScreen(
     onSelectDay: (Long) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var blockedDayIndices by remember { mutableStateOf(setOf<Int>()) }
     var showAddEventDialog by remember { mutableStateOf(false) }
+    var isBlockingTime by remember { mutableStateOf(false) }
 
     val timeFormatter = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
     val monthFormatter = remember { SimpleDateFormat("MMMM yyyy", Locale.getDefault()) }
 
-    // Dynamically compute the current 7 days of this week
-    val (_, daysList) = remember {
+    // Dynamically compute the current 7 days of this week, keyed by day of year so midnight updates cleanly
+    val currentDayOfYear = Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
+    val (_, daysList) = remember(currentDayOfYear) {
         val cal = Calendar.getInstance()
         val monthStr = monthFormatter.format(cal.time).uppercase()
         val dayOfWeekToday = cal.get(Calendar.DAY_OF_WEEK)
@@ -127,10 +128,6 @@ fun CalendarScreen(
         monthFormatter.format(cal.time).uppercase()
     }
 
-    val hasFocusEventToday = remember(events) {
-        events.any { it.eventType == "FOCUS_TIME" || it.title.contains("focus", ignoreCase = true) }
-    }
-    val hasBlockedSuggestedTime = hasFocusEventToday || blockedDayIndices.contains(selectedDayIndex)
     val suggestedSlot = remember(events, selectedDayIndex) {
         val baseCal = Calendar.getInstance().apply { timeInMillis = selectedDayMillis }
         val sortedEvents = events.sortedBy { it.startEpochMillis }
@@ -176,6 +173,18 @@ fun CalendarScreen(
             }
 
             Triple(foundStart, foundEnd, foundDuration)
+        }
+    }
+
+    val suggestedStart = suggestedSlot.first
+    val suggestedEnd = suggestedSlot.second
+    val suggestedDuration = suggestedSlot.third
+
+    val hasBlockedSuggestedTime = remember(events, suggestedStart, suggestedEnd) {
+        events.any { event ->
+            event.eventType == "FOCUS_TIME" ||
+            event.title.contains("focus", ignoreCase = true) ||
+            (event.startEpochMillis < suggestedEnd && event.endEpochMillis > suggestedStart)
         }
     }
 
@@ -541,10 +550,12 @@ fun CalendarScreen(
 
                 Button(
                     onClick = {
-                        blockedDayIndices = blockedDayIndices + selectedDayIndex
-                        onBlockFocusTime(suggestedStart, suggestedEnd, "Deep focus session")
+                        if (!isBlockingTime && !hasBlockedSuggestedTime) {
+                            isBlockingTime = true
+                            onBlockFocusTime(suggestedStart, suggestedEnd, "Deep focus session")
+                        }
                     },
-                    enabled = !hasBlockedSuggestedTime,
+                    enabled = !hasBlockedSuggestedTime && !isBlockingTime,
                     shape = RoundedCornerShape(100.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (hasBlockedSuggestedTime) Color(0xFFE0E0E0) else NudgyPrimary

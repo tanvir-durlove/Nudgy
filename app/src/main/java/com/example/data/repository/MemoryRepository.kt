@@ -55,16 +55,7 @@ class MemoryRepository(
     }
 
     suspend fun checkAndSeedInitialMemory(userId: String) = withContext(Dispatchers.IO) {
-        val current = memoryDao.getMemoriesFlow(userId).first()
-        if (current.isEmpty()) {
-            val seed = NudgyMemoryEntity(
-                id = "seed_memory_1",
-                userId = userId,
-                content = "You prefer focus time in the morning and studying at 7 PM."
-            )
-            memoryDao.insertMemory(seed)
-            syncMemoryToFirestore(userId, seed)
-        }
+        // Production: Memories are authored exclusively by user interactions.
     }
 
     fun startCloudSync(userId: String) {

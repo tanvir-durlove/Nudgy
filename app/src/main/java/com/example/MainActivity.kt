@@ -177,9 +177,6 @@ fun NudgyMainFlow(
         val currentUser = user!!
 
         LaunchedEffect(currentUser.uid) {
-            taskRepository.checkAndSeedInitialData(currentUser.uid)
-            calendarRepository.checkAndSeedInitialEvents(currentUser.uid)
-            memoryRepository.checkAndSeedInitialMemory(currentUser.uid)
             chatRepository.checkAndSeedWelcomeMessage(currentUser.uid, currentUser.displayName)
             taskRepository.startCloudSync(currentUser.uid)
             memoryRepository.startCloudSync(currentUser.uid)
@@ -499,15 +496,6 @@ fun NudgyAppScaffold(
                             onAddEvent = { title, start, end, loc, type ->
                                 scope.launch {
                                     calendarRepository.addEvent(user.uid, title, start, end, loc, type)
-                                    taskRepository.createTask(
-                                        userId = user.uid,
-                                        title = title,
-                                        description = "Calendar Event ($type)",
-                                        dueEpochMillis = start,
-                                        priority = Priority.HIGH,
-                                        category = TaskCategory.WORK,
-                                        reminderSet = true
-                                    )
                                 }
                             },
                             onDeleteEvent = { eventId ->

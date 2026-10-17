@@ -58,7 +58,6 @@ class AuthManager(private val context: Context) {
             if (user != null) {
                 prefs.edit()
                     .putString(KEY_ACTIVE_USER_ID, user.uid)
-                    .putBoolean(KEY_IS_GUEST, false)
                     .putBoolean(KEY_EXPLICITLY_SIGNED_OUT, false)
                     .apply()
                 _userState.value = NudgyUser(
@@ -67,7 +66,7 @@ class AuthManager(private val context: Context) {
                     email = resolveEmail(user.email),
                     photoUrl = user.photoUrl?.toString()
                 )
-            } else if (!prefs.getBoolean(KEY_IS_GUEST, false)) {
+            } else {
                 _userState.value = null
             }
         }
@@ -78,7 +77,6 @@ class AuthManager(private val context: Context) {
         if (user != null) {
             prefs.edit()
                 .putString(KEY_ACTIVE_USER_ID, user.uid)
-                .putBoolean(KEY_IS_GUEST, false)
                 .apply()
             return NudgyUser(
                 uid = user.uid,
@@ -92,15 +90,15 @@ class AuthManager(private val context: Context) {
 
     private fun getWebClientId(): String {
         return try {
-            val resId = context.resources.getIdentifier(
+            var resId = context.resources.getIdentifier(
                 "default_web_client_id", "string", context.packageName
             )
-            if (resId != 0) {
-                context.getString(resId)
-            } else {
-                // Direct fallback to provisioned OAuth Web Client ID from google-services.json
-                "55985970746-jcg96ghtodpq0c448p7gi1fpqt8hrqac.apps.googleusercontent.com"
+            if (resId == 0) {
+                resId = context.resources.getIdentifier(
+                    "default_web_client_id", "string", "com.example"
+                )
             }
+            if (resId != 0) context.getString(resId) else "55985970746-jcg96ghtodpq0c448p7gi1fpqt8hrqac.apps.googleusercontent.com"
         } catch (e: Exception) {
             Log.e(TAG, "Missing default_web_client_id string resource", e)
             "55985970746-jcg96ghtodpq0c448p7gi1fpqt8hrqac.apps.googleusercontent.com"
@@ -207,7 +205,6 @@ class AuthManager(private val context: Context) {
                             email = resolveEmail(user.email),
                             photoUrl = user.photoUrl?.toString()
                         )
-                        _isLoading.value = false
                         withContext(Dispatchers.Main) {
                             onSuccess()
                         }
@@ -218,16 +215,22 @@ class AuthManager(private val context: Context) {
                     throw IllegalStateException("Unexpected credential type: ${credential.type}")
                 }
             } catch (e: GetCredentialCancellationException) {
-                Log.w(TAG, "Google Sign-In flow cancelled or dismissed: ${e.message}", e)
-                _isLoading.value = false
+                Log.w(TAG, "Google Sign-In flow cancelled or dismissed: ${e.message}")
             } catch (e: Exception) {
                 Log.e(TAG, "Google Sign-In failed", e)
-                val msg = e.localizedMessage ?: "Sign in failed"
+                val msg = when {
+                    e.message?.contains("16") == true || e.message?.contains("10") == true ->
+                        "Sign-in failed. Please verify Google Play Services and internet connection."
+                    e.message?.contains("No credential") == true ->
+                        "No Google account found on device. Please sign in to Google first."
+                    else -> e.localizedMessage ?: "Sign in failed. Please try again."
+                }
                 _errorMessage.value = msg
-                _isLoading.value = false
                 withContext(Dispatchers.Main) {
                     onError(msg)
                 }
+            } finally {
+                _isLoading.value = false
             }
         }
     }

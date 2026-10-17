@@ -38,7 +38,11 @@ class ClientIntentPreFilter(
     private val calendarRepository: CalendarRepository,
     private val memoryRepository: MemoryRepository
 ) {
-    private val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+    private fun formatTime(millis: Long): String =
+        SimpleDateFormat("h:mm a", Locale.getDefault()).format(java.util.Date(millis))
+
+    private fun formatTime(date: java.util.Date): String =
+        SimpleDateFormat("h:mm a", Locale.getDefault()).format(date)
 
     suspend fun tryHandle(
         userId: String,
@@ -50,38 +54,49 @@ class ClientIntentPreFilter(
         val cleaned = cleanUserPrompt(trimmed)
         val lower = cleaned.lowercase()
 
-        // 1. Bengali: "John-কে কল করার কথা মনে করিয়ে দিও" (From User Brief)
-        if (cleaned.contains("John", ignoreCase = true) && (cleaned.contains("কল") || cleaned.contains("মনে করিয়ে"))) {
+        // 1. Bengali: Dynamic Call / Reminder Intent (e.g. "রাহুলকে কল করার কথা মনে করিয়ে দিও")
+        if (cleaned.contains("মনে করিয়ে") || (cleaned.contains("কল") && cleaned.contains("করার"))) {
+            val isTomorrow = cleaned.contains("আগামীকাল") || cleaned.contains("কাল")
             val cal = Calendar.getInstance()
-            if (cleaned.contains("আগামীকাল") || cleaned.contains("কাল")) {
+            if (isTomorrow) {
                 cal.add(Calendar.DAY_OF_YEAR, 1)
             }
-            cal.set(Calendar.HOUR_OF_DAY, 15) // 3 PM
-            cal.set(Calendar.MINUTE, 0)
-            cal.set(Calendar.SECOND, 0)
+            // Check for explicit time like "৩টায়", "3 PM"
+            val timeMatcher = Pattern.compile("(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?\\s*(?:টায়|টায়)?)", Pattern.CASE_INSENSITIVE).matcher(cleaned)
+            if (timeMatcher.find()) {
+                val rawTime = timeMatcher.group(1)?.replace("টায়", "")?.replace("টায়", "")?.trim() ?: "3 PM"
+                parseTimeIntoCalendar(rawTime, cal)
+            } else {
+                cal.set(Calendar.HOUR_OF_DAY, 15) // default 3 PM
+                cal.set(Calendar.MINUTE, 0)
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+            }
+
+            var title = cleaned
+                .replace("মনে করিয়ে দিও", "")
+                .replace("মনে করিয়ে দাও", "")
+                .replace("কথা", "")
+                .replace("আগামীকাল", "")
+                .replace("কাল", "")
+                .trim()
+            if (title.isBlank()) title = "জরুরি কল ও ফলোআপ"
 
             val task = taskRepository.createTask(
                 userId = userId,
-                title = "Call John about the launch",
+                title = title,
                 dueEpochMillis = cal.timeInMillis,
                 priority = Priority.HIGH,
                 category = TaskCategory.WORK,
                 reminderSet = true
             )
-            val event = calendarRepository.addEvent(
-                userId = userId,
-                title = "Call John about the launch",
-                startEpochMillis = cal.timeInMillis,
-                endEpochMillis = cal.timeInMillis + (30 * 60 * 1000L),
-                locationOrLink = "Phone Call",
-                eventType = "MEETING"
-            )
+            val dayLabel = if (isTomorrow) "আগামীকাল" else "আজ"
+            val formatted = formatTime(cal.timeInMillis)
             return PreFilterResult.Handled(
-                responseText = "Done! কাল বিকেল ৩টায় মনে করিয়ে দেব এবং ক্যালেন্ডারে যোগ করেছি।",
+                responseText = "ঠিক আছে! $dayLabel $formatted সময়ে \"$title\" মনে করিয়ে দেব। 🔔",
                 createdTask = task,
-                createdEvent = event,
                 actionType = ChatActionType.TASK_PREVIEW,
-                quickSuggestions = listOf("Plan my day", "Show today's tasks", "Find free time")
+                quickSuggestions = listOf("দিনের প্ল্যান", "আজকের কাজ", "ফাঁকা সময়")
             )
         }
 
@@ -94,7 +109,7 @@ class ClientIntentPreFilter(
             } else {
                 todayTasks.joinToString("\n") { task ->
                     val status = if (task.isCompleted) "✓" else "○"
-                    "$status ${task.title} (${timeFormat.format(task.dueDateEpochMillis)})"
+                    "$status ${task.title} (${formatTime(task.dueDateEpochMillis)})"
                 }
             }
             return PreFilterResult.Handled(
@@ -118,14 +133,21 @@ class ClientIntentPreFilter(
         }
 
         // 4. Flexible Schedule / Meeting / Appointment Intent (English & Bengali)
-        // Matches: "schedule meeting", "put a schedule", "schedule a call", "set a schedule", "appointment", "meeting tomorrow at 3pm"
-        val isMeetingOrScheduleIntent = lower.contains("meeting") ||
-                lower.contains("schedule") ||
-                lower.contains("appointment") ||
-                lower.contains("মিটিং") ||
-                lower.contains("শিডিউল") ||
+        // Guard against cancellation/deletion commands ("cancel appointment", "delete meeting")
+        val isCancellation = lower.contains("cancel") || lower.contains("delete") ||
+                lower.contains("remove") || cleaned.contains("বাতিল") || cleaned.contains("মুছে")
+        val isMeetingOrScheduleIntent = !isCancellation && (
+                lower.contains("schedule a meeting") ||
+                lower.contains("schedule meeting") ||
+                lower.contains("book meeting") ||
+                lower.contains("set a meeting") ||
+                lower.contains("new appointment") ||
+                lower.contains("book an appointment") ||
+                lower.contains("schedule appointment") ||
+                lower.contains("মিটিং শিডিউল") ||
                 lower.startsWith("call with") ||
                 lower.startsWith("sync with")
+        )
 
         if (isMeetingOrScheduleIntent && !lower.contains("what's on my schedule") && !lower.contains("show schedule")) {
             val isTomorrow = lower.contains("tomorrow") || cleaned.contains("কাল") || cleaned.contains("আগামীকাল")
@@ -204,7 +226,7 @@ class ClientIntentPreFilter(
             )
 
             val dayLabel = if (isTomorrow) "tomorrow" else "today"
-            val formattedTime = timeFormat.format(startMillis)
+            val formattedTime = formatTime(startMillis)
             return PreFilterResult.Handled(
                 responseText = "Done! Scheduled \"$meetingTitle\" for $dayLabel at $formattedTime on both your calendar and task list. 📅🔔",
                 createdTask = createdTask,
@@ -228,7 +250,7 @@ class ClientIntentPreFilter(
                 reminderSet = true
             )
             return PreFilterResult.Handled(
-                responseText = "Done! I've set a reminder for 30 minutes from now (at ${timeFormat.format(cal.timeInMillis)}). 🔔",
+                responseText = "Done! I've set a reminder for 30 minutes from now (at ${formatTime(cal.timeInMillis)}). 🔔",
                 createdTask = reminderTask,
                 actionType = ChatActionType.TASK_PREVIEW,
                 quickSuggestions = listOf("Plan my day", "Show today's tasks")
@@ -251,7 +273,7 @@ class ClientIntentPreFilter(
             }
             val durationMinutes = suggestedSlot?.durationMinutes ?: 45
             val endMillis = suggestedSlot?.endEpochMillis ?: (startMillis + (durationMinutes * 60 * 1000L))
-            val timeRangeText = "${timeFormat.format(java.util.Date(startMillis))} – ${timeFormat.format(java.util.Date(endMillis))}"
+            val timeRangeText = "${formatTime(java.util.Date(startMillis))} – ${formatTime(java.util.Date(endMillis))}"
             val reason = suggestedSlot?.reason ?: "$durationMinutes minutes free in your schedule"
 
             return PreFilterResult.Handled(
@@ -278,7 +300,7 @@ class ClientIntentPreFilter(
             }
             val durationMinutes = suggestedSlot?.durationMinutes ?: 45
             val endMillis = suggestedSlot?.endEpochMillis ?: (startMillis + (durationMinutes * 60 * 1000L))
-            val timeRangeText = "${timeFormat.format(java.util.Date(startMillis))} – ${timeFormat.format(java.util.Date(endMillis))}"
+            val timeRangeText = "${formatTime(java.util.Date(startMillis))} – ${formatTime(java.util.Date(endMillis))}"
 
             val event = calendarRepository.blockFocusTime(userId, startMillis, endMillis, "Focus Time (Deep Work)")
             val task = taskRepository.createTask(
@@ -303,7 +325,7 @@ class ClientIntentPreFilter(
             val firstTaskTitle = pending.firstOrNull()?.title ?: "Review product proposal"
             val meetingText = if (events.isNotEmpty()) {
                 val firstEvent = events.first()
-                "meeting '${firstEvent.title}' at ${timeFormat.format(firstEvent.startEpochMillis)}"
+                "meeting '${firstEvent.title}' at ${formatTime(firstEvent.startEpochMillis)}"
             } else {
                 "no conflicting meetings"
             }
@@ -320,7 +342,7 @@ class ClientIntentPreFilter(
             }
             val durationMinutes = suggestedSlot?.durationMinutes ?: 45
             val endFocus = suggestedSlot?.endEpochMillis ?: (startFocus + (durationMinutes * 60 * 1000L))
-            val focusRangeText = "${timeFormat.format(java.util.Date(startFocus))} – ${timeFormat.format(java.util.Date(endFocus))}"
+            val focusRangeText = "${formatTime(java.util.Date(startFocus))} – ${formatTime(java.util.Date(endFocus))}"
 
             return PreFilterResult.Handled(
                 responseText = "Here is your plan today: Start with '$firstTaskTitle'. You have $meetingText, and an open $durationMinutes-minute focus window ($focusRangeText).",
@@ -341,7 +363,7 @@ class ClientIntentPreFilter(
             } else {
                 todayTasks.joinToString("\n") {
                     val check = if (it.isCompleted) "✓" else "○"
-                    "$check ${it.title} (${timeFormat.format(it.dueDateEpochMillis)})"
+                    "$check ${it.title} (${formatTime(it.dueDateEpochMillis)})"
                 }
             }
             return PreFilterResult.Handled(
@@ -350,17 +372,21 @@ class ClientIntentPreFilter(
             )
         }
 
-        // 10. Memory command: "Remember that [fact]" / "Remember [fact]" / "মনে রাখো [fact]"
-        val rememberPattern = Pattern.compile("(?:remember that|remember|note that|মনে রাখো)\\s+(.+)$", Pattern.CASE_INSENSITIVE)
-        val rememberMatcher = rememberPattern.matcher(cleaned)
-        if (rememberMatcher.find()) {
-            val fact = rememberMatcher.group(1)?.trim() ?: ""
-            if (fact.isNotBlank()) {
-                memoryRepository.addMemory(userId, fact)
-                return PreFilterResult.Handled(
-                    responseText = "Noted! I've saved that to memory: \"$fact\". I'll keep this in mind as your productivity partner! 🧠✨",
-                    quickSuggestions = listOf("What do you remember about me?", "Plan my day", "Show today's tasks")
-                )
+        // 10. Memory command: "Remember that [fact]" / "Note that [fact]" / "মনে রাখো [fact]"
+        // Explicitly guard against actionable tasks like "remember to buy milk" or "মনে করিয়ে দিও"
+        val isActionableTask = lower.startsWith("remember to ") || lower.contains("মনে করিয়ে")
+        if (!isActionableTask) {
+            val rememberPattern = Pattern.compile("^(?:remember that|note that|keep in mind that|মনে রাখো|মনে রেখো)\\s+(.+)$", Pattern.CASE_INSENSITIVE)
+            val rememberMatcher = rememberPattern.matcher(cleaned)
+            if (rememberMatcher.find()) {
+                val fact = rememberMatcher.group(1)?.trim() ?: ""
+                if (fact.isNotBlank()) {
+                    memoryRepository.addMemory(userId, fact)
+                    return PreFilterResult.Handled(
+                        responseText = "Noted! I've saved that to memory: \"$fact\". I'll keep this in mind as your productivity partner! 🧠✨",
+                        quickSuggestions = listOf("What do you remember about me?", "Plan my day", "Show today's tasks")
+                    )
+                }
             }
         }
 
@@ -492,8 +518,9 @@ class ClientIntentPreFilter(
                 )
             } else null
 
-            val formatted = timeFormat.format(cal.timeInMillis)
-            val dayLabel = if (isTomorrow) "tomorrow at" else "today at"
+            val formatted = formatTime(cal.timeInMillis)
+            val isNowTomorrow = cal.get(Calendar.DAY_OF_YEAR) != Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
+            val dayLabel = if (isNowTomorrow) "tomorrow at" else "today at"
             return PreFilterResult.Handled(
                 responseText = "Done! Added '$cleanTitle' for $dayLabel $formatted with a reminder set. 🔔",
                 createdTask = task,
@@ -503,8 +530,15 @@ class ClientIntentPreFilter(
             )
         }
 
-        // 15. Intelligent Fallback for Any Natural Language Action Phrase (e.g. "Doctor appointment 5pm", "Gym session tomorrow")
-        if (lower.contains(" at ") || lower.contains("pm") || lower.contains("am") || lower.contains("tomorrow") || lower.contains("today")) {
+        // 15. Intelligent Fallback for Specific Scheduled Events (e.g. "Doctor appointment 5pm", "Gym session tomorrow at 6am")
+        // Strictly require valid time regex and actionable nouns so casual phrases like "I am busy" or names like "Sam" are not hijacked!
+        val hasTimePattern = Pattern.compile("(?i)\\b\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)\\b").matcher(cleaned).find()
+        val hasActionContext = lower.contains("appointment") || lower.contains("session") ||
+                lower.contains("doctor") || lower.contains("dentist") || lower.contains("workout") ||
+                lower.contains("gym") || lower.contains("flight") || lower.contains("pickup") ||
+                lower.contains("class") || lower.contains("practice")
+
+        if (hasTimePattern && hasActionContext) {
             val cal = Calendar.getInstance()
             val isTomorrow = lower.contains("tomorrow")
             if (isTomorrow) cal.add(Calendar.DAY_OF_YEAR, 1)
@@ -542,8 +576,9 @@ class ClientIntentPreFilter(
                     locationOrLink = "Personal",
                     eventType = "EVENT"
                 )
-                val formatted = timeFormat.format(cal.timeInMillis)
-                val dayLabel = if (isTomorrow) "tomorrow at" else "today at"
+                val formatted = formatTime(cal.timeInMillis)
+                val isNowTomorrow = cal.get(Calendar.DAY_OF_YEAR) != Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
+                val dayLabel = if (isNowTomorrow) "tomorrow at" else "today at"
                 return PreFilterResult.Handled(
                     responseText = "Got it! I've scheduled '$fallbackTitle' for $dayLabel $formatted on your task list and calendar. 🔔📅",
                     createdTask = task,
@@ -589,5 +624,10 @@ class ClientIntentPreFilter(
         cal.set(Calendar.MINUTE, minute)
         cal.set(Calendar.SECOND, 0)
         cal.set(Calendar.MILLISECOND, 0)
+
+        // Prevent scheduling reminders in the past: roll over to tomorrow
+        if (cal.timeInMillis <= System.currentTimeMillis()) {
+            cal.add(Calendar.DAY_OF_YEAR, 1)
+        }
     }
 }

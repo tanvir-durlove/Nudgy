@@ -16,15 +16,20 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
         if (action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_MY_PACKAGE_REPLACED) {
-            Log.d(TAG, "Device rebooted or package replaced ($action); rescheduling active reminders...")
+            val activeUserId = com.example.auth.AuthManager.getActiveUserId(context)
+            if (activeUserId.isBlank()) {
+                Log.d(TAG, "No active user logged in on boot, skipping reminder restoration.")
+                return
+            }
+            Log.d(TAG, "Device rebooted or package replaced ($action); restoring reminders for user $activeUserId...")
             val pendingResult = goAsync()
             CoroutineScope(Dispatchers.IO).launch {
                 try {
                     val db = NudgyDatabase.getInstance(context)
                     val reminderManager = ReminderManager(context)
                     val now = System.currentTimeMillis()
-                    val tasks = db.taskDao().getPendingTasksWithReminders(now)
-                    Log.d(TAG, "Found ${tasks.size} pending tasks to restore")
+                    val tasks = db.taskDao().getPendingTasksWithRemindersForUser(activeUserId, now)
+                    Log.d(TAG, "Found ${tasks.size} pending tasks to restore for active user")
                     for (task in tasks) {
                         val triggerTime = task.reminderEpochMillis ?: task.dueDateEpochMillis
                         if (triggerTime > now) {

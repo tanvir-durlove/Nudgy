@@ -172,53 +172,62 @@ class WakeWordForegroundService : Service() {
             val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
             val bufferSize = (minBufferSize * 2).coerceAtLeast(2048)
 
-            try {
-                audioRecord = AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
-                    sampleRate,
-                    channelConfig,
-                    audioFormat,
-                    bufferSize
-                )
+            var consecutiveFailures = 0
+            while (isRunning && isActive) {
+                try {
+                    audioRecord = AudioRecord(
+                        MediaRecorder.AudioSource.MIC,
+                        sampleRate,
+                        channelConfig,
+                        audioFormat,
+                        bufferSize
+                    )
 
-                if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-                    Log.w(TAG, "AudioRecord could not initialize, falling back to periodic speech check")
-                    return@launch
-                }
-
-                audioRecord?.startRecording()
-                val buffer = ShortArray(1024)
-
-                while (isRunning && isActive) {
-                    if (isRecognizing) {
-                        delay(500)
+                    if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+                        Log.w(TAG, "AudioRecord not initialized, retrying in 3s...")
+                        consecutiveFailures++
+                        delay((consecutiveFailures * 1000L).coerceAtMost(10000L))
                         continue
                     }
 
-                    val read = synchronized(audioLock) {
-                        if (!isRunning) 0 else audioRecord?.read(buffer, 0, buffer.size) ?: 0
-                    }
-                    if (read > 0) {
-                        var sum = 0.0
-                        for (i in 0 until read) {
-                            sum += buffer[i] * buffer[i]
-                        }
-                        val rms = sqrt(sum / read)
+                    audioRecord?.startRecording()
+                    val buffer = ShortArray(1024)
+                    consecutiveFailures = 0
 
-                        // Speech onset threshold (~1500-2000 RMS)
-                        if (rms > 1600) {
-                            Log.d(TAG, "Voice onset detected (RMS=$rms), checking for 'Hey Nudgy'...")
-                            pauseAudioRecordAndRecognize()
+                    while (isRunning && isActive) {
+                        if (isRecognizing) {
+                            delay(500)
+                            continue
                         }
+
+                        val read = synchronized(audioLock) {
+                            if (!isRunning) 0 else audioRecord?.read(buffer, 0, buffer.size) ?: 0
+                        }
+                        if (read > 0) {
+                            var sum = 0.0
+                            for (i in 0 until read) {
+                                sum += buffer[i] * buffer[i]
+                            }
+                            val rms = sqrt(sum / read)
+
+                            // Speech onset threshold (~1500-2000 RMS)
+                            if (rms > 1600) {
+                                Log.d(TAG, "Voice onset detected (RMS=$rms), checking for 'Hey Nudgy'...")
+                                pauseAudioRecordAndRecognize()
+                            }
+                        }
+                        delay(80)
                     }
-                    delay(80)
+                } catch (e: SecurityException) {
+                    Log.e(TAG, "Missing RECORD_AUDIO permission: ${e.message}")
+                    break
+                } catch (e: Exception) {
+                    consecutiveFailures++
+                    Log.e(TAG, "Wake word loop glitch (retry $consecutiveFailures): ${e.message}")
+                    delay((consecutiveFailures * 1000L).coerceAtMost(10000L))
+                } finally {
+                    releaseAudioRecord()
                 }
-            } catch (e: SecurityException) {
-                Log.e(TAG, "Missing RECORD_AUDIO permission: ${e.message}")
-            } catch (e: Exception) {
-                Log.e(TAG, "Wake word loop error", e)
-            } finally {
-                releaseAudioRecord()
             }
         }
     }
