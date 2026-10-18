@@ -53,23 +53,51 @@ class AuthManager(private val context: Context) {
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     init {
+        val isGuest = prefs.getBoolean(KEY_IS_GUEST, false)
+        val explicitlySignedOut = prefs.getBoolean(KEY_EXPLICITLY_SIGNED_OUT, false)
+        if (isGuest && !explicitlySignedOut && auth?.currentUser == null) {
+            _userState.value = NudgyUser(
+                uid = GUEST_USER_ID,
+                displayName = "Guest User",
+                email = "guest@nudgy.local",
+                isGuest = true
+            )
+        }
+
         auth?.addAuthStateListener { firebaseAuth ->
             val user = firebaseAuth.currentUser
             if (user != null) {
                 prefs.edit()
                     .putString(KEY_ACTIVE_USER_ID, user.uid)
+                    .putBoolean(KEY_IS_GUEST, false)
                     .putBoolean(KEY_EXPLICITLY_SIGNED_OUT, false)
                     .apply()
                 _userState.value = NudgyUser(
                     uid = user.uid,
                     displayName = resolveDisplayName(user.displayName, user.email),
                     email = resolveEmail(user.email),
-                    photoUrl = user.photoUrl?.toString()
+                    photoUrl = user.photoUrl?.toString(),
+                    isGuest = false
                 )
-            } else {
+            } else if (!prefs.getBoolean(KEY_IS_GUEST, false)) {
                 _userState.value = null
             }
         }
+    }
+
+    fun continueAsGuest() {
+        val guest = NudgyUser(
+            uid = GUEST_USER_ID,
+            displayName = "Guest User",
+            email = "guest@nudgy.local",
+            isGuest = true
+        )
+        prefs.edit()
+            .putString(KEY_ACTIVE_USER_ID, GUEST_USER_ID)
+            .putBoolean(KEY_IS_GUEST, true)
+            .putBoolean(KEY_EXPLICITLY_SIGNED_OUT, false)
+            .apply()
+        _userState.value = guest
     }
 
     private fun extractUser(): NudgyUser? {
@@ -90,15 +118,18 @@ class AuthManager(private val context: Context) {
 
     private fun getWebClientId(): String {
         return try {
-            var resId = context.resources.getIdentifier(
+            val resId = context.resources.getIdentifier(
                 "default_web_client_id", "string", context.packageName
             )
-            if (resId == 0) {
-                resId = context.resources.getIdentifier(
-                    "default_web_client_id", "string", "com.example"
-                )
+            if (resId != 0) {
+                context.getString(resId)
+            } else {
+                try {
+                    context.getString(R.string.default_web_client_id)
+                } catch (e: Exception) {
+                    "55985970746-jcg96ghtodpq0c448p7gi1fpqt8hrqac.apps.googleusercontent.com"
+                }
             }
-            if (resId != 0) context.getString(resId) else "55985970746-jcg96ghtodpq0c448p7gi1fpqt8hrqac.apps.googleusercontent.com"
         } catch (e: Exception) {
             Log.e(TAG, "Missing default_web_client_id string resource", e)
             "55985970746-jcg96ghtodpq0c448p7gi1fpqt8hrqac.apps.googleusercontent.com"
@@ -117,6 +148,16 @@ class AuthManager(private val context: Context) {
         val explicitlySignedOut = prefs.getBoolean(KEY_EXPLICITLY_SIGNED_OUT, false)
         if (explicitlySignedOut) {
             Log.d(TAG, "Silent sign-in skipped: user explicitly signed out")
+            return
+        }
+
+        if (prefs.getBoolean(KEY_IS_GUEST, false)) {
+            _userState.value = NudgyUser(
+                uid = GUEST_USER_ID,
+                displayName = "Guest User",
+                email = "guest@nudgy.local",
+                isGuest = true
+            )
             return
         }
 
@@ -145,7 +186,12 @@ class AuthManager(private val context: Context) {
                     val authResult = firebaseAuth.signInWithCredential(authCredential).await()
                     val user = authResult.user
                     if (user != null) {
-                        prefs.edit().putBoolean(KEY_EXPLICITLY_SIGNED_OUT, false).apply()
+                        prefs.edit()
+                            .putBoolean(KEY_EXPLICITLY_SIGNED_OUT, false)
+                            .putBoolean(KEY_IS_GUEST, false)
+                            .putString(KEY_ACTIVE_USER_ID, user.uid)
+                            .apply()
+                        migrateGuestDataToUser(user.uid)
                         syncUserToFirestore(user.uid, user.displayName, user.email, user.photoUrl?.toString())
                     }
                 }
@@ -176,8 +222,18 @@ class AuthManager(private val context: Context) {
         _isLoading.value = true
         _errorMessage.value = null
 
+        val googleIdOption = GetGoogleIdOption.Builder()
+            .setFilterByAuthorizedAccounts(false)
+            .setServerClientId(clientId)
+            .setAutoSelectEnabled(false)
+            .build()
+
         val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
-        val request = GetCredentialRequest.Builder().addCredentialOption(signInOption).build()
+
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(googleIdOption)
+            .addCredentialOption(signInOption)
+            .build()
 
         val firebaseAuth = auth ?: run {
             val error = "Google Sign-In unavailable: Firebase is not configured"
@@ -197,13 +253,19 @@ class AuthManager(private val context: Context) {
                     val user = authResult.user
 
                     if (user != null) {
-                        prefs.edit().putBoolean(KEY_EXPLICITLY_SIGNED_OUT, false).apply()
+                        prefs.edit()
+                            .putBoolean(KEY_EXPLICITLY_SIGNED_OUT, false)
+                            .putBoolean(KEY_IS_GUEST, false)
+                            .putString(KEY_ACTIVE_USER_ID, user.uid)
+                            .apply()
+                        migrateGuestDataToUser(user.uid)
                         syncUserToFirestore(user.uid, user.displayName, user.email, user.photoUrl?.toString())
                         _userState.value = NudgyUser(
                             uid = user.uid,
                             displayName = resolveDisplayName(user.displayName, user.email),
                             email = resolveEmail(user.email),
-                            photoUrl = user.photoUrl?.toString()
+                            photoUrl = user.photoUrl?.toString(),
+                            isGuest = false
                         )
                         withContext(Dispatchers.Main) {
                             onSuccess()
@@ -220,10 +282,10 @@ class AuthManager(private val context: Context) {
                 Log.e(TAG, "Google Sign-In failed", e)
                 val msg = when {
                     e.message?.contains("16") == true || e.message?.contains("10") == true ->
-                        "Sign-in failed. Please verify Google Play Services and internet connection."
+                        "No Google account or Play Services error on this device/emulator. Tap 'Continue as Guest' below to start instantly!"
                     e.message?.contains("No credential") == true ->
-                        "No Google account found on device. Please sign in to Google first."
-                    else -> e.localizedMessage ?: "Sign in failed. Please try again."
+                        "No Google account found on this device. You can tap 'Continue as Guest' below!"
+                    else -> e.localizedMessage ?: "Sign-in not completed. You can tap 'Continue as Guest' below."
                 }
                 _errorMessage.value = msg
                 withContext(Dispatchers.Main) {
@@ -236,6 +298,25 @@ class AuthManager(private val context: Context) {
     }
 
     /**
+     * Migrate local guest-created tasks, memories, calendar events, and chat messages
+     * to the authenticated user account so nothing is lost.
+     */
+    suspend fun migrateGuestDataToUser(newUserId: String) = withContext(Dispatchers.IO) {
+        if (newUserId.isBlank() || newUserId == GUEST_USER_ID) return@withContext
+        try {
+            val db = NudgyDatabase.getInstance(context)
+            db.taskDao().reassignUser(GUEST_USER_ID, newUserId)
+            db.memoryDao().reassignUser(GUEST_USER_ID, newUserId)
+            db.chatDao().reassignUser(GUEST_USER_ID, newUserId)
+            db.calendarDao().reassignUser(GUEST_USER_ID, newUserId)
+            db.dailyBriefDao().reassignUser(GUEST_USER_ID, newUserId)
+            Log.d(TAG, "Migrated all local guest data to user $newUserId")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error migrating guest data", e)
+        }
+    }
+
+    /**
      * Store or update user metadata in Firestore
      */
     private suspend fun syncUserToFirestore(
@@ -244,6 +325,7 @@ class AuthManager(private val context: Context) {
         email: String?,
         photoUrl: String?
     ) = withContext(Dispatchers.IO) {
+        if (uid == GUEST_USER_ID) return@withContext
         try {
             val dbId = context.getString(R.string.firestore_database_id)
             val db = FirebaseFirestore.getInstance(dbId)
@@ -401,6 +483,7 @@ class AuthManager(private val context: Context) {
         const val KEY_IS_GUEST = "is_guest"
         const val KEY_ACTIVE_USER_ID = "active_user_id"
         const val KEY_EXPLICITLY_SIGNED_OUT = "nudgy_explicitly_signed_out"
+        const val GUEST_USER_ID = "guest_user_local"
 
         fun resolveDisplayName(displayName: String?, email: String?): String {
             return displayName?.takeIf { it.isNotBlank() }

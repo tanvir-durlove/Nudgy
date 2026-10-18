@@ -82,6 +82,9 @@ interface TaskDao {
 
     @Query("DELETE FROM tasks WHERE userId = :userId")
     suspend fun clearTasksForUser(userId: String)
+
+    @Query("UPDATE tasks SET userId = :toUserId, isSyncedToCloud = 0 WHERE userId = :fromUserId")
+    suspend fun reassignUser(fromUserId: String, toUserId: String)
 }
 
 @Dao
@@ -115,6 +118,9 @@ interface CalendarDao {
 
     @Query("DELETE FROM calendar_events WHERE userId = :userId")
     suspend fun clearEventsForUser(userId: String)
+
+    @Query("UPDATE calendar_events SET userId = :toUserId WHERE userId = :fromUserId")
+    suspend fun reassignUser(fromUserId: String, toUserId: String)
 }
 
 @Dao
@@ -133,6 +139,9 @@ interface MemoryDao {
 
     @Query("DELETE FROM nudgy_memories WHERE userId = :userId")
     suspend fun clearMemoriesForUser(userId: String)
+
+    @Query("UPDATE nudgy_memories SET userId = :toUserId WHERE userId = :fromUserId")
+    suspend fun reassignUser(fromUserId: String, toUserId: String)
 }
 
 @Dao
@@ -145,6 +154,9 @@ interface DailyBriefDao {
 
     @Query("DELETE FROM daily_briefs WHERE userId = :userId")
     suspend fun clearBriefsForUser(userId: String)
+
+    @Query("UPDATE daily_briefs SET userId = :toUserId WHERE userId = :fromUserId")
+    suspend fun reassignUser(fromUserId: String, toUserId: String)
 }
 
 @Dao
@@ -160,4 +172,7 @@ interface ChatDao {
 
     @Query("DELETE FROM chat_messages WHERE userId = :userId")
     suspend fun clearMessages(userId: String)
+
+    @Query("UPDATE chat_messages SET userId = :toUserId WHERE userId = :fromUserId")
+    suspend fun reassignUser(fromUserId: String, toUserId: String)
 }

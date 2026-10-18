@@ -67,6 +67,7 @@ class WakeWordForegroundService : Service() {
     private lateinit var reminderManager: ReminderManager
     private lateinit var voiceManager: VoiceAssistantManager
     private lateinit var chatRepository: com.example.data.repository.ChatRepository
+    private val geminiClient = GeminiClient()
 
     override fun onCreate() {
         super.onCreate()
@@ -144,7 +145,7 @@ class WakeWordForegroundService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_nudgy_notification)
             .setContentTitle("Nudgy Always-On Voice")
             .setContentText(statusText)
             .setContentIntent(pendingIntent)
@@ -385,15 +386,6 @@ class WakeWordForegroundService : Service() {
 
             when (result) {
                 is PreFilterResult.Handled -> {
-                    result.createdTask?.let { created ->
-                        if (created.reminderSet) {
-                            reminderManager.scheduleReminder(
-                                taskId = created.id,
-                                taskTitle = created.title,
-                                triggerEpochMillis = created.dueDateEpochMillis
-                            )
-                        }
-                    }
                     val handledMsg = com.example.ui.screens.ChatMessage(
                         id = java.util.UUID.randomUUID().toString(),
                         senderIsUser = false,
@@ -412,26 +404,53 @@ class WakeWordForegroundService : Service() {
                     updateNotification("Executed: ${result.responseText.take(40)}...")
                 }
                 is PreFilterResult.Unhandled -> {
-                    // Direct task creation fallback
-                    val taskCal = java.util.Calendar.getInstance().apply { add(java.util.Calendar.HOUR_OF_DAY, 2) }
-                    val newTask = taskRepository.createTask(
-                        userId = currentUserId,
-                        title = command.replaceFirstChar { it.uppercase() },
-                        dueEpochMillis = taskCal.timeInMillis,
-                        reminderSet = true
-                    )
-                    val reply = "Got it! Added task '${newTask.title}' to your schedule."
-                    val fallbackMsg = com.example.ui.screens.ChatMessage(
-                        id = java.util.UUID.randomUUID().toString(),
-                        senderIsUser = false,
-                        text = reply,
-                        actionType = com.example.ui.screens.ChatActionType.TASK_PREVIEW,
-                        associatedTask = newTask
-                    )
-                    chatRepository.addMessage(currentUserId, fallbackMsg)
+                    val isExplicitTaskRequest = command.startsWith("add task", ignoreCase = true) ||
+                            command.startsWith("new task", ignoreCase = true) ||
+                            command.startsWith("create task", ignoreCase = true) ||
+                            command.startsWith("todo", ignoreCase = true) ||
+                            command.startsWith("remind me to", ignoreCase = true)
 
-                    voiceManager.speak(reply)
-                    updateNotification(reply)
+                    if (isExplicitTaskRequest) {
+                        val taskCal = java.util.Calendar.getInstance().apply { add(java.util.Calendar.HOUR_OF_DAY, 2) }
+                        val cleanTitle = command
+                            .replace(Regex("(?i)^(add task|new task|create task|todo|remind me to)\\s*"), "")
+                            .trim()
+                            .ifBlank { "New Task" }
+                            .replaceFirstChar { it.uppercase() }
+
+                        val newTask = taskRepository.createTask(
+                            userId = currentUserId,
+                            title = cleanTitle,
+                            dueEpochMillis = taskCal.timeInMillis,
+                            reminderSet = true
+                        )
+                        val reply = "Got it! Added task '$cleanTitle' to your schedule."
+                        val fallbackMsg = com.example.ui.screens.ChatMessage(
+                            id = java.util.UUID.randomUUID().toString(),
+                            senderIsUser = false,
+                            text = reply,
+                            actionType = com.example.ui.screens.ChatActionType.TASK_PREVIEW,
+                            associatedTask = newTask
+                        )
+                        chatRepository.addMessage(currentUserId, fallbackMsg)
+                        voiceManager.speak(reply)
+                        updateNotification(reply)
+                    } else {
+                        val memories = memoryRepository.getMemories(currentUserId).map { it.content }
+                        val aiResponse = geminiClient.generateNudgyResponse(
+                            userMessage = command,
+                            userMemories = memories
+                        )
+                        val chatMsg = com.example.ui.screens.ChatMessage(
+                            id = java.util.UUID.randomUUID().toString(),
+                            senderIsUser = false,
+                            text = aiResponse,
+                            quickSuggestions = listOf("Plan my day", "Show today's tasks", "Find free time")
+                        )
+                        chatRepository.addMessage(currentUserId, chatMsg)
+                        voiceManager.speak(aiResponse)
+                        updateNotification(aiResponse.take(50))
+                    }
                 }
             }
         }

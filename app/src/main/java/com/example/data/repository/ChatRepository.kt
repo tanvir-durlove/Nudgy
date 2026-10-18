@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
+import kotlinx.coroutines.flow.combine
+
 class ChatRepository(
     private val context: Context,
     private val database: NudgyDatabase = NudgyDatabase.getInstance(context)
@@ -23,7 +25,14 @@ class ChatRepository(
     private val chatDao = database.chatDao()
 
     fun observeMessages(userId: String): Flow<List<ChatMessage>> {
-        return chatDao.getMessagesFlow(userId).map { entities ->
+        return combine(
+            chatDao.getMessagesFlow(userId),
+            database.taskDao().getAllTasksFlow(userId),
+            database.calendarDao().getAllEventsFlow(userId)
+        ) { entities, tasks, events ->
+            val taskMap = tasks.associateBy { it.id }
+            val eventMap = events.associateBy { it.id }
+
             entities.map { entity ->
                 val actionType = try {
                     ChatActionType.valueOf(entity.actionType)
@@ -31,28 +40,32 @@ class ChatRepository(
                     ChatActionType.NONE
                 }
 
-                val task = if (!entity.associatedTaskId.isNullOrBlank() && !entity.associatedTaskTitle.isNullOrBlank()) {
-                    TaskEntity(
-                        id = entity.associatedTaskId,
-                        userId = userId,
-                        title = entity.associatedTaskTitle,
-                        dueDateEpochMillis = entity.associatedTaskDueMillis ?: entity.timestampMillis,
-                        priority = Priority.MEDIUM,
-                        category = TaskCategory.WORK
-                    )
-                } else null
+                val task = entity.associatedTaskId?.let { taskMap[it] } ?: run {
+                    if (!entity.associatedTaskId.isNullOrBlank() && !entity.associatedTaskTitle.isNullOrBlank()) {
+                        TaskEntity(
+                            id = entity.associatedTaskId,
+                            userId = userId,
+                            title = entity.associatedTaskTitle,
+                            dueDateEpochMillis = entity.associatedTaskDueMillis ?: entity.timestampMillis,
+                            priority = Priority.MEDIUM,
+                            category = TaskCategory.WORK
+                        )
+                    } else null
+                }
 
-                val event = if (!entity.associatedEventId.isNullOrBlank() && !entity.associatedEventTitle.isNullOrBlank()) {
-                    CalendarEventEntity(
-                        id = entity.associatedEventId,
-                        userId = userId,
-                        title = entity.associatedEventTitle,
-                        startEpochMillis = entity.associatedEventStartMillis ?: entity.timestampMillis,
-                        endEpochMillis = entity.associatedEventEndMillis ?: (entity.timestampMillis + 45 * 60 * 1000L),
-                        locationOrLink = "Google Meet",
-                        eventType = "MEETING"
-                    )
-                } else null
+                val event = entity.associatedEventId?.let { eventMap[it] } ?: run {
+                    if (!entity.associatedEventId.isNullOrBlank() && !entity.associatedEventTitle.isNullOrBlank()) {
+                        CalendarEventEntity(
+                            id = entity.associatedEventId,
+                            userId = userId,
+                            title = entity.associatedEventTitle,
+                            startEpochMillis = entity.associatedEventStartMillis ?: entity.timestampMillis,
+                            endEpochMillis = entity.associatedEventEndMillis ?: (entity.timestampMillis + 45 * 60 * 1000L),
+                            locationOrLink = "Google Meet",
+                            eventType = "MEETING"
+                        )
+                    } else null
+                }
 
                 val suggestions = if (entity.quickSuggestionsRaw.isNotBlank()) {
                     entity.quickSuggestionsRaw.split("||").filter { it.isNotBlank() }

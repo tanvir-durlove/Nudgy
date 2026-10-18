@@ -114,7 +114,7 @@ class ClientIntentPreFilter(
             }
             return PreFilterResult.Handled(
                 responseText = "আজকের কাজ ($completed/$total সম্পন্ন):\n$listSummary",
-                quickSuggestions = listOf("দিনের প্ল্যান", "ফাঁকা সময়", "Call John")
+                quickSuggestions = listOf("দিনের প্ল্যান", "ফাঁকা সময়", "নতুন কাজ")
             )
         }
 
@@ -532,13 +532,15 @@ class ClientIntentPreFilter(
 
         // 15. Intelligent Fallback for Specific Scheduled Events (e.g. "Doctor appointment 5pm", "Gym session tomorrow at 6am")
         // Strictly require valid time regex and actionable nouns so casual phrases like "I am busy" or names like "Sam" are not hijacked!
+        val isEventCancellation = lower.contains("cancel") || lower.contains("delete") ||
+                lower.contains("remove") || cleaned.contains("বাতিল") || cleaned.contains("মুছে")
         val hasTimePattern = Pattern.compile("(?i)\\b\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)\\b").matcher(cleaned).find()
         val hasActionContext = lower.contains("appointment") || lower.contains("session") ||
                 lower.contains("doctor") || lower.contains("dentist") || lower.contains("workout") ||
                 lower.contains("gym") || lower.contains("flight") || lower.contains("pickup") ||
                 lower.contains("class") || lower.contains("practice")
 
-        if (hasTimePattern && hasActionContext) {
+        if (!isEventCancellation && hasTimePattern && hasActionContext) {
             val cal = Calendar.getInstance()
             val isTomorrow = lower.contains("tomorrow")
             if (isTomorrow) cal.add(Calendar.DAY_OF_YEAR, 1)

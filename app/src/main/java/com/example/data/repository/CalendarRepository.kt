@@ -336,14 +336,31 @@ class CalendarRepository(
             .sortedBy { it.startEpochMillis }
 
         val tf = SimpleDateFormat("h:mm a", Locale.getDefault())
+        val now = System.currentTimeMillis()
+        val isToday = now in startOfDay..endOfDay
+
+        fun computeNextFutureSlot(baseTime: Long): Long {
+            val cal = Calendar.getInstance().apply { timeInMillis = maxOf(baseTime, now + 10 * 60 * 1000L) }
+            val m = cal.get(Calendar.MINUTE)
+            val rounded = if (m < 30) 30 else 0
+            if (rounded == 0) cal.add(Calendar.HOUR_OF_DAY, 1)
+            cal.set(Calendar.MINUTE, rounded)
+            cal.set(Calendar.SECOND, 0)
+            cal.set(Calendar.MILLISECOND, 0)
+            return cal.timeInMillis
+        }
 
         if (events.isEmpty()) {
-            val baseCal = Calendar.getInstance().apply { timeInMillis = dayMillis }
-            baseCal.set(Calendar.HOUR_OF_DAY, 14)
-            baseCal.set(Calendar.MINUTE, 0)
-            baseCal.set(Calendar.SECOND, 0)
-            baseCal.set(Calendar.MILLISECOND, 0)
-            val slotStart = baseCal.timeInMillis
+            val slotStart = if (isToday) {
+                computeNextFutureSlot(now)
+            } else {
+                val baseCal = Calendar.getInstance().apply { timeInMillis = dayMillis }
+                baseCal.set(Calendar.HOUR_OF_DAY, 14)
+                baseCal.set(Calendar.MINUTE, 0)
+                baseCal.set(Calendar.SECOND, 0)
+                baseCal.set(Calendar.MILLISECOND, 0)
+                baseCal.timeInMillis
+            }
             val slotEnd = slotStart + (45 * 60 * 1000L)
             val formattedSlot = "${tf.format(java.util.Date(slotStart))} – ${tf.format(java.util.Date(slotEnd))}"
             return@withContext FocusTimeSlot(
@@ -355,13 +372,14 @@ class CalendarRepository(
             )
         }
 
-        // Check for gap between events
+        // Check for gap between events (only consider gaps that are in the future)
         for (i in 0 until events.size - 1) {
             val currentEnd = events[i].endEpochMillis
             val nextStart = events[i + 1].startEpochMillis
             val gapMillis = nextStart - currentEnd
-            if (gapMillis >= 35 * 60 * 1000L) {
-                val slotStart = currentEnd + (5 * 60 * 1000L)
+            val candidateStart = currentEnd + (5 * 60 * 1000L)
+            if (gapMillis >= 35 * 60 * 1000L && (!isToday || candidateStart > now)) {
+                val slotStart = candidateStart
                 val duration = minOf(((gapMillis - (5 * 60 * 1000L)) / (60 * 1000L)).toInt(), 45)
                 val slotEnd = slotStart + (duration * 60 * 1000L)
                 val formattedSlot = "${tf.format(java.util.Date(slotStart))} – ${tf.format(java.util.Date(slotEnd))}"
@@ -375,9 +393,10 @@ class CalendarRepository(
             }
         }
 
-        // Fallback: after the last event of the day
+        // Fallback: after the last event of the day or upcoming future window
         val lastEvent = events.last()
-        val slotStart = lastEvent.endEpochMillis + (15 * 60 * 1000L)
+        val rawStart = lastEvent.endEpochMillis + (15 * 60 * 1000L)
+        val slotStart = if (isToday && rawStart <= now) computeNextFutureSlot(now) else rawStart
         val slotEnd = slotStart + (45 * 60 * 1000L)
         val formattedSlot = "${tf.format(java.util.Date(slotStart))} – ${tf.format(java.util.Date(slotEnd))}"
         return@withContext FocusTimeSlot(
@@ -385,11 +404,12 @@ class CalendarRepository(
             endEpochMillis = slotEnd,
             durationMinutes = 45,
             label = formattedSlot,
-            reason = "45 minutes free after your meetings"
+            reason = "45 minutes free for deep focus"
         )
     }
 
     fun startCloudSync(userId: String) {
+        if (userId == com.example.auth.AuthManager.GUEST_USER_ID) return
         snapshotListener?.remove()
         try {
             val dbId = context.getString(R.string.firestore_database_id)
@@ -446,6 +466,7 @@ class CalendarRepository(
     }
 
     private fun syncEventToFirestore(userId: String, event: CalendarEventEntity) {
+        if (userId == com.example.auth.AuthManager.GUEST_USER_ID) return
         repoScope.launch {
             try {
                 val dbId = context.getString(R.string.firestore_database_id)
@@ -474,6 +495,7 @@ class CalendarRepository(
     }
 
     private fun deleteEventFromFirestore(userId: String, eventId: String) {
+        if (userId == com.example.auth.AuthManager.GUEST_USER_ID) return
         repoScope.launch {
             try {
                 val dbId = context.getString(R.string.firestore_database_id)

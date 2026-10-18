@@ -178,16 +178,20 @@ fun NudgyMainFlow(
 
         LaunchedEffect(currentUser.uid) {
             chatRepository.checkAndSeedWelcomeMessage(currentUser.uid, currentUser.displayName)
-            taskRepository.startCloudSync(currentUser.uid)
-            memoryRepository.startCloudSync(currentUser.uid)
-            calendarRepository.startCloudSync(currentUser.uid)
+            if (!currentUser.isGuest) {
+                taskRepository.startCloudSync(currentUser.uid)
+                memoryRepository.startCloudSync(currentUser.uid)
+                calendarRepository.startCloudSync(currentUser.uid)
+            }
         }
 
         DisposableEffect(currentUser.uid) {
             onDispose {
-                taskRepository.stopCloudSync()
-                calendarRepository.stopCloudSync()
-                memoryRepository.stopCloudSync()
+                if (!currentUser.isGuest) {
+                    taskRepository.stopCloudSync()
+                    calendarRepository.stopCloudSync()
+                    memoryRepository.stopCloudSync()
+                }
             }
         }
 
@@ -354,9 +358,11 @@ fun NudgyAppScaffold(
             topBar = {
                 NudgyTopBar(
                     userInitials = user.initials,
+                    isGuest = user.isGuest,
                     hasNotifications = todayTasks.any { !it.isCompleted },
                     onNotificationsClick = { showNotificationsSheet = true },
-                    onProfileClick = { showProfileSheet = true }
+                    onProfileClick = { showProfileSheet = true },
+                    onGuestBadgeClick = { showProfileSheet = true }
                 )
             },
             bottomBar = {

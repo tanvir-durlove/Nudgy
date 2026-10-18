@@ -149,50 +149,166 @@ fun YourNudgySheet(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // Profile Card (Matches Figma Screenshot 1: pale yellow avatar circle + peach card)
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                color = NudgyPeach
-            ) {
-                Row(
-                    modifier = Modifier.padding(18.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            if (user.isGuest) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color(0xFFFFF3E0),
+                    border = androidx.compose.foundation.BorderStroke(1.2.dp, Color(0xFFFFB74D))
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(54.dp)
-                            .clip(CircleShape)
-                            .background(NudgyAvatarGold),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = user.initials,
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
-                            ),
-                            color = NudgyCharcoal
-                        )
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(46.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFFFE0B2)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "G",
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 18.sp
+                                        ),
+                                        color = Color(0xFFE65100)
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        text = "Guest Mode",
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp
+                                        ),
+                                        color = NudgyCharcoal
+                                    )
+                                    Text(
+                                        text = "Local Room database",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                        color = NudgyMuted
+                                    )
+                                }
+                            }
+
+                            Switch(
+                                checked = true,
+                                onCheckedChange = { isChecked ->
+                                    if (!isChecked) {
+                                        val activity = context as? android.app.Activity
+                                        if (activity != null) {
+                                            authManager.signInWithGoogle(
+                                                activity = activity,
+                                                scope = scope,
+                                                onSuccess = {
+                                                    Toast.makeText(context, "Signed in with Google", Toast.LENGTH_SHORT).show()
+                                                }
+                                            )
+                                        }
+                                    }
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = NudgyPrimary
+                                )
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        val activity = context as? android.app.Activity
+                        Button(
+                            onClick = {
+                                if (activity != null) {
+                                    authManager.signInWithGoogle(
+                                        activity = activity,
+                                        scope = scope,
+                                        onSuccess = {
+                                            Toast.makeText(context, "Signed in with Google", Toast.LENGTH_SHORT).show()
+                                        },
+                                        onError = { error ->
+                                            Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary),
+                            shape = RoundedCornerShape(100.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp)
+                        ) {
+                            Icon(
+                                painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_google_logo),
+                                contentDescription = "Google Logo",
+                                tint = Color.Unspecified,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Sign in with Google to Sync",
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            )
+                        }
                     }
+                }
+            } else {
+                // Profile Card (Matches Figma Screenshot 1: pale yellow avatar circle + peach card)
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    color = NudgyPeach
+                ) {
+                    Row(
+                        modifier = Modifier.padding(18.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(54.dp)
+                                .clip(CircleShape)
+                                .background(NudgyAvatarGold),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = user.initials,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp
+                                ),
+                                color = NudgyCharcoal
+                            )
+                        }
 
-                    Spacer(modifier = Modifier.width(16.dp))
+                        Spacer(modifier = Modifier.width(16.dp))
 
-                    Column {
-                        Text(
-                            text = user.displayName,
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 17.sp
-                            ),
-                            color = NudgyCharcoal
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = user.email,
-                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-                            color = NudgyMuted
-                        )
+                        Column {
+                            Text(
+                                text = user.displayName,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 17.sp
+                                ),
+                                color = NudgyCharcoal
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = user.email,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                                color = NudgyMuted
+                            )
+                        }
                     }
                 }
             }

@@ -119,7 +119,7 @@ class ReminderReceiver : BroadcastReceiver() {
         )
 
         val notification = NotificationCompat.Builder(context, ReminderManager.CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_nudgy_notification)
             .setContentTitle(taskTitle)
             .setContentText("Time to get this done! 💪")
             .setContentIntent(contentPendingIntent)

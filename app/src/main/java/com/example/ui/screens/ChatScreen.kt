@@ -160,9 +160,10 @@ fun ChatScreen(
         "আজকের সব কাজ দেখাও"
     )
 
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
+    LaunchedEffect(messages.size, isThinking) {
+        val count = messages.size + if (isThinking) 1 else 0
+        if (count > 0) {
+            listState.animateScrollToItem(count - 1)
         }
     }
 
@@ -600,6 +601,43 @@ fun ChatScreen(
                                             }
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (isThinking) {
+                    item(key = "thinking_indicator") {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            NudgyMascot(size = 28.dp, mood = MascotMood.THINKING)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = Color.White,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        color = NudgyPrimary,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Nudgy is thinking...",
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                            fontSize = 13.sp
+                                        ),
+                                        color = NudgyMuted
+                                    )
                                 }
                             }
                         }

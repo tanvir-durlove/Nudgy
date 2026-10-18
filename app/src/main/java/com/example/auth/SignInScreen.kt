@@ -29,6 +29,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -120,53 +122,53 @@ fun SignInScreen(
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Your AI personal assistant for tasks, time, and focus. Built to keep your day moving.",
+                text = "Personal assistant for tasks, time, and focus.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = NudgyMuted,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 16.dp)
+                textAlign = TextAlign.Center
             )
 
             Spacer(modifier = Modifier.height(28.dp))
 
             if (!errorMessage.isNullOrBlank()) {
                 Surface(
-                    color = Color(0xFFFFEBEE),
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFCDD2)),
+                    color = Color(0xFFFFF3E0),
+                    shape = RoundedCornerShape(14.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFB74D)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 16.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Info,
-                            contentDescription = "Error",
-                            tint = Color(0xFFD32F2F),
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = errorMessage,
-                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                            color = Color(0xFFC62828),
-                            modifier = Modifier.weight(1f)
-                        )
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = Color(0xFFE65100),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = errorMessage,
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                color = Color(0xFFBF360C),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
             }
 
-            // Google Sign-In Button (Official, Clean M3 Container)
+            // Google Sign-In Button
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp)
+                    .height(54.dp)
                     .clip(RoundedCornerShape(100.dp))
                     .border(1.2.dp, NudgyCardBorder, RoundedCornerShape(100.dp))
                     .clickable(
@@ -182,8 +184,7 @@ fun SignInScreen(
                         }
                     },
                 color = NudgyCard,
-                shape = RoundedCornerShape(100.dp),
-                shadowElevation = 1.dp
+                shape = RoundedCornerShape(100.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxSize(),
@@ -192,11 +193,11 @@ fun SignInScreen(
                 ) {
                     if (isLoading) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
+                            modifier = Modifier.size(22.dp),
                             color = NudgyPrimary,
-                            strokeWidth = 2.5.dp
+                            strokeWidth = 2.dp
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
                         Text(
                             text = "Signing in...",
                             style = MaterialTheme.typography.titleMedium,
@@ -207,13 +208,14 @@ fun SignInScreen(
                             painter = painterResource(id = R.drawable.ic_google_logo),
                             contentDescription = "Google Logo",
                             tint = Color.Unspecified,
-                            modifier = Modifier.size(22.dp)
+                            modifier = Modifier.size(20.dp)
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "Continue with Google",
+                            text = "Sign in with Google",
                             style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 15.sp
                             ),
                             color = NudgyCharcoal
                         )
@@ -221,14 +223,59 @@ fun SignInScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            Text(
-                text = "Secure sign-in · Sync across devices with Google",
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
-                color = NudgyMuted,
-                textAlign = TextAlign.Center
-            )
+            // Guest Mode Toggle Card (Core features without sign-in, local Room storage)
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .border(1.2.dp, NudgyCardBorder, RoundedCornerShape(20.dp))
+                    .clickable {
+                        authManager.continueAsGuest()
+                        onSignInSuccess()
+                    },
+                color = NudgyCard,
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Guest Mode",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            ),
+                            color = NudgyCharcoal
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Use local task management with Room database",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                            color = NudgyMuted
+                        )
+                    }
+
+                    Switch(
+                        checked = false,
+                        onCheckedChange = {
+                            authManager.continueAsGuest()
+                            onSignInSuccess()
+                        },
+                        colors = SwitchDefaults.colors(
+                            uncheckedThumbColor = Color.White,
+                            uncheckedTrackColor = Color(0xFFE0DDD5),
+                            checkedTrackColor = NudgyPrimary
+                        )
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(24.dp))
         }

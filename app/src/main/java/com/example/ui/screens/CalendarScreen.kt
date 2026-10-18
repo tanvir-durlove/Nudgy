@@ -39,6 +39,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -87,6 +88,10 @@ fun CalendarScreen(
     var showAddEventDialog by remember { mutableStateOf(false) }
     var isBlockingTime by remember { mutableStateOf(false) }
 
+    LaunchedEffect(events) {
+        isBlockingTime = false
+    }
+
     val timeFormatter = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
     val monthFormatter = remember { SimpleDateFormat("MMMM yyyy", Locale.getDefault()) }
 
@@ -131,21 +136,30 @@ fun CalendarScreen(
     val suggestedSlot = remember(events, selectedDayIndex) {
         val baseCal = Calendar.getInstance().apply { timeInMillis = selectedDayMillis }
         val sortedEvents = events.sortedBy { it.startEpochMillis }
+        val now = System.currentTimeMillis()
+        val isToday = daysList.getOrNull(selectedDayIndex)?.isToday == true
 
         if (sortedEvents.isEmpty()) {
-            val startCal = (baseCal.clone() as Calendar).apply {
-                set(Calendar.HOUR_OF_DAY, 14)
-                set(Calendar.MINUTE, 0)
-                set(Calendar.SECOND, 0)
-                set(Calendar.MILLISECOND, 0)
+            val startMillis = if (isToday) {
+                val cal = Calendar.getInstance().apply { timeInMillis = now + 10 * 60 * 1000L }
+                val m = cal.get(Calendar.MINUTE)
+                val rounded = if (m < 30) 30 else 0
+                if (rounded == 0) cal.add(Calendar.HOUR_OF_DAY, 1)
+                cal.set(Calendar.MINUTE, rounded)
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                cal.timeInMillis
+            } else {
+                val cal = (baseCal.clone() as Calendar).apply {
+                    set(Calendar.HOUR_OF_DAY, 14)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                cal.timeInMillis
             }
-            val endCal = (baseCal.clone() as Calendar).apply {
-                set(Calendar.HOUR_OF_DAY, 14)
-                set(Calendar.MINUTE, 45)
-                set(Calendar.SECOND, 0)
-                set(Calendar.MILLISECOND, 0)
-            }
-            Triple(startCal.timeInMillis, endCal.timeInMillis, 45)
+            val endMillis = startMillis + 45 * 60 * 1000L
+            Triple(startMillis, endMillis, 45)
         } else {
             var foundStart = 0L
             var foundEnd = 0L
@@ -155,10 +169,13 @@ fun CalendarScreen(
             for (i in 0 until sortedEvents.size - 1) {
                 val currentEnd = sortedEvents[i].endEpochMillis
                 val nextStart = sortedEvents[i + 1].startEpochMillis
-                val gapMinutes = ((nextStart - currentEnd) / (60 * 1000L)).toInt()
+                val candidateStart = currentEnd + (5 * 60 * 1000L) // 5 min buffer
+                if (isToday && candidateStart < now) continue
+
+                val gapMinutes = ((nextStart - candidateStart) / (60 * 1000L)).toInt()
                 if (gapMinutes >= 30) {
-                    foundStart = currentEnd + (5 * 60 * 1000L) // 5 min buffer
-                    val dur = minOf(gapMinutes - 5, 45)
+                    foundStart = candidateStart
+                    val dur = minOf(gapMinutes, 45)
                     foundEnd = foundStart + (dur * 60 * 1000L)
                     foundDuration = dur
                     break
@@ -167,7 +184,8 @@ fun CalendarScreen(
 
             if (foundDuration == 0) {
                 val lastEventEnd = sortedEvents.last().endEpochMillis
-                foundStart = lastEventEnd + (15 * 60 * 1000L)
+                val candidateStart = maxOf(lastEventEnd + (15 * 60 * 1000L), if (isToday) now + 10 * 60 * 1000L else 0L)
+                foundStart = candidateStart
                 foundDuration = 45
                 foundEnd = foundStart + (45 * 60 * 1000L)
             }
@@ -182,9 +200,7 @@ fun CalendarScreen(
 
     val hasBlockedSuggestedTime = remember(events, suggestedStart, suggestedEnd) {
         events.any { event ->
-            event.eventType == "FOCUS_TIME" ||
-            event.title.contains("focus", ignoreCase = true) ||
-            (event.startEpochMillis < suggestedEnd && event.endEpochMillis > suggestedStart)
+            event.startEpochMillis < suggestedEnd && event.endEpochMillis > suggestedStart
         }
     }
 

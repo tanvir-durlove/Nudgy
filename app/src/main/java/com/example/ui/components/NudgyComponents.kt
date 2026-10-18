@@ -64,9 +64,11 @@ import com.example.ui.theme.NudgyPrimary
 fun NudgyTopBar(
     modifier: Modifier = Modifier,
     userInitials: String = "AR",
+    isGuest: Boolean = false,
     hasNotifications: Boolean = true,
     onNotificationsClick: () -> Unit = {},
-    onProfileClick: () -> Unit = {}
+    onProfileClick: () -> Unit = {},
+    onGuestBadgeClick: () -> Unit = {}
 ) {
     Row(
         modifier = modifier
@@ -75,7 +77,7 @@ fun NudgyTopBar(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Left: Mascot + Brand
+        // Left: Mascot + Brand + optional Guest Mode Badge
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.clickable(
@@ -85,14 +87,34 @@ fun NudgyTopBar(
         ) {
             NudgyMascot(size = 36.dp)
             Spacer(modifier = Modifier.width(10.dp))
-            Text(
-                text = "Nudgy",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold
-                ),
-                color = NudgyCharcoal
-            )
+            Column {
+                Text(
+                    text = "Nudgy",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = NudgyCharcoal
+                )
+                if (isGuest) {
+                    Surface(
+                        color = Color(0xFFFFF3E0),
+                        shape = RoundedCornerShape(100.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFB74D)),
+                        modifier = Modifier.clickable { onGuestBadgeClick() }
+                    ) {
+                        Text(
+                            text = "Guest (Local) • Tap to Sync",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFE65100)
+                            ),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                        )
+                    }
+                }
+            }
         }
 
         // Right: Notifications & Avatar

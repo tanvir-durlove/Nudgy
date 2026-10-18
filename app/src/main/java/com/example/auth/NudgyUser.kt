@@ -5,6 +5,7 @@ data class NudgyUser(
     val displayName: String,
     val email: String,
     val photoUrl: String? = null,
+    val isGuest: Boolean = false,
     val initials: String = extractInitials(displayName, email)
 ) {
     companion object {
