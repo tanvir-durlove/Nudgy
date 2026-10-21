@@ -136,7 +136,7 @@ fun CalendarScreen(
         monthFormatter.format(cal.time).uppercase()
     }
 
-    val displayEvents = remember(events, tasks, selectedDayMillis) {
+    val displayEvents = remember(events, selectedDayMillis) {
         val (startOfDay, endOfDay) = run {
             val cal = Calendar.getInstance().apply { timeInMillis = selectedDayMillis }
             cal.set(Calendar.HOUR_OF_DAY, 0)
@@ -152,28 +152,12 @@ fun CalendarScreen(
             start to end
         }
 
+        // Calendar events only — tasks are never projected into the
+        // schedule; they live in the Tasks tab.
         val list = events.filter {
             (it.startEpochMillis in startOfDay..endOfDay) ||
             (it.startEpochMillis <= endOfDay && it.endEpochMillis >= startOfDay)
         }.toMutableList()
-        tasks.filter { it.dueDateEpochMillis in startOfDay..endOfDay }.forEach { task ->
-            val alreadyPresent = list.any { e ->
-                e.title.equals(task.title, ignoreCase = true) && Math.abs(e.startEpochMillis - task.dueDateEpochMillis) < 60_000L
-            }
-            if (!alreadyPresent) {
-                list.add(
-                    CalendarEventEntity(
-                        id = "task_${task.id}",
-                        userId = task.userId,
-                        title = task.title,
-                        startEpochMillis = task.dueDateEpochMillis,
-                        endEpochMillis = task.dueDateEpochMillis + 30 * 60 * 1000L,
-                        locationOrLink = if (task.reminderSet) "Scheduled task • Alert set" else "Scheduled task",
-                        eventType = if (task.priority == Priority.HIGH) "MEETING" else "TASK"
-                    )
-                )
-            }
-        }
         list.sortedBy { it.startEpochMillis }
     }
 
