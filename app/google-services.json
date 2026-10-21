@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "747996594458",
+    "project_id": "nudgy-8bd76",
+    "storage_bucket": "nudgy-8bd76.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:747996594458:android:9524695c4d51c8e0602ca3",
+        "android_client_info": {
+          "package_name": "com.nextgentool.nudgy"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "747996594458-gfnpkfdkk8345d2aaeqgni2md1jm1tt3.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.nextgentool.nudgy",
+            "certificate_hash": "7e520e4192eaa16e0b37820162d9f5fdbef2cbf3"
+          }
+        },
+        {
+          "client_id": "747996594458-3pkcbkccfr75f0his992mnmnofl0d3tn.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCQ89x3RrKISSYajpOcWcQ1kYKoPG1HgiU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "747996594458-3pkcbkccfr75f0his992mnmnofl0d3tn.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
