@@ -503,27 +503,10 @@ fun HomeScreen(
             )
         }
 
-        val scheduledItems = remember(events, todayTasks) {
-            val list = events.toMutableList()
-            todayTasks.forEach { task ->
-                val alreadyPresent = list.any { e ->
-                    e.title.equals(task.title, ignoreCase = true) && Math.abs(e.startEpochMillis - task.dueDateEpochMillis) < 60_000L
-                }
-                if (!alreadyPresent) {
-                    list.add(
-                        CalendarEventEntity(
-                            id = "task_${task.id}",
-                            userId = task.userId,
-                            title = task.title,
-                            startEpochMillis = task.dueDateEpochMillis,
-                            endEpochMillis = task.dueDateEpochMillis + 30 * 60 * 1000L,
-                            locationOrLink = if (task.reminderSet) "Scheduled task • Alert set" else "Scheduled task",
-                            eventType = if (task.priority == Priority.HIGH) "MEETING" else "TASK"
-                        )
-                    )
-                }
-            }
-            list.sortedBy { it.startEpochMillis }
+        // Schedule shows calendar events only — tasks live in the Tasks
+        // list and are never projected into the schedule timeline.
+        val scheduledItems = remember(events) {
+            events.sortedBy { it.startEpochMillis }
         }
 
         // Up Next Schedule Section
