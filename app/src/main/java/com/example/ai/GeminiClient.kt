@@ -1,6 +1,5 @@
 package com.example.ai
 
-import android.content.Context
 import android.util.Log
 import com.example.BuildConfig
 import kotlinx.coroutines.Dispatchers
@@ -13,7 +12,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-class GeminiClient(private val context: Context? = null) {
+class GeminiClient {
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -26,24 +25,15 @@ class GeminiClient(private val context: Context? = null) {
         userMessage: String,
         recentHistory: List<Pair<String, Boolean>> = emptyList(), // Pair(text, isUser)
         userMemories: List<String> = emptyList(),
-        modelVersion: String = "gemini-3.1-flash-lite-preview",
-        callContext: Context? = null
+        modelVersion: String = "gemini-3.1-flash-lite-preview"
     ): String = withContext(Dispatchers.IO) {
-        val effectiveContext = callContext ?: context
-        val customKey = effectiveContext?.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE)
-            ?.getString("custom_gemini_api_key", null)
-            ?.trim()
-
-        val apiKey = when {
-            !customKey.isNullOrBlank() -> customKey
-            else -> try {
-                BuildConfig.GEMINI_API_KEY
-            } catch (e: Exception) {
-                ""
-            }
+        val apiKey = try {
+            BuildConfig.GEMINI_API_KEY
+        } catch (e: Exception) {
+            ""
         }
 
-        // If API key is not configured in user secrets panel or BYOK, provide smart on-device response
+        // If API key is not configured in user secrets panel, provide smart on-device response
         if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
             return@withContext getLocalFallback(userMessage)
         }
@@ -163,7 +153,7 @@ class GeminiClient(private val context: Context? = null) {
         val lower = prompt.lowercase()
         return when {
             prompt.any { it in '\u0980'..'\u09FF' } ->
-                "বুঝতে পেরেছি! Nudgy আপনার সাথে আছে। আপনার দিনটি সুন্দর এবং কার্যকরী হোক।"
+                "দুঃখিত, এই মুহূর্তে উত্তর দিতে পারছি না — সংযোগে সমস্যা হচ্ছে। আবার চেষ্টা করুন, অথবা + বাটন দিয়ে সরাসরি টাস্ক যোগ করুন।"
             lower.contains("hello") || lower.contains("hi") ->
                 "Hey there! Ready to get things done today?"
             lower.contains("thank") ->
@@ -171,7 +161,7 @@ class GeminiClient(private val context: Context? = null) {
             lower.contains("help") ->
                 "I can organize your tasks, schedule meetings, find open focus blocks, and nudge you on time."
             else ->
-                "I'm here to help you stay on track! Ask me to plan your day, schedule a task, or find open focus time."
+                "Sorry, I couldn't process that just now — my connection didn't respond. Please try again, or use the + button to add a task directly."
         }
     }
 }
