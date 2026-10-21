@@ -8,6 +8,7 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.NoCredentialException
 import com.example.R
 import com.example.ai.WakeWordForegroundService
 import com.example.data.local.NudgyDatabase
@@ -37,7 +38,6 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
 class AuthManager(private val context: Context) {
-    private val authScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     // Nullable: Firebase is unavailable when google-services.json is absent (e.g. CI builds).
     private val auth: FirebaseAuth? = try {
         Firebase.auth
@@ -214,7 +214,6 @@ class AuthManager(private val context: Context) {
         activity: Activity,
         scope: CoroutineScope,
         onSuccess: () -> Unit = {},
-        onNoDeviceAccount: () -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
         val clientId = getWebClientId()
@@ -222,7 +221,13 @@ class AuthManager(private val context: Context) {
             val error = "Google Sign-In configuration missing: client ID not found"
             _errorMessage.value = error
             onError(error)
-            onNoDeviceAccount()
+            return
+        }
+
+        val firebaseAuth = auth ?: run {
+            val error = "Google Sign-In unavailable: Firebase is not configured in this build (missing google-services.json). Use Guest Mode, or a build with Firebase set up."
+            _errorMessage.value = error
+            onError(error)
             return
         }
 
@@ -230,16 +235,9 @@ class AuthManager(private val context: Context) {
         _errorMessage.value = null
 
         val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
-
         val request = GetCredentialRequest.Builder()
             .addCredentialOption(signInOption)
             .build()
-
-        val firebaseAuth = auth ?: run {
-            _isLoading.value = false
-            onNoDeviceAccount()
-            return
-        }
 
         scope.launch {
             try {
@@ -272,114 +270,40 @@ class AuthManager(private val context: Context) {
                             photoUrl = user.photoUrl?.toString(),
                             isGuest = false
                         )
-                        _isLoading.value = false
                         withContext(Dispatchers.Main) {
                             onSuccess()
                         }
                     } else {
-                        _isLoading.value = false
-                        withContext(Dispatchers.Main) {
-                            onNoDeviceAccount()
-                        }
+                        failSignIn("Sign-in failed: no user was returned. Please try again.", onError)
                     }
                 } else {
-                    _isLoading.value = false
-                    withContext(Dispatchers.Main) {
-                        onNoDeviceAccount()
-                    }
+                    failSignIn("Sign-in failed: unexpected credential type (${credential.type}). Please try again.", onError)
                 }
             } catch (e: GetCredentialCancellationException) {
+                // On emulators this also fires when no Google account / Play Services
+                // is available, so never fail silently here.
                 Log.w(TAG, "Google Sign-In flow cancelled or dismissed: ${e.message}")
-                _isLoading.value = false
+                failSignIn("Sign-in didn't complete. If you're testing on an emulator, add a Google account first (Settings \u2192 Accounts), or continue as Guest.", onError)
+            } catch (e: NoCredentialException) {
+                Log.w(TAG, "No credential available: ${e.message}")
+                failSignIn("No Google account found on this device. Add a Google account in Settings \u2192 Accounts, or continue as Guest.", onError)
             } catch (e: Exception) {
-                val isCancelled = e.message?.contains("cancel", ignoreCase = true) == true ||
-                        e.message?.contains("user canceled", ignoreCase = true) == true
-
+                Log.e(TAG, "Google Sign-In failed", e)
+                val isCancelled = e.message?.contains("cancel", ignoreCase = true) == true
                 if (isCancelled) {
-                    Log.d(TAG, "Google Sign-In cancelled by user")
-                    _isLoading.value = false
-                    return@launch
+                    failSignIn("Sign-in didn't complete. If you're testing on an emulator, add a Google account first (Settings \u2192 Accounts), or continue as Guest.", onError)
+                } else {
+                    failSignIn("Sign-in failed: ${e.localizedMessage ?: "unknown error"}. On an emulator, add a Google account or continue as Guest.", onError)
                 }
-
+            } finally {
                 _isLoading.value = false
-                Log.d(TAG, "No Google accounts on device: ${e.message}; opening Google sign-in sheet")
-                withContext(Dispatchers.Main) {
-                    onNoDeviceAccount()
-                }
             }
         }
     }
 
-    /**
-     * Sign in directly with a Google account email (for emulators or direct Google identity selection).
-     */
-    fun signInWithGoogleAccount(
-        email: String,
-        displayName: String? = null,
-        onSuccess: () -> Unit = {}
-    ) {
-        val resolvedEmail = email.trim()
-        val name = displayName?.takeIf { it.isNotBlank() }
-            ?: resolveDisplayName(null, resolvedEmail)
-        val uid = "google_" + java.util.UUID.nameUUIDFromBytes(resolvedEmail.lowercase().toByteArray()).toString().replace("-", "")
-
-        val user = NudgyUser(
-            uid = uid,
-            displayName = name,
-            email = resolvedEmail,
-            photoUrl = null,
-            isGuest = false
-        )
-        prefs.edit()
-            .putString(KEY_ACTIVE_USER_ID, uid)
-            .putBoolean(KEY_IS_GUEST, false)
-            .putBoolean(KEY_EXPLICITLY_SIGNED_OUT, false)
-            .apply()
-        _userState.value = user
-        _isLoading.value = false
-        _errorMessage.value = null
-
-        authScope.launch {
-            migrateGuestDataToUser(uid)
-            try {
-                syncUserToFirestore(uid, name, resolvedEmail, null)
-            } catch (e: Exception) {
-                Log.d(TAG, "Local Google user initialized: ${e.message}")
-            }
-            withContext(Dispatchers.Main) {
-                onSuccess()
-            }
-        }
-    }
-
-    /**
-     * Launch the standard Google Account Sign-In / Account Picker modal
-     * when no saved Google credentials are found on the device.
-     */
-    fun openGoogleAccountModal(activity: Activity) {
-        _isLoading.value = false
-        _errorMessage.value = null
-        try {
-            val chooseAccountIntent = AccountManager.newChooseAccountIntent(
-                null,
-                null,
-                arrayOf("com.google"),
-                null,
-                null,
-                null,
-                null
-            )
-            activity.startActivity(chooseAccountIntent)
-        } catch (e: Exception) {
-            try {
-                val addAccountIntent = Intent(Settings.ACTION_ADD_ACCOUNT).apply {
-                    putExtra(Settings.EXTRA_ACCOUNT_TYPES, arrayOf("com.google"))
-                }
-                activity.startActivity(addAccountIntent)
-            } catch (ex: Exception) {
-                Log.w(TAG, "Could not open Google account modal", ex)
-            }
-        }
+    private fun failSignIn(message: String, onError: (String) -> Unit) {
+        _errorMessage.value = message
+        onError(message)
     }
 
     /**
