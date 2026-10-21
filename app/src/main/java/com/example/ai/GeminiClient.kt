@@ -1,5 +1,6 @@
 package com.example.ai
 
+import android.content.Context
 import android.util.Log
 import com.example.BuildConfig
 import kotlinx.coroutines.Dispatchers
@@ -12,7 +13,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-class GeminiClient {
+class GeminiClient(private val context: Context? = null) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -25,15 +26,24 @@ class GeminiClient {
         userMessage: String,
         recentHistory: List<Pair<String, Boolean>> = emptyList(), // Pair(text, isUser)
         userMemories: List<String> = emptyList(),
-        modelVersion: String = "gemini-3.1-flash-lite-preview"
+        modelVersion: String = "gemini-3.1-flash-lite-preview",
+        callContext: Context? = null
     ): String = withContext(Dispatchers.IO) {
-        val apiKey = try {
-            BuildConfig.GEMINI_API_KEY
-        } catch (e: Exception) {
-            ""
+        val effectiveContext = callContext ?: context
+        val customKey = effectiveContext?.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE)
+            ?.getString("custom_gemini_api_key", null)
+            ?.trim()
+
+        val apiKey = when {
+            !customKey.isNullOrBlank() -> customKey
+            else -> try {
+                BuildConfig.GEMINI_API_KEY
+            } catch (e: Exception) {
+                ""
+            }
         }
 
-        // If API key is not configured in user secrets panel, provide smart on-device response
+        // If API key is not configured in user secrets panel or BYOK, provide smart on-device response
         if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
             return@withContext getLocalFallback(userMessage)
         }

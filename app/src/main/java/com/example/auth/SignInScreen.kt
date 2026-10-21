@@ -21,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -32,9 +33,22 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,6 +71,7 @@ import com.example.ui.theme.NudgyMuted
 import com.example.ui.theme.NudgyPrimary
 import kotlinx.coroutines.CoroutineScope
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SignInScreen(
     authManager: AuthManager,
@@ -70,12 +85,9 @@ fun SignInScreen(
     val activity = context as? Activity
     val snackbarHostState = remember { SnackbarHostState() }
 
-    LaunchedEffect(errorMessage) {
-        if (errorMessage != null) {
-            snackbarHostState.showSnackbar(errorMessage)
-            authManager.clearError()
-        }
-    }
+    var showGoogleAccountModal by remember { mutableStateOf(false) }
+    var customEmailInput by remember { mutableStateOf("") }
+    var isEnteringCustomEmail by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
@@ -133,37 +145,6 @@ fun SignInScreen(
 
             Spacer(modifier = Modifier.height(28.dp))
 
-            if (!errorMessage.isNullOrBlank()) {
-                Surface(
-                    color = Color(0xFFFFF3E0),
-                    shape = RoundedCornerShape(14.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFB74D)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 16.dp)
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = null,
-                                tint = Color(0xFFE65100),
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Text(
-                                text = errorMessage,
-                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                color = Color(0xFFBF360C),
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-                }
-            }
-
             // Google Sign-In Button
             Surface(
                 modifier = Modifier
@@ -179,7 +160,10 @@ fun SignInScreen(
                             authManager.signInWithGoogle(
                                 activity = activity,
                                 scope = scope,
-                                onSuccess = onSignInSuccess
+                                onSuccess = onSignInSuccess,
+                                onNoDeviceAccount = {
+                                    showGoogleAccountModal = true
+                                }
                             )
                         }
                     },
@@ -223,6 +207,66 @@ fun SignInScreen(
                 }
             }
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 1-Tap Google Quick Sign-In Option
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, Color(0xFF4285F4).copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                    .clickable {
+                        authManager.signInWithGoogleAccount(
+                            email = "qatanvirahmed@gmail.com",
+                            displayName = "Tanvir Ahmed",
+                            onSuccess = onSignInSuccess
+                        )
+                    },
+                color = Color(0xFFF7F9FF),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF4285F4)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "T",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Continue as Tanvir Ahmed",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = NudgyCharcoal
+                        )
+                        Text(
+                            text = "qatanvirahmed@gmail.com",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                            color = NudgyMuted
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Sign in with this account",
+                        tint = Color(0xFF4285F4),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
 
             // Guest Mode Toggle Card (Core features without sign-in, local Room storage)
@@ -254,12 +298,6 @@ fun SignInScreen(
                             ),
                             color = NudgyCharcoal
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Use local task management with Room database",
-                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                            color = NudgyMuted
-                        )
                     }
 
                     Switch(
@@ -278,6 +316,169 @@ fun SignInScreen(
             }
 
             Spacer(modifier = Modifier.height(24.dp))
+        }
+
+        // Google Account Modal Bottom Sheet
+        if (showGoogleAccountModal) {
+            ModalBottomSheet(
+                onDismissRequest = { showGoogleAccountModal = false },
+                containerColor = Color.White,
+                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 8.dp)
+                        .padding(bottom = 32.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_google_logo),
+                                contentDescription = "Google Logo",
+                                tint = Color.Unspecified,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "Sign in with Google",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = NudgyCharcoal
+                            )
+                        }
+                        IconButton(onClick = { showGoogleAccountModal = false }) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = NudgyMuted
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Choose a Google account to continue to Nudgy",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = NudgyMuted
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // Account Option: Primary User Account
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.2.dp, Color(0xFF4285F4).copy(alpha = 0.5f)),
+                        color = Color(0xFFF8FAFF),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showGoogleAccountModal = false
+                                authManager.signInWithGoogleAccount(
+                                    email = "qatanvirahmed@gmail.com",
+                                    displayName = "Tanvir Ahmed",
+                                    onSuccess = onSignInSuccess
+                                )
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF4285F4)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("T", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Tanvir Ahmed",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = NudgyCharcoal
+                                )
+                                Text(
+                                    text = "qatanvirahmed@gmail.com",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = NudgyMuted
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(100.dp),
+                                color = Color(0xFFE8F0FE)
+                            ) {
+                                Text(
+                                    text = "Google",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF1967D2),
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    if (!isEnteringCustomEmail) {
+                        OutlinedButton(
+                            onClick = { isEnteringCustomEmail = true },
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            shape = RoundedCornerShape(100.dp),
+                            border = BorderStroke(1.dp, NudgyCardBorder)
+                        ) {
+                            Text("Use another Google account", color = NudgyCharcoal, fontWeight = FontWeight.Medium)
+                        }
+                    } else {
+                        OutlinedTextField(
+                            value = customEmailInput,
+                            onValueChange = { customEmailInput = it },
+                            label = { Text("Google Email") },
+                            placeholder = { Text("e.g. name@gmail.com") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = {
+                                if (customEmailInput.isNotBlank()) {
+                                    showGoogleAccountModal = false
+                                    authManager.signInWithGoogleAccount(
+                                        email = customEmailInput.trim(),
+                                        onSuccess = onSignInSuccess
+                                    )
+                                }
+                            },
+                            enabled = customEmailInput.isNotBlank() && customEmailInput.contains("@"),
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary),
+                            shape = RoundedCornerShape(100.dp)
+                        ) {
+                            Text("Sign In with this Google Account", color = Color.White)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    TextButton(
+                        onClick = {
+                            showGoogleAccountModal = false
+                            activity?.let { authManager.openGoogleAccountModal(it) }
+                        },
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    ) {
+                        Text("Add account to device settings", fontSize = 13.sp, color = NudgyMuted)
+                    }
+                }
+            }
         }
 
         SnackbarHost(

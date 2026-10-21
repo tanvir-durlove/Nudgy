@@ -62,13 +62,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.BuildApkActivity
 import com.example.ai.WakeWordForegroundService
 import com.example.auth.AuthManager
 import com.example.auth.NudgyUser
@@ -98,11 +98,14 @@ fun YourNudgySheet(
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val settingsPrefs = remember { context.getSharedPreferences("nudgy_settings", android.content.Context.MODE_PRIVATE) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var showPreferencesDialog by remember { mutableStateOf(false) }
     var showNotificationsDialog by remember { mutableStateOf(false) }
     var showVoiceDialog by remember { mutableStateOf(false) }
     var showMemoriesDialog by remember { mutableStateOf(false) }
+    var showApiKeyDialog by remember { mutableStateOf(false) }
+    var customApiKeyInput by remember { mutableStateOf(settingsPrefs.getString("custom_gemini_api_key", "") ?: "") }
     var newMemoryInput by remember { mutableStateOf("") }
 
     var selectedPersona by remember { mutableStateOf("Gentle & Encouraging") }
@@ -190,11 +193,6 @@ fun YourNudgySheet(
                                             fontSize = 16.sp
                                         ),
                                         color = NudgyCharcoal
-                                    )
-                                    Text(
-                                        text = "Local Room database",
-                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                        color = NudgyMuted
                                     )
                                 }
                             }
@@ -348,12 +346,9 @@ fun YourNudgySheet(
             HorizontalDivider(color = NudgyBorder.copy(alpha = 0.5f))
 
             NudgyMenuItem(
-                icon = Icons.Default.PlayArrow,
-                title = "Build APK in GitHub Actions",
-                onClick = {
-                    onDismiss()
-                    context.startActivity(Intent(context, BuildApkActivity::class.java))
-                }
+                icon = Icons.Outlined.Key,
+                title = "Gemini API Key (BYOK)",
+                onClick = { showApiKeyDialog = true }
             )
 
             Spacer(modifier = Modifier.height(22.dp))
@@ -743,6 +738,60 @@ fun YourNudgySheet(
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirmDialog = false }) {
                     Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showApiKeyDialog) {
+        AlertDialog(
+            onDismissRequest = { showApiKeyDialog = false },
+            title = { Text("Gemini API Key (BYOK)", fontWeight = FontWeight.Bold, color = NudgyCharcoal) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Bring Your Own Key: Enter your personal Gemini API key from Google AI Studio. Stored privately on this device to protect developer quota.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = NudgyMuted
+                    )
+                    OutlinedTextField(
+                        value = customApiKeyInput,
+                        onValueChange = { customApiKeyInput = it },
+                        placeholder = { Text("AIzaSy...", color = NudgyMuted) },
+                        label = { Text("API Key") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = customApiKeyInput.trim()
+                        if (trimmed.isNotBlank()) {
+                            settingsPrefs.edit().putString("custom_gemini_api_key", trimmed).apply()
+                            Toast.makeText(context, "Custom Gemini API Key saved!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            settingsPrefs.edit().remove("custom_gemini_api_key").apply()
+                            Toast.makeText(context, "Using default API key", Toast.LENGTH_SHORT).show()
+                        }
+                        showApiKeyDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary)
+                ) {
+                    Text("Save", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        customApiKeyInput = ""
+                        settingsPrefs.edit().remove("custom_gemini_api_key").apply()
+                        Toast.makeText(context, "Reset to default key", Toast.LENGTH_SHORT).show()
+                        showApiKeyDialog = false
+                    }
+                ) {
+                    Text("Reset")
                 }
             }
         )

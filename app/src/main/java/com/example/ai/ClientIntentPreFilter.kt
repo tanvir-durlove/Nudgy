@@ -118,16 +118,40 @@ class ClientIntentPreFilter(
             )
         }
 
-        // 3. English: "What's on my schedule today?" / "What is on my schedule" / "Show schedule"
-        if (lower.contains("schedule today") || lower.contains("what's on my schedule") ||
-            lower.contains("what is on my schedule") || lower == "my schedule" || lower == "show schedule"
-        ) {
+        // 3. English: "What's on my schedule today?" / "What is on my schedule" / "Show schedule" / "Scheduled"
+        val isScheduleQuery = lower == "scheduled" || lower == "schedule" ||
+                lower.contains("schedule today") || lower.contains("what's on my schedule") ||
+                lower.contains("what is on my schedule") || lower == "my schedule" || lower == "show schedule" ||
+                lower.contains("scheduled items") || lower.contains("scheduled tasks") ||
+                lower.contains("what is scheduled") || lower.contains("what's scheduled") ||
+                lower.contains("show scheduled") || lower.contains("view schedule") ||
+                cleaned.contains("শিডিউল দেখাও") || cleaned.contains("আজকের শিডিউল")
+
+        if (isScheduleQuery) {
             val totalTasks = todayTasks.size
             val totalMeetings = events.size
-            val taskWord = if (totalTasks == 1) "task" else "tasks"
-            val meetingWord = if (totalMeetings == 1) "meeting" else "meetings"
+            val response = if (totalTasks == 0 && totalMeetings == 0) {
+                "You have no items scheduled for today! Your schedule is completely open. Tap + to add a task or say 'Schedule meeting with team tomorrow at 2pm'."
+            } else {
+                val lines = mutableListOf<String>()
+                lines.add("Here is your schedule for today ($totalMeetings ${if (totalMeetings == 1) "meeting" else "meetings"}, $totalTasks ${if (totalTasks == 1) "task" else "tasks"}):")
+                if (events.isNotEmpty()) {
+                    lines.add("\n📅 Meetings & Events:")
+                    events.sortedBy { it.startEpochMillis }.forEach {
+                        lines.add("• ${it.title} (${formatTime(it.startEpochMillis)} – ${formatTime(it.endEpochMillis)})")
+                    }
+                }
+                if (todayTasks.isNotEmpty()) {
+                    lines.add("\n✅ Tasks:")
+                    todayTasks.sortedBy { it.dueDateEpochMillis }.forEach {
+                        val status = if (it.isCompleted) "✓" else "○"
+                        lines.add("$status ${it.title} (due ${formatTime(it.dueDateEpochMillis)})")
+                    }
+                }
+                lines.joinToString("\n")
+            }
             return PreFilterResult.Handled(
-                responseText = "You have $totalTasks $taskWord and $totalMeetings $meetingWord today. Your day is organized and on track!",
+                responseText = response.trim(),
                 quickSuggestions = listOf("Plan my day", "Find free time", "Show today's tasks")
             )
         }
@@ -137,6 +161,8 @@ class ClientIntentPreFilter(
         val isCancellation = lower.contains("cancel") || lower.contains("delete") ||
                 lower.contains("remove") || cleaned.contains("বাতিল") || cleaned.contains("মুছে")
         val isMeetingOrScheduleIntent = !isCancellation && (
+                lower.startsWith("schedule ") ||
+                lower.startsWith("schedule a ") ||
                 lower.contains("schedule a meeting") ||
                 lower.contains("schedule meeting") ||
                 lower.contains("book meeting") ||
@@ -149,7 +175,7 @@ class ClientIntentPreFilter(
                 lower.startsWith("sync with")
         )
 
-        if (isMeetingOrScheduleIntent && !lower.contains("what's on my schedule") && !lower.contains("show schedule")) {
+        if (isMeetingOrScheduleIntent && !isScheduleQuery) {
             val isTomorrow = lower.contains("tomorrow") || cleaned.contains("কাল") || cleaned.contains("আগামীকাল")
             val cal = Calendar.getInstance()
             if (isTomorrow) {

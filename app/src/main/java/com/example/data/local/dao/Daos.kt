@@ -17,10 +17,10 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE userId = :userId ORDER BY dueDateEpochMillis ASC")
     fun getAllTasksFlow(userId: String): Flow<List<TaskEntity>>
 
-    @Query("SELECT * FROM tasks WHERE userId = :userId AND dueDateEpochMillis >= :startOfDay AND dueDateEpochMillis <= :endOfDay ORDER BY isCompleted ASC, dueDateEpochMillis ASC")
+    @Query("SELECT * FROM tasks WHERE userId = :userId AND ((dueDateEpochMillis >= :startOfDay AND dueDateEpochMillis <= :endOfDay) OR (dueDateEpochMillis < :startOfDay AND isCompleted = 0)) ORDER BY isCompleted ASC, dueDateEpochMillis ASC")
     fun getTasksForDayFlow(userId: String, startOfDay: Long, endOfDay: Long): Flow<List<TaskEntity>>
 
-    @Query("SELECT * FROM tasks WHERE userId = :userId AND dueDateEpochMillis >= :startOfDay AND dueDateEpochMillis <= :endOfDay ORDER BY isCompleted ASC, dueDateEpochMillis ASC")
+    @Query("SELECT * FROM tasks WHERE userId = :userId AND ((dueDateEpochMillis >= :startOfDay AND dueDateEpochMillis <= :endOfDay) OR (dueDateEpochMillis < :startOfDay AND isCompleted = 0)) ORDER BY isCompleted ASC, dueDateEpochMillis ASC")
     suspend fun getTasksForDayOnce(userId: String, startOfDay: Long, endOfDay: Long): List<TaskEntity>
 
     @Query("SELECT * FROM tasks WHERE userId = :userId AND isCompleted = 0 ORDER BY dueDateEpochMillis ASC")
@@ -89,10 +89,10 @@ interface TaskDao {
 
 @Dao
 interface CalendarDao {
-    @Query("SELECT * FROM calendar_events WHERE userId = :userId AND startEpochMillis >= :startOfDay AND startEpochMillis <= :endOfDay ORDER BY startEpochMillis ASC")
+    @Query("SELECT * FROM calendar_events WHERE userId = :userId AND ((startEpochMillis >= :startOfDay AND startEpochMillis <= :endOfDay) OR (startEpochMillis <= :endOfDay AND endEpochMillis >= :startOfDay)) ORDER BY startEpochMillis ASC")
     fun getEventsForDayFlow(userId: String, startOfDay: Long, endOfDay: Long): Flow<List<CalendarEventEntity>>
 
-    @Query("SELECT * FROM calendar_events WHERE userId = :userId AND startEpochMillis >= :startOfDay AND startEpochMillis <= :endOfDay ORDER BY startEpochMillis ASC")
+    @Query("SELECT * FROM calendar_events WHERE userId = :userId AND ((startEpochMillis >= :startOfDay AND startEpochMillis <= :endOfDay) OR (startEpochMillis <= :endOfDay AND endEpochMillis >= :startOfDay)) ORDER BY startEpochMillis ASC")
     suspend fun getEventsForDayOnce(userId: String, startOfDay: Long, endOfDay: Long): List<CalendarEventEntity>
 
     @Query("SELECT * FROM calendar_events WHERE userId = :userId ORDER BY startEpochMillis ASC")

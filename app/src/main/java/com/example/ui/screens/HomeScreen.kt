@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.CheckCircleOutline
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -502,6 +503,29 @@ fun HomeScreen(
             )
         }
 
+        val scheduledItems = remember(events, todayTasks) {
+            val list = events.toMutableList()
+            todayTasks.forEach { task ->
+                val alreadyPresent = list.any { e ->
+                    e.title.equals(task.title, ignoreCase = true) && Math.abs(e.startEpochMillis - task.dueDateEpochMillis) < 60_000L
+                }
+                if (!alreadyPresent) {
+                    list.add(
+                        CalendarEventEntity(
+                            id = "task_${task.id}",
+                            userId = task.userId,
+                            title = task.title,
+                            startEpochMillis = task.dueDateEpochMillis,
+                            endEpochMillis = task.dueDateEpochMillis + 30 * 60 * 1000L,
+                            locationOrLink = if (task.reminderSet) "Scheduled task • Alert set" else "Scheduled task",
+                            eventType = if (task.priority == Priority.HIGH) "MEETING" else "TASK"
+                        )
+                    )
+                }
+            }
+            list.sortedBy { it.startEpochMillis }
+        }
+
         // Up Next Schedule Section
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(
@@ -546,7 +570,7 @@ fun HomeScreen(
                 color = NudgyCard,
                 border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
             ) {
-                if (events.isEmpty()) {
+                if (scheduledItems.isEmpty()) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -555,23 +579,37 @@ fun HomeScreen(
                         verticalArrangement = Arrangement.Center
                     ) {
                         Text(
-                            text = "No events scheduled for today",
+                            text = "No items scheduled for today",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                             color = NudgyCharcoal
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Your calendar is clear. Perfect time for deep focus!",
+                            text = "Your schedule is clear. Perfect time for deep focus!",
                             style = MaterialTheme.typography.bodyMedium,
                             color = NudgyMuted
                         )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedButton(
+                            onClick = { onCalendarClick() },
+                            shape = RoundedCornerShape(100.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.CalendarMonth,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = NudgyPrimary
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Open Schedule", fontSize = 12.sp, color = NudgyCharcoal)
+                        }
                     }
                 } else {
                     Column(
                         modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        events.forEach { event ->
+                        scheduledItems.forEach { event ->
                             val isMeeting = event.eventType == "MEETING"
                             val cardBg = if (isMeeting) NudgyPeach else NudgyLavender
                             val dotColor = if (isMeeting) NudgyPrimary else Color(0xFF7A68E6)
@@ -602,7 +640,9 @@ fun HomeScreen(
                                 }
 
                                 Surface(
-                                    modifier = Modifier.weight(1f),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { onCalendarClick() },
                                     shape = RoundedCornerShape(14.dp),
                                     color = cardBg
                                 ) {

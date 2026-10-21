@@ -59,6 +59,9 @@ class CalendarRepository(
         return calendarDao.getEventsForDayFlow(userId, startOfDay, endOfDay)
     }
 
+    fun observeAllEvents(userId: String): Flow<List<CalendarEventEntity>> =
+        calendarDao.getAllEventsFlow(userId)
+
     fun hasCalendarPermissions(): Boolean {
         val read = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
         val write = ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) == PackageManager.PERMISSION_GRANTED

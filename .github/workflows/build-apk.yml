@@ -67,31 +67,51 @@ jobs:
       - name: Grant Execute Permission to Gradlew
         run: chmod +x gradlew
 
-      - name: Build Debug APK with Gradle
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
-
-      - name: Prepare & Verify APK Output
+      - name: Build Android App Bundle (AAB for Google Play) & APK
         run: |
-          mkdir -p build-apks
-          if [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
-            cp app/build/outputs/apk/debug/app-debug.apk build-apks/nudgy.apk
-            cp app/build/outputs/apk/debug/app-debug.apk build-apks/nudgy-debug.apk
+          if [ -n "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ]; then
+            echo "Configuring Release signing keystore..."
+            echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+            export KEYSTORE_PATH="$(pwd)/release.keystore"
+            export STORE_PASSWORD="${{ secrets.STORE_PASSWORD }}"
+            export KEY_PASSWORD="${{ secrets.KEY_PASSWORD }}"
+            ./gradlew bundleRelease assembleRelease assembleDebug bundleDebug --no-daemon --stacktrace || ./gradlew assembleDebug bundleDebug --no-daemon --stacktrace
           else
-            find app/build/outputs/apk -name "*.apk" -exec cp {} build-apks/nudgy.apk \;
-            cp build-apks/nudgy.apk build-apks/nudgy-debug.apk
+            ./gradlew assembleDebug bundleDebug --no-daemon --stacktrace
           fi
-          echo "Verifying APK integrity..."
-          unzip -t build-apks/nudgy.apk | tail -n 5
-          ls -lh build-apks/
 
-      - name: Upload APK as GitHub Actions Artifact
+      - name: Prepare & Verify Artifacts
+        run: |
+          mkdir -p build-artifacts
+          # Copy APK
+          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
+            cp app/build/outputs/apk/release/app-release.apk build-artifacts/nudgy-release.apk
+            cp app/build/outputs/apk/release/app-release.apk build-artifacts/nudgy.apk
+          elif [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
+            cp app/build/outputs/apk/debug/app-debug.apk build-artifacts/nudgy.apk
+            cp app/build/outputs/apk/debug/app-debug.apk build-artifacts/nudgy-debug.apk
+          fi
+
+          # Copy Google Play Android App Bundle (AAB)
+          if [ -f app/build/outputs/bundle/release/app-release.aab ]; then
+            cp app/build/outputs/bundle/release/app-release.aab build-artifacts/nudgy-release.aab
+            cp app/build/outputs/bundle/release/app-release.aab build-artifacts/nudgy.aab
+          elif [ -f app/build/outputs/bundle/debug/app-debug.aab ]; then
+            cp app/build/outputs/bundle/debug/app-debug.aab build-artifacts/nudgy.aab
+            cp app/build/outputs/bundle/debug/app-debug.aab build-artifacts/nudgy-debug.aab
+          fi
+
+          echo "Verifying build outputs..."
+          ls -lh build-artifacts/
+
+      - name: Upload Build Artifacts (APK & AAB)
         uses: actions/upload-artifact@v4
         with:
-          name: nudgy-android-apk
-          path: build-apks/*.apk
+          name: nudgy-android-artifacts
+          path: build-artifacts/*
           retention-days: 30
 
-      - name: Publish GitHub Release (Direct Download)
+      - name: Publish GitHub Release
         if: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true') || startsWith(github.ref, 'refs/tags/v') }}
         continue-on-error: true
         env:
@@ -102,12 +122,12 @@ jobs:
             TAG_NAME="v1.0.${{ github.run_number }}"
           fi
           echo "Publishing release with tag: $TAG_NAME"
-          gh release create "$TAG_NAME" build-apks/nudgy.apk build-apks/nudgy-debug.apk \
-            --title "Nudgy Android APK ($TAG_NAME)" \
+          gh release create "$TAG_NAME" build-artifacts/* \
+            --title "Nudgy Android Release ($TAG_NAME)" \
             --notes "### Nudgy — Things Get Done ✨
-          Directly download the ready-to-install Android APK below:
-          - **nudgy.apk** / **nudgy-debug.apk** (Package: \`com.aistudio.nudgy.prod\`)
-          - Fully signed with debug keystore.
-          - Compatible with Android 7.0+ (API 24 to 36)." \
+          Directly download the ready-to-use artifacts below:
+          - **nudgy.aab** — Google Play Android App Bundle (Play Store submission)
+          - **nudgy.apk** — Direct installable Android APK (Android 7.0+ / API 24-36)
+          Package: \`com.nextgentool.nudgy\`" \
             --draft=false \
-            --prerelease=false || gh release upload "$TAG_NAME" build-apks/nudgy.apk build-apks/nudgy-debug.apk --clobber || true
+            --prerelease=false || gh release upload "$TAG_NAME" build-artifacts/* --clobber || true

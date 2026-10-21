@@ -67,10 +67,11 @@ class WakeWordForegroundService : Service() {
     private lateinit var reminderManager: ReminderManager
     private lateinit var voiceManager: VoiceAssistantManager
     private lateinit var chatRepository: com.example.data.repository.ChatRepository
-    private val geminiClient = GeminiClient()
+    private lateinit var geminiClient: GeminiClient
 
     override fun onCreate() {
         super.onCreate()
+        geminiClient = GeminiClient(applicationContext)
         taskRepository = TaskRepository(applicationContext)
         calendarRepository = CalendarRepository(applicationContext)
         memoryRepository = MemoryRepository(applicationContext)
@@ -90,19 +91,37 @@ class WakeWordForegroundService : Service() {
         }
 
         if (!isRunning) {
-            isRunning = true
-            _isWakeWordActive.value = true
-            val notification = buildForegroundNotification("Listening for \"Hey Nudgy\"...")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
+            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                    this,
+                    android.Manifest.permission.RECORD_AUDIO
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                Log.w(TAG, "Cannot start WakeWordForegroundService: RECORD_AUDIO permission not granted")
+                stopSelf()
+                return START_NOT_STICKY
             }
-            startAcousticWakeWordLoop()
+
+            try {
+                val notification = buildForegroundNotification("Listening for \"Hey Nudgy\"...")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        notification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                    )
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+                isRunning = true
+                _isWakeWordActive.value = true
+                startAcousticWakeWordLoop()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start foreground service: ${e.message}", e)
+                isRunning = false
+                _isWakeWordActive.value = false
+                stopSelf()
+                return START_NOT_STICKY
+            }
         }
 
         return START_STICKY

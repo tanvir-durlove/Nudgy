@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -243,6 +244,21 @@ fun TasksScreen(
                             color = NudgyMuted,
                             textAlign = TextAlign.Center
                         )
+
+                        if (selectedTab == 0 && upcomingTasks.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = { selectedTab = 1 },
+                                shape = RoundedCornerShape(100.dp)
+                            ) {
+                                Text(
+                                    text = "View Upcoming (${upcomingTasks.size})",
+                                    fontSize = 12.sp,
+                                    color = NudgyPrimary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                     }
                 }
             }

@@ -36,12 +36,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".BuildApkActivity"
-            android:exported="false"
-            android:label="GitHub Actions APK Builder"
-            android:theme="@style/Theme.MyApplication" />
-
         <receiver
             android:name=".reminders.ReminderReceiver"
             android:exported="false" />

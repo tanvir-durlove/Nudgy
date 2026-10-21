@@ -99,7 +99,7 @@ class MainActivity : ComponentActivity() {
         remoteConfig = NudgyRemoteConfig()
 
         preFilter = ClientIntentPreFilter(taskRepository, calendarRepository, memoryRepository)
-        geminiClient = GeminiClient()
+        geminiClient = GeminiClient(applicationContext)
         voiceAssistantManager = VoiceAssistantManager(this)
 
         authManager.attemptSilentSignIn(lifecycleScope)
@@ -274,8 +274,10 @@ fun NudgyAppScaffold(
     val todayTasks by taskRepository.observeTodayTasks(user.uid).collectAsStateWithLifecycle(emptyList())
     val upcomingTasks by taskRepository.observeUpcomingTasks(user.uid).collectAsStateWithLifecycle(emptyList())
     val completedTasks by taskRepository.observeCompletedTasks(user.uid).collectAsStateWithLifecycle(emptyList())
+    val allTasks by taskRepository.observeAllTasks(user.uid).collectAsStateWithLifecycle(emptyList())
     val dailyStats by taskRepository.observeTodayStats(user.uid).collectAsStateWithLifecycle(DailyTaskStats())
-    val events by calendarRepository.observeEventsForDay(user.uid, selectedCalendarDayMillis).collectAsStateWithLifecycle(emptyList())
+    val todayEvents by calendarRepository.observeEventsForDay(user.uid, System.currentTimeMillis()).collectAsStateWithLifecycle(emptyList())
+    val allEvents by calendarRepository.observeAllEvents(user.uid).collectAsStateWithLifecycle(emptyList())
     val memories by memoryRepository.observeMemories(user.uid).collectAsStateWithLifecycle(emptyList())
 
     val isListening by voiceAssistantManager.isListening.collectAsStateWithLifecycle()
@@ -296,7 +298,7 @@ fun NudgyAppScaffold(
                     userId = user.uid,
                     userPrompt = prompt,
                     todayTasks = todayTasks,
-                    events = events
+                    events = todayEvents
                 )
 
                 when (preFilterResult) {
@@ -385,7 +387,7 @@ fun NudgyAppScaffold(
                         HomeScreen(
                             user = user,
                             todayTasks = todayTasks,
-                            events = events,
+                            events = todayEvents,
                             dailyStats = dailyStats,
                             remoteConfigValues = remoteConfigValues,
                             onToggleTask = { task ->
@@ -473,7 +475,8 @@ fun NudgyAppScaffold(
 
                     NudgyNavDestination.CALENDAR -> {
                         CalendarScreen(
-                            events = events,
+                            events = allEvents,
+                            tasks = allTasks,
                             isCalendarConnected = isCalendarConnected,
                             onConnectGoogleCalendar = {
                                 calendarPermissionLauncher.launch(
@@ -502,6 +505,15 @@ fun NudgyAppScaffold(
                             onAddEvent = { title, start, end, loc, type ->
                                 scope.launch {
                                     calendarRepository.addEvent(user.uid, title, start, end, loc, type)
+                                    taskRepository.createTask(
+                                        userId = user.uid,
+                                        title = title,
+                                        description = loc,
+                                        dueEpochMillis = start,
+                                        priority = if (type == "FOCUS_TIME") Priority.HIGH else Priority.MEDIUM,
+                                        category = TaskCategory.WORK,
+                                        reminderSet = true
+                                    )
                                 }
                             },
                             onDeleteEvent = { eventId ->
@@ -614,6 +626,14 @@ fun NudgyAppScaffold(
                             priority = priority,
                             category = category,
                             reminderSet = reminderSet
+                        )
+                        calendarRepository.addEvent(
+                            userId = user.uid,
+                            title = title,
+                            startEpochMillis = dueEpochMillis,
+                            endEpochMillis = dueEpochMillis + 30 * 60 * 1000L,
+                            locationOrLink = category.name.lowercase().replaceFirstChar { it.uppercase() },
+                            eventType = if (priority == Priority.HIGH) "MEETING" else "TASK"
                         )
                         analytics.logTaskCreated(title, priority.name, category.name, reminderSet)
                     }
