@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -126,7 +128,11 @@ fun SignInScreen(
             .fillMaxSize()
             .background(NudgyCanvas)
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+        ) {
 
             // ---------- HERO ----------
             Box(
@@ -139,57 +145,62 @@ fun SignInScreen(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                // Soft coral glow behind the mascot
+                // Fixed stage so the chips hug the mascot on every screen size
                 Box(
-                    modifier = Modifier
-                        .size(320.dp)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.radialGradient(
-                                colors = listOf(
-                                    NudgyPrimaryLight.copy(alpha = 0.50f),
-                                    NudgyPeach,
-                                    NudgyCanvas.copy(alpha = 0f)
+                    modifier = Modifier.size(330.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Soft coral glow behind the mascot
+                    Box(
+                        modifier = Modifier
+                            .size(320.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        NudgyPrimaryLight.copy(alpha = 0.50f),
+                                        NudgyPeach,
+                                        NudgyCanvas.copy(alpha = 0f)
+                                    )
                                 )
                             )
-                        )
-                )
+                    )
 
-                Box(modifier = Modifier.offset(y = bob.dp)) {
-                    NudgyMascot(
-                        size = 148.dp,
-                        mood = MascotMood.IDLE
+                    Box(modifier = Modifier.offset(y = bob.dp)) {
+                        NudgyMascot(
+                            size = 148.dp,
+                            mood = MascotMood.IDLE
+                        )
+                    }
+
+                    FloatingChip(
+                        icon = Icons.Default.NotificationsActive,
+                        label = "Reminders",
+                        container = NudgyPeach,
+                        border = NudgyPeachBorder,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .offset(x = 0.dp, y = 34.dp)
+                    )
+                    FloatingChip(
+                        icon = Icons.Default.CalendarMonth,
+                        label = "Calendar",
+                        container = NudgyLavender,
+                        border = NudgyLavenderBorder,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .offset(x = 0.dp, y = (-30).dp)
+                    )
+                    FloatingChip(
+                        icon = Icons.Default.Timer,
+                        label = "Focus time",
+                        container = NudgySage,
+                        border = NudgySageBorder,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .offset(x = 14.dp, y = (-26).dp)
                     )
                 }
-
-                FloatingChip(
-                    icon = Icons.Default.NotificationsActive,
-                    label = "Reminders",
-                    container = NudgyPeach,
-                    border = NudgyPeachBorder,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(start = 26.dp, top = 44.dp)
-                )
-                FloatingChip(
-                    icon = Icons.Default.CalendarMonth,
-                    label = "Calendar",
-                    container = NudgyLavender,
-                    border = NudgyLavenderBorder,
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .padding(end = 18.dp)
-                        .offset(y = (-26).dp)
-                )
-                FloatingChip(
-                    icon = Icons.Default.Timer,
-                    label = "Focus time",
-                    container = NudgySage,
-                    border = NudgySageBorder,
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(start = 38.dp, bottom = 6.dp)
-                )
             }
 
             // ---------- HEADLINE ----------
@@ -247,6 +258,7 @@ fun SignInScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .navigationBarsPadding()
                         .padding(horizontal = 24.dp, vertical = 24.dp)
                 ) {
                     if (!errorMessage.isNullOrBlank()) {
