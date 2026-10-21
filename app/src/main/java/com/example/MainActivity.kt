@@ -627,14 +627,8 @@ fun NudgyAppScaffold(
                             category = category,
                             reminderSet = reminderSet
                         )
-                        calendarRepository.addEvent(
-                            userId = user.uid,
-                            title = title,
-                            startEpochMillis = dueEpochMillis,
-                            endEpochMillis = dueEpochMillis + 30 * 60 * 1000L,
-                            locationOrLink = category.name.lowercase().replaceFirstChar { it.uppercase() },
-                            eventType = if (priority == Priority.HIGH) "MEETING" else "TASK"
-                        )
+                        // Tasks live in the Tasks list only — no calendar event is
+                        // created for a task (keeps Tasks and Calendar separate).
                         analytics.logTaskCreated(title, priority.name, category.name, reminderSet)
                     }
                 }

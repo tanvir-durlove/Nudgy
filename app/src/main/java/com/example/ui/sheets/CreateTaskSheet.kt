@@ -57,6 +57,7 @@ import com.example.ui.theme.NudgyCardBorder
 import com.example.ui.theme.NudgyCharcoal
 import com.example.ui.theme.NudgyMuted
 import com.example.ui.theme.NudgyPrimary
+import com.example.ui.theme.NudgyPrimaryDark
 import java.util.Calendar
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -283,6 +284,34 @@ fun CreateTaskSheet(
                 )
             }
 
+            // Past-time guard: "Today" + a time that has already passed would
+            // silently kill the reminder, so warn here and roll to tomorrow.
+            val previewCalendar = Calendar.getInstance()
+            previewCalendar.add(Calendar.DAY_OF_YEAR, selectedDayOption)
+            val (previewHour, previewMinute) = if (hasCustomTime) {
+                customHour to customMinute
+            } else {
+                when (selectedTimeOption) {
+                    0 -> 9 to 0
+                    1 -> 14 to 0
+                    else -> 19 to 0
+                }
+            }
+            previewCalendar.set(Calendar.HOUR_OF_DAY, previewHour)
+            previewCalendar.set(Calendar.MINUTE, previewMinute)
+            previewCalendar.set(Calendar.SECOND, 0)
+            previewCalendar.set(Calendar.MILLISECOND, 0)
+            val willRollToTomorrow = selectedDayOption == 0 &&
+                previewCalendar.timeInMillis <= System.currentTimeMillis()
+            if (willRollToTomorrow) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "⚠ This time has already passed today — it will be scheduled for tomorrow at the same time.",
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    color = NudgyPrimaryDark
+                )
+            }
+
             Spacer(modifier = Modifier.height(18.dp))
 
             // PRIORITY SELECTOR
@@ -432,6 +461,13 @@ fun CreateTaskSheet(
                         calendar.set(Calendar.MINUTE, finalMinute)
                         calendar.set(Calendar.SECOND, 0)
                         calendar.set(Calendar.MILLISECOND, 0)
+
+                        // Past time chosen for today -> roll to tomorrow so
+                        // the reminder can actually fire (the sheet warns
+                        // about this next to the time picker).
+                        if (calendar.timeInMillis <= System.currentTimeMillis()) {
+                            calendar.add(Calendar.DAY_OF_YEAR, 1)
+                        }
 
                         val computedDueTime = calendar.timeInMillis
                         val desc = if (description.isNotBlank()) description.trim() else null
