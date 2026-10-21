@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -52,6 +53,7 @@ import com.example.ui.theme.NudgyCard
 import com.example.ui.theme.NudgyCardBorder
 import com.example.ui.theme.NudgyCharcoal
 import com.example.ui.theme.NudgyGreen
+import com.example.ui.theme.NudgyCanvas
 import com.example.ui.theme.NudgyMuted
 import com.example.ui.theme.NudgyPrimary
 
@@ -73,6 +75,8 @@ fun NudgyTopBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .background(NudgyCanvas)
+            .statusBarsPadding()
             .padding(horizontal = 20.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
