@@ -161,9 +161,23 @@ fun CalendarScreen(
         list.sortedBy { it.startEpochMillis }
     }
 
-    val suggestedSlot = remember(displayEvents, selectedDayIndex) {
+    val suggestedSlot = remember(displayEvents, tasks, selectedDayIndex) {
         val baseCal = Calendar.getInstance().apply { timeInMillis = selectedDayMillis }
-        val sortedEvents = displayEvents.sortedBy { it.startEpochMillis }
+        // Busy timeline for slot-finding = events + timed tasks (due + 30m).
+        // Tasks stay off the visible schedule, but a suggested focus slot
+        // must never collide with one.
+        val dayStart = (baseCal.clone() as Calendar).apply {
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val dayEnd = dayStart + 24 * 60 * 60 * 1000L - 1
+        val taskBlocks = tasks.filter { it.dueDateEpochMillis in dayStart..dayEnd && !it.isCompleted }
+            .map { ev -> CalendarEventEntity(
+                id = "busy_${ev.id}", userId = ev.userId, title = ev.title,
+                startEpochMillis = ev.dueDateEpochMillis,
+                endEpochMillis = ev.dueDateEpochMillis + 30 * 60 * 1000L,
+                locationOrLink = null, eventType = "TASK"
+            ) }
+        val sortedEvents = (displayEvents + taskBlocks).sortedBy { it.startEpochMillis }
         val now = System.currentTimeMillis()
         val isToday = daysList.getOrNull(selectedDayIndex)?.isToday == true
 

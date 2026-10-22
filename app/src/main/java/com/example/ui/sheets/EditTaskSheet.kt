@@ -65,6 +65,7 @@ import com.example.ui.theme.NudgyCardBorder
 import com.example.ui.theme.NudgyCharcoal
 import com.example.ui.theme.NudgyMuted
 import com.example.ui.theme.NudgyPrimary
+import com.example.ui.theme.NudgyPrimaryDark
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -253,6 +254,29 @@ fun EditTaskSheet(
                 )
             }
 
+            // Past-due guard: a time picked for today that has already passed
+            // rolls to tomorrow on save (same rule as the create sheet); an
+            // older date stays overdue and gets no reminder — say so openly.
+            val editNow = System.currentTimeMillis()
+            val dueIsToday = run {
+                val a = Calendar.getInstance()
+                val b = Calendar.getInstance().apply { timeInMillis = currentDueDateMillis }
+                a.get(Calendar.YEAR) == b.get(Calendar.YEAR) && a.get(Calendar.DAY_OF_YEAR) == b.get(Calendar.DAY_OF_YEAR)
+            }
+            val dueInPast = currentDueDateMillis <= editNow
+            if (dueInPast) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = if (dueIsToday) {
+                        "⚠ This time has already passed today — saving will move it to tomorrow at the same time."
+                    } else {
+                        "⚠ This date is in the past — the task will stay overdue and no reminder will fire."
+                    },
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    color = NudgyPrimaryDark
+                )
+            }
+
             Spacer(modifier = Modifier.height(18.dp))
 
             // Priority
@@ -387,11 +411,19 @@ fun EditTaskSheet(
             Button(
                 onClick = {
                     if (title.isNotBlank()) {
+                        val finalDueMillis = if (dueInPast && dueIsToday) {
+                            Calendar.getInstance().apply {
+                                timeInMillis = currentDueDateMillis
+                                add(Calendar.DAY_OF_YEAR, 1)
+                            }.timeInMillis
+                        } else {
+                            currentDueDateMillis
+                        }
                         val updated = task.copy(
                             title = title.trim(),
                             description = if (description.isNotBlank()) description.trim() else null,
-                            dueDateEpochMillis = currentDueDateMillis,
-                            reminderEpochMillis = if (reminderSet) currentDueDateMillis else null,
+                            dueDateEpochMillis = finalDueMillis,
+                            reminderEpochMillis = if (reminderSet) finalDueMillis else null,
                             priority = priority,
                             category = category,
                             reminderSet = reminderSet

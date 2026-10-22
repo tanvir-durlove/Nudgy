@@ -114,7 +114,7 @@ fun ChatScreen(
     onStartVoice: () -> Unit,
     onStopVoice: () -> Unit,
     onTaskClick: (TaskEntity) -> Unit = {},
-    onBlockFocusTime: (Long, Long, String) -> Unit = { _, _, _ -> },
+    onBlockFocusTime: (Long, Long, String, String) -> Unit = { _, _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -561,7 +561,7 @@ fun ChatScreen(
                                                     Button(
                                                         onClick = {
                                                             focusScheduled = true
-                                                            onBlockFocusTime(message.focusStartMillis, message.focusEndMillis, "Focus Time")
+                                                            onBlockFocusTime(message.focusStartMillis, message.focusEndMillis, "Focus Time", message.id)
                                                         },
                                                         shape = RoundedCornerShape(100.dp),
                                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5B45E0)),

@@ -25,6 +25,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -228,6 +229,7 @@ fun NudgyAppScaffold(
     remoteConfig: NudgyRemoteConfig
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var currentDestination by remember { mutableStateOf(NudgyNavDestination.HOME) }
     var showProfileSheet by remember { mutableStateOf(false) }
     var showNotificationsSheet by remember { mutableStateOf(false) }
@@ -439,17 +441,10 @@ fun NudgyAppScaffold(
                             },
                             onStopVoice = { voiceAssistantManager.stopListening() },
                             onTaskClick = { task -> taskToEdit = task },
-                            onBlockFocusTime = { start, end, title ->
+                            onBlockFocusTime = { start, end, title, messageId ->
                                 scope.launch {
                                     calendarRepository.blockFocusTime(user.uid, start, end, title)
-                                    taskRepository.createTask(
-                                        userId = user.uid,
-                                        title = title,
-                                        dueEpochMillis = start,
-                                        priority = Priority.HIGH,
-                                        category = TaskCategory.WORK,
-                                        reminderSet = true
-                                    )
+                                    chatRepository.markFocusActionCompleted(messageId)
                                     analytics.logFocusTimeBlocked(45)
                                 }
                             }
@@ -491,29 +486,20 @@ fun NudgyAppScaffold(
                             onBlockFocusTime = { start, end, title ->
                                 scope.launch {
                                     calendarRepository.blockFocusTime(user.uid, start, end, title)
-                                    taskRepository.createTask(
-                                        userId = user.uid,
-                                        title = title,
-                                        dueEpochMillis = start,
-                                        priority = Priority.HIGH,
-                                        category = TaskCategory.WORK,
-                                        reminderSet = true
-                                    )
                                     analytics.logFocusTimeBlocked(45)
                                 }
                             },
                             onAddEvent = { title, start, end, loc, type ->
                                 scope.launch {
+                                    val conflict = calendarRepository.checkConflict(user.uid, start, end)
+                                    if (conflict.hasConflict) {
+                                        Toast.makeText(
+                                            context,
+                                            "Heads up: this overlaps with '${conflict.conflictingEvent?.title}'",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
                                     calendarRepository.addEvent(user.uid, title, start, end, loc, type)
-                                    taskRepository.createTask(
-                                        userId = user.uid,
-                                        title = title,
-                                        description = loc,
-                                        dueEpochMillis = start,
-                                        priority = if (type == "FOCUS_TIME") Priority.HIGH else Priority.MEDIUM,
-                                        category = TaskCategory.WORK,
-                                        reminderSet = true
-                                    )
                                 }
                             },
                             onDeleteEvent = { eventId ->
@@ -542,7 +528,7 @@ fun NudgyAppScaffold(
         if (showFloatingBubbleDialog) {
             val pendingTask = todayTasks.firstOrNull { !it.isCompleted }
             NudgyFloatingBubbleDialog(
-                reminderTitle = pendingTask?.title ?: "Review product proposal",
+                reminderTitle = pendingTask?.title ?: "No pending tasks right now",
                 onDoneClick = {
                     showFloatingBubbleDialog = false
                     analytics.logNudgeInteracted("done")
