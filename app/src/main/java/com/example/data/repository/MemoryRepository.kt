@@ -59,6 +59,7 @@ class MemoryRepository(
     }
 
     fun startCloudSync(userId: String) {
+        if (userId == com.example.auth.AuthManager.GUEST_USER_ID) return
         snapshotListener?.remove()
         try {
             val dbId = context.getString(R.string.firestore_database_id)
@@ -103,6 +104,7 @@ class MemoryRepository(
     }
 
     private fun syncMemoryToFirestore(userId: String, memory: NudgyMemoryEntity) {
+        if (userId == com.example.auth.AuthManager.GUEST_USER_ID) return
         repoScope.launch {
             try {
                 val dbId = context.getString(R.string.firestore_database_id)
@@ -126,6 +128,7 @@ class MemoryRepository(
     }
 
     private fun deleteMemoryFromFirestore(userId: String, memoryId: String) {
+        if (userId == com.example.auth.AuthManager.GUEST_USER_ID) return
         repoScope.launch {
             try {
                 val dbId = context.getString(R.string.firestore_database_id)
