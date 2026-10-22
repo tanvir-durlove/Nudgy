@@ -516,6 +516,19 @@ class CalendarRepository(
         } catch (e: Exception) {
             Log.w(TAG, "Could not start calendar events sync: ${e.message}")
         }
+        // One-time backfill: events created while cloud sync was unreachable
+        // (e.g. the retired applet database id era) exist only locally.
+        // Re-push them all — the write is an idempotent upsert by document
+        // id, so already-synced events are simply rewritten with themselves.
+        repoScope.launch {
+            try {
+                calendarDao.getAllEventsOnce(userId).forEach { event ->
+                    syncEventToFirestore(userId, event)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Events backfill failed: ${e.message}")
+            }
+        }
     }
 
     fun stopCloudSync() {

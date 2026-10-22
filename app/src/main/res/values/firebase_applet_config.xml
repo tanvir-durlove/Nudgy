@@ -1,4 +1,4 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
-    <string name="firestore_database_id" translatable="false">ai-studio-android-nudgy-0d313c85-9d32-482e-915b-9a5708f09ba7</string>
+    <string name="firestore_database_id" translatable="false">(default)</string>
 </resources>

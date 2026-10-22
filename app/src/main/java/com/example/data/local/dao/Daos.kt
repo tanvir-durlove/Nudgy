@@ -98,6 +98,9 @@ interface CalendarDao {
     @Query("SELECT * FROM calendar_events WHERE userId = :userId ORDER BY startEpochMillis ASC")
     fun getAllEventsFlow(userId: String): Flow<List<CalendarEventEntity>>
 
+    @Query("SELECT * FROM calendar_events WHERE userId = :userId ORDER BY startEpochMillis ASC")
+    suspend fun getAllEventsOnce(userId: String): List<CalendarEventEntity>
+
     @Query("SELECT * FROM calendar_events WHERE id = :id LIMIT 1")
     suspend fun getEventById(id: String): CalendarEventEntity?
 
