@@ -145,69 +145,116 @@ class CalendarRepository(
         val searchStart = now - (7 * 24 * 60 * 60 * 1000L) // past 7 days
         val searchEnd = now + (30 * 24 * 60 * 60 * 1000L) // next 30 days
 
-        val projection = arrayOf(
-            CalendarContract.Events._ID,
-            CalendarContract.Events.TITLE,
-            CalendarContract.Events.DTSTART,
-            CalendarContract.Events.DTEND,
-            CalendarContract.Events.EVENT_LOCATION,
-            CalendarContract.Events.ALL_DAY
-        )
+        // Query Instances (not Events) so recurring series expand into their
+        // individual occurrences inside the window.
+        val instancesUri = CalendarContract.Instances.CONTENT_URI.buildUpon().apply {
+            appendPath(searchStart.toString())
+            appendPath(searchEnd.toString())
+        }.build()
 
-        val selection = "(${CalendarContract.Events.DTSTART} >= ?) AND (${CalendarContract.Events.DTSTART} <= ?) AND (${CalendarContract.Events.DELETED} = 0)"
-        val selectionArgs = arrayOf(searchStart.toString(), searchEnd.toString())
+        val projection = arrayOf(
+            CalendarContract.Instances.EVENT_ID,
+            CalendarContract.Instances.TITLE,
+            CalendarContract.Instances.BEGIN,
+            CalendarContract.Instances.END,
+            CalendarContract.Instances.EVENT_LOCATION,
+            CalendarContract.Instances.ALL_DAY
+        )
+        val selection = "(${CalendarContract.Instances.DELETED} = 0)"
 
         try {
+            // Remote occurrences, keyed by (google event id, occurrence start)
+            // so each occurrence of a recurring series is tracked separately.
+            val remote = LinkedHashMap<Pair<Long, Long>, CalendarEventEntity>()
             context.contentResolver.query(
-                CalendarContract.Events.CONTENT_URI,
+                instancesUri,
                 projection,
                 selection,
-                selectionArgs,
-                "${CalendarContract.Events.DTSTART} ASC"
+                null,
+                "${CalendarContract.Instances.BEGIN} ASC"
             )?.use { cursor ->
-                val idIndex = cursor.getColumnIndex(CalendarContract.Events._ID)
-                val titleIndex = cursor.getColumnIndex(CalendarContract.Events.TITLE)
-                val startIndex = cursor.getColumnIndex(CalendarContract.Events.DTSTART)
-                val endIndex = cursor.getColumnIndex(CalendarContract.Events.DTEND)
-                val locIndex = cursor.getColumnIndex(CalendarContract.Events.EVENT_LOCATION)
-                val allDayIndex = cursor.getColumnIndex(CalendarContract.Events.ALL_DAY)
-
-                val existingEvents = calendarDao.getAllEventsFlow(userId).first()
+                val idIndex = cursor.getColumnIndex(CalendarContract.Instances.EVENT_ID)
+                val titleIndex = cursor.getColumnIndex(CalendarContract.Instances.TITLE)
+                val beginIndex = cursor.getColumnIndex(CalendarContract.Instances.BEGIN)
+                val endIndex = cursor.getColumnIndex(CalendarContract.Instances.END)
+                val locIndex = cursor.getColumnIndex(CalendarContract.Instances.EVENT_LOCATION)
+                val allDayIndex = cursor.getColumnIndex(CalendarContract.Instances.ALL_DAY)
 
                 while (cursor.moveToNext()) {
                     val gId = cursor.getLong(idIndex)
                     val rawTitle = cursor.getString(titleIndex) ?: "Untitled Event"
-                    val start = cursor.getLong(startIndex)
+                    val start = cursor.getLong(beginIndex)
                     var end = cursor.getLong(endIndex)
                     if (end <= start) end = start + (45 * 60 * 1000L)
                     val loc = if (locIndex >= 0) cursor.getString(locIndex) else null
                     val isAllDay = if (allDayIndex >= 0) cursor.getInt(allDayIndex) == 1 else false
 
-                    // Deduplicate against existing events
-                    val alreadyExists = existingEvents.any { local ->
-                        local.googleCalendarEventId == gId ||
-                        (local.title.equals(rawTitle, ignoreCase = true) && Math.abs(local.startEpochMillis - start) < 60_000L)
-                    }
+                    remote[gId to start] = CalendarEventEntity(
+                        id = "",
+                        userId = userId,
+                        title = rawTitle,
+                        startEpochMillis = start,
+                        endEpochMillis = end,
+                        locationOrLink = loc ?: "Google Calendar",
+                        eventType = if (rawTitle.contains("Focus", ignoreCase = true) || rawTitle.contains("Deep work", ignoreCase = true)) "FOCUS_TIME" else "MEETING",
+                        isAllDay = isAllDay,
+                        googleCalendarEventId = gId,
+                        isFromGoogleCalendar = true
+                    )
+                }
+            }
 
-                    if (!alreadyExists) {
-                        val eventType = if (rawTitle.contains("Focus", ignoreCase = true) || rawTitle.contains("Deep work", ignoreCase = true)) "FOCUS_TIME" else "MEETING"
-                        val newEntity = CalendarEventEntity(
-                            id = UUID.randomUUID().toString(),
-                            userId = userId,
-                            title = rawTitle,
-                            startEpochMillis = start,
-                            endEpochMillis = end,
-                            locationOrLink = loc ?: "Google Calendar",
-                            eventType = eventType,
-                            isAllDay = isAllDay,
-                            googleCalendarEventId = gId,
-                            isFromGoogleCalendar = true
-                        )
+            val existingEvents = calendarDao.getAllEventsFlow(userId).first()
+            val existingByKey = existingEvents
+                .filter { it.googleCalendarEventId != null }
+                .associateBy { it.googleCalendarEventId!! to it.startEpochMillis }
+
+            // Import new occurrences; update ones whose details changed on the
+            // Google side (title / end / location / all-day).
+            for ((key, remoteEvent) in remote) {
+                val local = existingByKey[key]
+                if (local == null) {
+                    // Legacy dedupe only against UNLINKED local events (e.g.
+                    // exported before ids were tracked). A different Google
+                    // event that merely shares title+minute is never swallowed.
+                    val legacyDup = existingEvents.any { e ->
+                        e.googleCalendarEventId == null &&
+                        e.title.equals(remoteEvent.title, ignoreCase = true) &&
+                        Math.abs(e.startEpochMillis - remoteEvent.startEpochMillis) < 60_000L
+                    }
+                    if (!legacyDup) {
+                        val newEntity = remoteEvent.copy(id = UUID.randomUUID().toString())
                         calendarDao.insertEvent(newEntity)
                         syncEventToFirestore(userId, newEntity)
                         syncedCount++
                     }
+                } else if (local.title != remoteEvent.title ||
+                    local.endEpochMillis != remoteEvent.endEpochMillis ||
+                    local.locationOrLink != remoteEvent.locationOrLink ||
+                    local.isAllDay != remoteEvent.isAllDay
+                ) {
+                    val updated = local.copy(
+                        title = remoteEvent.title,
+                        endEpochMillis = remoteEvent.endEpochMillis,
+                        locationOrLink = remoteEvent.locationOrLink,
+                        isAllDay = remoteEvent.isAllDay
+                    )
+                    calendarDao.insertEvent(updated)
+                    syncEventToFirestore(userId, updated)
                 }
+            }
+
+            // Reconcile deletions: a Google-linked local row inside the synced
+            // window whose occurrence no longer exists on the device calendar
+            // was deleted (or its series was deleted) in Google Calendar —
+            // remove it here too. Rows outside the window are never touched.
+            existingEvents.filter { local ->
+                local.googleCalendarEventId != null &&
+                local.startEpochMillis in searchStart..searchEnd &&
+                (local.googleCalendarEventId!! to local.startEpochMillis) !in remote.keys
+            }.forEach { stale ->
+                calendarDao.deleteEventByIdForUser(userId, stale.id)
+                deleteEventFromFirestore(userId, stale.id)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error syncing Google Calendar into Nudgy: ${e.message}")
@@ -333,10 +380,15 @@ class CalendarRepository(
         // Production: New users start with a clean schedule; events sync from real Google Calendar or manual creation.
     }
 
-    suspend fun findSuggestedFocusSlot(userId: String, dayMillis: Long): FocusTimeSlot? = withContext(Dispatchers.IO) {
+    suspend fun findSuggestedFocusSlot(userId: String, dayMillis: Long, busyIntervals: List<Pair<Long, Long>> = emptyList()): FocusTimeSlot? = withContext(Dispatchers.IO) {
         val (startOfDay, endOfDay) = getDayBounds(dayMillis)
-        val events = calendarDao.getEventsForDayFlow(userId, startOfDay, endOfDay).first()
-            .sortedBy { it.startEpochMillis }
+        // Busy timeline = calendar events + any extra busy intervals (the
+        // caller passes timed tasks, so a suggested slot never collides with
+        // a task even though tasks are not shown on the schedule).
+        val events = (calendarDao.getEventsForDayFlow(userId, startOfDay, endOfDay).first()
+            .map { it.startEpochMillis to it.endEpochMillis } +
+            busyIntervals.filter { it.first in startOfDay..endOfDay })
+            .sortedBy { it.first }
 
         val tf = SimpleDateFormat("h:mm a", Locale.getDefault())
         val now = System.currentTimeMillis()
@@ -375,10 +427,10 @@ class CalendarRepository(
             )
         }
 
-        // Check for gap between events (only consider gaps that are in the future)
+        // Check for gap between busy blocks (only consider gaps that are in the future)
         for (i in 0 until events.size - 1) {
-            val currentEnd = events[i].endEpochMillis
-            val nextStart = events[i + 1].startEpochMillis
+            val currentEnd = events[i].second
+            val nextStart = events[i + 1].first
             val gapMillis = nextStart - currentEnd
             val candidateStart = currentEnd + (5 * 60 * 1000L)
             if (gapMillis >= 35 * 60 * 1000L && (!isToday || candidateStart > now)) {
@@ -396,9 +448,8 @@ class CalendarRepository(
             }
         }
 
-        // Fallback: after the last event of the day or upcoming future window
-        val lastEvent = events.last()
-        val rawStart = lastEvent.endEpochMillis + (15 * 60 * 1000L)
+        // Fallback: after the last busy block of the day or upcoming future window
+        val rawStart = events.last().second + (15 * 60 * 1000L)
         val slotStart = if (isToday && rawStart <= now) computeNextFutureSlot(now) else rawStart
         val slotEnd = slotStart + (45 * 60 * 1000L)
         val formattedSlot = "${tf.format(java.util.Date(slotStart))} – ${tf.format(java.util.Date(slotEnd))}"
@@ -437,6 +488,7 @@ class CalendarRepository(
                                         val location = doc.getString("locationOrLink")
                                         val eventType = doc.getString("eventType") ?: "EVENT"
                                         val isAllDay = doc.getBoolean("isAllDay") ?: false
+                                        val gId = doc.getLong("googleCalendarEventId")
                                         val event = CalendarEventEntity(
                                             id = doc.id,
                                             userId = userId,
@@ -446,7 +498,8 @@ class CalendarRepository(
                                             locationOrLink = location,
                                             eventType = eventType,
                                             isAllDay = isAllDay,
-                                            isFromGoogleCalendar = false
+                                            googleCalendarEventId = gId,
+                                            isFromGoogleCalendar = doc.getBoolean("isFromGoogleCalendar") ?: (gId != null)
                                         )
                                         calendarDao.insertEvent(event)
                                     }
@@ -485,6 +538,8 @@ class CalendarRepository(
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
                 if (event.locationOrLink != null) payload["locationOrLink"] = event.locationOrLink
+                event.googleCalendarEventId?.let { payload["googleCalendarEventId"] = it }
+                payload["isFromGoogleCalendar"] = event.isFromGoogleCalendar
                 firestore.collection("users")
                     .document(userId)
                     .collection("events")

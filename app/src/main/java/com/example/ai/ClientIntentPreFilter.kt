@@ -53,16 +53,23 @@ class ClientIntentPreFilter(
         val trimmed = userPrompt.trim()
         val cleaned = cleanUserPrompt(trimmed)
         val lower = cleaned.lowercase()
+        // Digit-normalized copy used ONLY for time extraction, so Bengali
+        // digits (৫টায়) parse the same as ASCII (5 PM). Titles keep the
+        // user's original script.
+        val cleanedNorm = normalizeBengaliDigits(cleaned)
+        // Timed tasks count as busy time when suggesting focus slots.
+        val taskBusyIntervals = todayTasks.filter { !it.isCompleted }
+            .map { it.dueDateEpochMillis to (it.dueDateEpochMillis + 30 * 60 * 1000L) }
 
         // 1. Bengali: Dynamic Call / Reminder Intent (e.g. "রাহুলকে কল করার কথা মনে করিয়ে দিও")
         if (cleaned.contains("মনে করিয়ে") || (cleaned.contains("কল") && cleaned.contains("করার"))) {
-            val isTomorrow = cleaned.contains("আগামীকাল") || cleaned.contains("কাল")
+            val isTomorrow = mentionsTomorrow(cleaned, lower)
             val cal = Calendar.getInstance()
             if (isTomorrow) {
                 cal.add(Calendar.DAY_OF_YEAR, 1)
             }
             // Check for explicit time like "৩টায়", "3 PM"
-            val timeMatcher = Pattern.compile("(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?\\s*(?:টায়|টায়)?)", Pattern.CASE_INSENSITIVE).matcher(cleaned)
+            val timeMatcher = Pattern.compile("(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?\\s*(?:টায়|টায়)?)", Pattern.CASE_INSENSITIVE).matcher(cleanedNorm)
             if (timeMatcher.find()) {
                 val rawTime = timeMatcher.group(1)?.replace("টায়", "")?.replace("টায়", "")?.trim() ?: "3 PM"
                 parseTimeIntoCalendar(rawTime, cal)
@@ -78,7 +85,7 @@ class ClientIntentPreFilter(
                 .replace("মনে করিয়ে দাও", "")
                 .replace("কথা", "")
                 .replace("আগামীকাল", "")
-                .replace("কাল", "")
+                .replace(Regex("(^|\\s)কাল(কে)?(?=\\s|$)"), " ")
                 .trim()
             if (title.isBlank()) title = "জরুরি কল ও ফলোআপ"
 
@@ -90,7 +97,9 @@ class ClientIntentPreFilter(
                 category = TaskCategory.WORK,
                 reminderSet = true
             )
-            val dayLabel = if (isTomorrow) "আগামীকাল" else "আজ"
+            // Label from the ACTUAL date: parseTimeIntoCalendar may have
+            // rolled a past time to tomorrow — never claim "today" then.
+            val dayLabel = if (cal.get(Calendar.DAY_OF_YEAR) != Calendar.getInstance().get(Calendar.DAY_OF_YEAR)) "আগামীকাল" else "আজ"
             val formatted = formatTime(cal.timeInMillis)
             return PreFilterResult.Handled(
                 responseText = "ঠিক আছে! $dayLabel $formatted সময়ে \"$title\" মনে করিয়ে দেব। 🔔",
@@ -183,7 +192,7 @@ class ClientIntentPreFilter(
             }
 
             // Extract time if present
-            val timeMatcher = Pattern.compile("(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm))", Pattern.CASE_INSENSITIVE).matcher(cleaned)
+            val timeMatcher = Pattern.compile("(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm))", Pattern.CASE_INSENSITIVE).matcher(cleanedNorm)
             if (timeMatcher.find()) {
                 parseTimeIntoCalendar(timeMatcher.group(1) ?: "2:00 PM", cal)
             } else {
@@ -241,10 +250,16 @@ class ClientIntentPreFilter(
             )
 
             // Meetings live on the Calendar only — no shadow task is created.
-            val dayLabel = if (isTomorrow) "tomorrow" else "today"
+            // Label from the ACTUAL date (the parser may roll a past time to
+            // tomorrow) and warn when the slot overlaps an existing event.
+            val dayLabel = if (cal.get(Calendar.DAY_OF_YEAR) != Calendar.getInstance().get(Calendar.DAY_OF_YEAR)) "tomorrow" else "today"
             val formattedTime = formatTime(startMillis)
+            val conflict = calendarRepository.checkConflict(userId, startMillis, endMillis)
+            val conflictNote = if (conflict.hasConflict && conflict.conflictingEvent?.id != createdEvent.id) {
+                " ⚠ Heads up: this overlaps with '${conflict.conflictingEvent?.title}'."
+            } else ""
             return PreFilterResult.Handled(
-                responseText = "Done! Scheduled \"$meetingTitle\" for $dayLabel at $formattedTime on your calendar. 📅",
+                responseText = "Done! Scheduled \"$meetingTitle\" for $dayLabel at $formattedTime on your calendar. 📅$conflictNote",
                 createdEvent = createdEvent,
                 actionType = ChatActionType.EVENT_CREATED,
                 focusStartMillis = startMillis,
@@ -276,7 +291,7 @@ class ClientIntentPreFilter(
         if (lower.contains("free time") || lower.contains("open time") || lower.contains("focus slot") ||
             cleaned.contains("ফাঁকা সময়") || cleaned.contains("ফ্রি সময়")
         ) {
-            val suggestedSlot = calendarRepository.findSuggestedFocusSlot(userId, System.currentTimeMillis())
+            val suggestedSlot = calendarRepository.findSuggestedFocusSlot(userId, System.currentTimeMillis(), taskBusyIntervals)
             val startMillis = suggestedSlot?.startEpochMillis ?: run {
                 val cal = Calendar.getInstance().apply {
                     add(Calendar.HOUR_OF_DAY, 1)
@@ -303,7 +318,7 @@ class ClientIntentPreFilter(
 
         // 7. English: "Block focus time" / "Block 45m focus" / "Schedule focus" / "ফোকাস টাইম যোগ করো"
         if (lower.contains("block focus") || lower.contains("block 45m") || lower.contains("schedule focus") || cleaned.contains("ফোকাস")) {
-            val suggestedSlot = calendarRepository.findSuggestedFocusSlot(userId, System.currentTimeMillis())
+            val suggestedSlot = calendarRepository.findSuggestedFocusSlot(userId, System.currentTimeMillis(), taskBusyIntervals)
             val startMillis = suggestedSlot?.startEpochMillis ?: run {
                 val cal = Calendar.getInstance().apply {
                     add(Calendar.HOUR_OF_DAY, 1)
@@ -318,17 +333,8 @@ class ClientIntentPreFilter(
             val timeRangeText = "${formatTime(java.util.Date(startMillis))} – ${formatTime(java.util.Date(endMillis))}"
 
             val event = calendarRepository.blockFocusTime(userId, startMillis, endMillis, "Focus Time (Deep Work)")
-            val task = taskRepository.createTask(
-                userId = userId,
-                title = "Focus Time (Deep Work)",
-                dueEpochMillis = startMillis,
-                priority = Priority.HIGH,
-                category = TaskCategory.WORK,
-                reminderSet = true
-            )
             return PreFilterResult.Handled(
-                responseText = "Done! Reserved $durationMinutes minutes of Deep Work on your calendar and task list ($timeRangeText). Let's stay in the zone! 🎯",
-                createdTask = task,
+                responseText = "Done! Reserved $durationMinutes minutes of Deep Work on your calendar ($timeRangeText). Let's stay in the zone! 🎯",
                 createdEvent = event,
                 quickSuggestions = listOf("Plan my day", "Show today's tasks", "What do you remember?")
             )
@@ -337,7 +343,11 @@ class ClientIntentPreFilter(
         // 8. English: "Plan my day" / "দিনের প্ল্যান"
         if (lower == "plan my day" || lower.contains("plan my day") || cleaned.contains("প্ল্যান")) {
             val pending = todayTasks.filter { !it.isCompleted }
-            val firstTaskTitle = pending.firstOrNull()?.title ?: "Review product proposal"
+            val planLead = if (pending.isEmpty()) {
+                "You have no tasks scheduled yet today"
+            } else {
+                "Start with '${pending.first().title}'"
+            }
             val meetingText = if (events.isNotEmpty()) {
                 val firstEvent = events.first()
                 "meeting '${firstEvent.title}' at ${formatTime(firstEvent.startEpochMillis)}"
@@ -345,7 +355,7 @@ class ClientIntentPreFilter(
                 "no conflicting meetings"
             }
 
-            val suggestedSlot = calendarRepository.findSuggestedFocusSlot(userId, System.currentTimeMillis())
+            val suggestedSlot = calendarRepository.findSuggestedFocusSlot(userId, System.currentTimeMillis(), taskBusyIntervals)
             val startFocus = suggestedSlot?.startEpochMillis ?: run {
                 val cal = Calendar.getInstance().apply {
                     add(Calendar.HOUR_OF_DAY, 1)
@@ -360,7 +370,7 @@ class ClientIntentPreFilter(
             val focusRangeText = "${formatTime(java.util.Date(startFocus))} – ${formatTime(java.util.Date(endFocus))}"
 
             return PreFilterResult.Handled(
-                responseText = "Here is your plan today: Start with '$firstTaskTitle'. You have $meetingText, and an open $durationMinutes-minute focus window ($focusRangeText).",
+                responseText = "Here is your plan today: $planLead. You have $meetingText, and an open $durationMinutes-minute focus window ($focusRangeText).",
                 actionType = ChatActionType.FOCUS_TIME_PROPOSAL,
                 focusStartMillis = startFocus,
                 focusEndMillis = endFocus,
@@ -539,7 +549,7 @@ class ClientIntentPreFilter(
         // Strictly require valid time regex and actionable nouns so casual phrases like "I am busy" or names like "Sam" are not hijacked!
         val isEventCancellation = lower.contains("cancel") || lower.contains("delete") ||
                 lower.contains("remove") || cleaned.contains("বাতিল") || cleaned.contains("মুছে")
-        val hasTimePattern = Pattern.compile("(?i)\\b\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)\\b").matcher(cleaned).find()
+        val hasTimePattern = Pattern.compile("(?i)\\b\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)\\b").matcher(cleanedNorm).find()
         val hasActionContext = lower.contains("appointment") || lower.contains("session") ||
                 lower.contains("doctor") || lower.contains("dentist") || lower.contains("workout") ||
                 lower.contains("gym") || lower.contains("flight") || lower.contains("pickup") ||
@@ -550,7 +560,7 @@ class ClientIntentPreFilter(
             val isTomorrow = lower.contains("tomorrow")
             if (isTomorrow) cal.add(Calendar.DAY_OF_YEAR, 1)
 
-            val timeMatcher = Pattern.compile("(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm))", Pattern.CASE_INSENSITIVE).matcher(cleaned)
+            val timeMatcher = Pattern.compile("(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm))", Pattern.CASE_INSENSITIVE).matcher(cleanedNorm)
             if (timeMatcher.find()) {
                 parseTimeIntoCalendar(timeMatcher.group(1) ?: "3:00 PM", cal)
             } else {
@@ -567,6 +577,10 @@ class ClientIntentPreFilter(
 
             if (fallbackTitle.isNotBlank() && fallbackTitle.length in 3..60) {
                 fallbackTitle = fallbackTitle.replaceFirstChar { it.uppercase() }
+                val conflict = calendarRepository.checkConflict(userId, cal.timeInMillis, cal.timeInMillis + (45 * 60 * 1000L))
+                val conflictNote = if (conflict.hasConflict) {
+                    " ⚠ Heads up: this overlaps with '${conflict.conflictingEvent?.title}'."
+                } else ""
                 // Scheduled appointments/sessions are events — Calendar only,
                 // no shadow task (keeps Tasks and Calendar separate).
                 val event = calendarRepository.addEvent(
@@ -581,7 +595,7 @@ class ClientIntentPreFilter(
                 val isNowTomorrow = cal.get(Calendar.DAY_OF_YEAR) != Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
                 val dayLabel = if (isNowTomorrow) "tomorrow at" else "today at"
                 return PreFilterResult.Handled(
-                    responseText = "Got it! I've scheduled '$fallbackTitle' for $dayLabel $formatted on your calendar. 📅",
+                    responseText = "Got it! I've scheduled '$fallbackTitle' for $dayLabel $formatted on your calendar. 📅$conflictNote",
                     createdEvent = event,
                     actionType = ChatActionType.EVENT_CREATED,
                     quickSuggestions = listOf("Show schedule", "Plan my day", "Find free time")
@@ -610,7 +624,7 @@ class ClientIntentPreFilter(
             val isTomorrow = mentionsTomorrow(cleaned, lower)
             val cal = Calendar.getInstance()
             if (isTomorrow) cal.add(Calendar.DAY_OF_YEAR, 1)
-            val timeMatcher = Pattern.compile("(?:at\\s+)?(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm))", Pattern.CASE_INSENSITIVE).matcher(cleaned)
+            val timeMatcher = Pattern.compile("(?:at\\s+)?(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm))", Pattern.CASE_INSENSITIVE).matcher(cleanedNorm)
             if (timeMatcher.find()) {
                 parseTimeIntoCalendar(timeMatcher.group(1) ?: "9:00 AM", cal)
             } else {
@@ -656,6 +670,16 @@ class ClientIntentPreFilter(
         return PreFilterResult.Unhandled
     }
 
+    private fun normalizeBengaliDigits(text: String): String {
+        val bn = "০১২৩৪৫৬৭৮৯"
+        val sb = StringBuilder(text.length)
+        for (ch in text) {
+            val idx = bn.indexOf(ch)
+            sb.append(if (idx >= 0) ('0' + idx) else ch)
+        }
+        return sb.toString()
+    }
+
     private fun mentionsTomorrow(cleaned: String, lower: String): Boolean {
         if (lower.contains("tomorrow") || cleaned.contains("আগামীকাল")) return true
         // Standalone কাল / কালকে only — a bare contains("কাল") also matches
@@ -681,7 +705,7 @@ class ClientIntentPreFilter(
     }
 
     private fun parseTimeIntoCalendar(timeStr: String, cal: Calendar) {
-        val lower = timeStr.lowercase().trim()
+        val lower = normalizeBengaliDigits(timeStr).lowercase().trim()
         val isPm = lower.contains("pm")
         val clean = lower.replace("am", "").replace("pm", "").trim()
         val parts = clean.split(":")
