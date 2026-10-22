@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -239,6 +240,24 @@ fun NudgyAppScaffold(
     var showFloatingBubbleDialog by remember { mutableStateOf(false) }
     var isThinking by remember { mutableStateOf(false) }
     var isCalendarConnected by remember { mutableStateOf(calendarRepository.hasCalendarPermissions()) }
+
+    // System Back: dismiss the topmost open surface first, then fall back
+    // to the HOME tab. Only on HOME with nothing open does Back exit the
+    // app (previously Back quit from any tab or sheet).
+    BackHandler(
+        enabled = showFloatingBubbleDialog || taskToEdit != null || showCreateTaskSheet ||
+            showNotificationsSheet || showProfileSheet ||
+            currentDestination != NudgyNavDestination.HOME
+    ) {
+        when {
+            showFloatingBubbleDialog -> showFloatingBubbleDialog = false
+            taskToEdit != null -> taskToEdit = null
+            showCreateTaskSheet -> showCreateTaskSheet = false
+            showNotificationsSheet -> showNotificationsSheet = false
+            showProfileSheet -> showProfileSheet = false
+            else -> currentDestination = NudgyNavDestination.HOME
+        }
+    }
 
     val calendarPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()

@@ -186,6 +186,9 @@ class TaskRepository(
     }
 
     private fun deleteTaskFromFirestore(userId: String, taskId: String) {
+        // Guests have no Firebase Auth identity — cloud calls would only
+        // fail with permission-denied; local persistence is unaffected.
+        if (userId == com.example.auth.AuthManager.GUEST_USER_ID) return
         repoScope.launch {
             try {
                 val dbId = context.getString(R.string.firestore_database_id)
@@ -199,7 +202,7 @@ class TaskRepository(
 
     suspend fun clearCompletedTasks(userId: String) = withContext(Dispatchers.IO) {
         val completed = taskDao.getCompletedTasksOnce(userId)
-        if (completed.isNotEmpty()) {
+        if (completed.isNotEmpty() && userId != com.example.auth.AuthManager.GUEST_USER_ID) {
             repoScope.launch {
                 try {
                     val dbId = context.getString(R.string.firestore_database_id)
@@ -217,6 +220,7 @@ class TaskRepository(
     }
 
     fun startCloudSync(userId: String) {
+        if (userId == com.example.auth.AuthManager.GUEST_USER_ID) return
         snapshotListener?.remove()
         try {
             val dbId = context.getString(R.string.firestore_database_id)
@@ -301,6 +305,7 @@ class TaskRepository(
      * Debounced Cloud Sync to Firestore (Minimizes server writes)
      */
     fun syncDirtyTasksToCloud(userId: String, scope: CoroutineScope = repoScope) {
+        if (userId == com.example.auth.AuthManager.GUEST_USER_ID) return
         scope.launch(Dispatchers.IO) {
             try {
                 val unsynced = taskDao.getUnsyncedTasks(userId)
