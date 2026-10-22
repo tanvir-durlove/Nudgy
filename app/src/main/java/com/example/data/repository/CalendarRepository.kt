@@ -69,37 +69,43 @@ class CalendarRepository(
     }
 
     private fun getPrimaryGoogleCalendarId(): Long? {
+        // Pick the calendar exports actually belong in: a WRITABLE Google
+        // calendar, preferring the account's primary one. The old picker
+        // returned the first calendar flagged primary OR Google — on many
+        // phones that is the device-local calendar (primary-flagged, never
+        // syncs to Google) or a read-only Google calendar (Holidays etc.),
+        // so app-created events never reached Google Calendar.
         val projection = arrayOf(
             CalendarContract.Calendars._ID,
-            CalendarContract.Calendars.ACCOUNT_NAME,
             CalendarContract.Calendars.ACCOUNT_TYPE,
-            CalendarContract.Calendars.IS_PRIMARY
+            CalendarContract.Calendars.IS_PRIMARY,
+            CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL
         )
         val uri = CalendarContract.Calendars.CONTENT_URI
-        var selectedId: Long? = null
+        var fallbackId: Long? = null
         try {
             context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
                 val idIndex = cursor.getColumnIndex(CalendarContract.Calendars._ID)
                 val typeIndex = cursor.getColumnIndex(CalendarContract.Calendars.ACCOUNT_TYPE)
                 val primaryIndex = cursor.getColumnIndex(CalendarContract.Calendars.IS_PRIMARY)
+                val accessIndex = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL)
 
                 while (cursor.moveToNext()) {
-                    val calId = cursor.getLong(idIndex)
+                    if (idIndex < 0) continue
                     val acctType = if (typeIndex >= 0) cursor.getString(typeIndex) else null
+                    if (acctType != "com.google") continue
+                    val access = if (accessIndex >= 0) cursor.getInt(accessIndex) else 0
+                    if (access < CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR) continue
+                    val calId = cursor.getLong(idIndex)
                     val isPrimary = if (primaryIndex >= 0) cursor.getInt(primaryIndex) == 1 else false
-
-                    if (isPrimary || acctType == "com.google") {
-                        return calId
-                    }
-                    if (selectedId == null) {
-                        selectedId = calId
-                    }
+                    if (isPrimary) return calId
+                    if (fallbackId == null) fallbackId = calId
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error finding primary Google Calendar ID: ${e.message}")
         }
-        return selectedId
+        return fallbackId
     }
 
     private fun exportEventToGoogleCalendar(
@@ -257,6 +263,33 @@ class CalendarRepository(
             }.forEach { stale ->
                 calendarDao.deleteEventByIdForUser(userId, stale.id)
                 deleteEventFromFirestore(userId, stale.id)
+            }
+            // Export retry: app-created events that never reached Google
+            // (export failed or permission was missing at creation) carry no
+            // Google id — push them now and record the id, so the two-way
+            // sync heals itself on the next sync.
+            try {
+                calendarDao.getAllEventsOnce(userId)
+                    .filter { it.googleCalendarEventId == null && !it.isFromGoogleCalendar }
+                    .forEach { local ->
+                        val gId = exportEventToGoogleCalendar(
+                            title = local.title,
+                            startEpochMillis = local.startEpochMillis,
+                            endEpochMillis = local.endEpochMillis,
+                            location = local.locationOrLink,
+                            eventType = local.eventType
+                        )
+                        if (gId != null) {
+                            val updated = local.copy(
+                                googleCalendarEventId = gId,
+                                isFromGoogleCalendar = true
+                            )
+                            calendarDao.insertEvent(updated)
+                            syncEventToFirestore(userId, updated)
+                        }
+                    }
+            } catch (e: Exception) {
+                Log.e(TAG, "Export retry failed: ${e.message}")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error syncing Google Calendar into Nudgy: ${e.message}")
