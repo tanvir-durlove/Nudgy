@@ -69,7 +69,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ai.WakeWordForegroundService
 import com.example.auth.AuthManager
 import com.example.auth.NudgyUser
 import com.example.data.local.entity.NudgyMemoryEntity
@@ -500,72 +499,11 @@ fun YourNudgySheet(
     }
 
     if (showVoiceDialog) {
-        val isWakeWordActive by WakeWordForegroundService.isWakeWordActive.collectAsStateWithLifecycle()
-        val micPermissionLauncher = rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.RequestPermission()
-        ) { isGranted ->
-            if (isGranted) {
-                WakeWordForegroundService.start(context)
-            } else {
-                Toast.makeText(context, "Microphone permission is required for 'Hey Nudgy'", Toast.LENGTH_SHORT).show()
-            }
-        }
-
         AlertDialog(
             onDismissRequest = { showVoiceDialog = false },
             title = { Text("Voice & Speech", fontWeight = FontWeight.Bold, color = NudgyCharcoal) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    // Always-On "Hey Nudgy" Wake Word Toggle
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = NudgyPeach,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Always-On \"Hey Nudgy\"",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
-                                    color = NudgyCharcoal
-                                )
-                                Text(
-                                    text = "Listen for \"Hey Nudgy\" in background to schedule tasks & calendar",
-                                    fontSize = 11.sp,
-                                    lineHeight = 15.sp,
-                                    color = NudgyCharcoal.copy(alpha = 0.8f)
-                                )
-                            }
-                            Switch(
-                                checked = isWakeWordActive,
-                                onCheckedChange = { active ->
-                                    if (active) {
-                                        val hasPermission = ContextCompat.checkSelfPermission(
-                                            context,
-                                            Manifest.permission.RECORD_AUDIO
-                                        ) == PackageManager.PERMISSION_GRANTED
-
-                                        if (hasPermission) {
-                                            WakeWordForegroundService.start(context)
-                                        } else {
-                                            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                        }
-                                    } else {
-                                        WakeWordForegroundService.stop(context)
-                                    }
-                                },
-                                colors = SwitchDefaults.colors(checkedTrackColor = NudgyPrimary)
-                            )
-                        }
-                    }
-
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,

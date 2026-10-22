@@ -62,7 +62,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.example.ai.WakeWordForegroundService
 import com.example.auth.NudgyUser
 import com.example.data.local.entity.CalendarEventEntity
 import com.example.data.local.entity.TaskEntity
@@ -127,14 +126,6 @@ fun ChatScreen(
     ) { isGranted ->
         if (isGranted) {
             onStartVoice()
-        }
-    }
-
-    val wakeWordPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
-            WakeWordForegroundService.start(context)
         }
     }
 
@@ -232,50 +223,6 @@ fun ChatScreen(
                         )
 
                         Spacer(modifier = Modifier.height(18.dp))
-
-                        // Always-On "Hey Nudgy" Wake Word Status Pill
-                        val isWakeWordActive by WakeWordForegroundService.isWakeWordActive.collectAsStateWithLifecycle()
-                        Surface(
-                            shape = RoundedCornerShape(100.dp),
-                            color = if (isWakeWordActive) Color(0xFFE8F5E9) else Color(0xFFF3EFE6),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                if (isWakeWordActive) Color(0xFF81C784) else Color(0xFFDCD6CA)
-                            ),
-                            modifier = Modifier.clickable {
-                                val permissionCheck = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
-                                if (permissionCheck == PackageManager.PERMISSION_GRANTED) {
-                                    if (isWakeWordActive) {
-                                        WakeWordForegroundService.stop(context)
-                                    } else {
-                                        WakeWordForegroundService.start(context)
-                                    }
-                                } else {
-                                    wakeWordPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                }
-                            }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .clip(CircleShape)
-                                        .background(if (isWakeWordActive) Color(0xFF2E7D32) else NudgyMuted)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = if (isWakeWordActive) "Always-On \"Hey Nudgy\" Active" else "Tap to Enable \"Hey Nudgy\"",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (isWakeWordActive) Color(0xFF1B5E20) else NudgyCharcoal
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(14.dp))
 
                         // Quick Prompt Pills
                         FlowRow(
