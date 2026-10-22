@@ -24,6 +24,12 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
+        <!-- AdMob application id. This is Google's public TEST app id, safe
+             for development builds. Replace with the real AdMob app id
+             (ca-app-pub-7794111343358988~...) before the Play release. -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-3940256099942544~3347511713" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

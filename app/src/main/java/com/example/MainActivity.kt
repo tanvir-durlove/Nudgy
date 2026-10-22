@@ -3,6 +3,7 @@ package com.example
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import android.app.Activity
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -39,6 +40,7 @@ import com.example.ai.ClientIntentPreFilter
 import com.example.ai.GeminiClient
 import com.example.ai.PreFilterResult
 import com.example.ai.VoiceAssistantManager
+import com.example.ads.NudgyAds
 import com.example.analytics.NudgyAnalytics
 import com.example.analytics.NudgyRemoteConfig
 import com.example.analytics.RemoteConfigValues
@@ -99,6 +101,10 @@ class MainActivity : ComponentActivity() {
         reminderManager = ReminderManager(this)
         analytics = NudgyAnalytics(this)
         remoteConfig = NudgyRemoteConfig()
+
+        // Ads: consent (UMP) + Mobile Ads SDK. Ads themselves stay OFF
+        // until Remote Config ads_enabled is flipped on.
+        NudgyAds.initialize(this)
 
         preFilter = ClientIntentPreFilter(taskRepository, calendarRepository, memoryRepository)
         geminiClient = GeminiClient(applicationContext)
@@ -297,6 +303,26 @@ fun NudgyAppScaffold(
     val completedTasks by taskRepository.observeCompletedTasks(user.uid).collectAsStateWithLifecycle(emptyList())
     val allTasks by taskRepository.observeAllTasks(user.uid).collectAsStateWithLifecycle(emptyList())
     val dailyStats by taskRepository.observeTodayStats(user.uid).collectAsStateWithLifecycle(DailyTaskStats())
+
+    // Ads: show one interstitial per N completed tasks (N and the on/off
+    // switch come from Remote Config; ads_enabled defaults to OFF, so
+    // nothing shows until it is deliberately enabled in the console).
+    val remoteValues by remoteConfig.configState.collectAsStateWithLifecycle()
+    val adsPrefs = remember { context.getSharedPreferences("nudgy_ads", android.content.Context.MODE_PRIVATE) }
+    var lastCompletedCount by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(dailyStats.completed) {
+        val previous = lastCompletedCount
+        lastCompletedCount = dailyStats.completed
+        if (previous == null || dailyStats.completed <= previous) return@LaunchedEffect
+        if (!remoteValues.adsEnabled) return@LaunchedEffect
+        val sinceLastAd = adsPrefs.getInt("completions_since_ad", 0) + (dailyStats.completed - previous)
+        if (sinceLastAd >= remoteValues.adFrequencyTasks) {
+            adsPrefs.edit().putInt("completions_since_ad", 0).apply()
+            (context as? Activity)?.let { NudgyAds.showInterstitial(it) }
+        } else {
+            adsPrefs.edit().putInt("completions_since_ad", sinceLastAd).apply()
+        }
+    }
     val todayEvents by calendarRepository.observeEventsForDay(user.uid, System.currentTimeMillis()).collectAsStateWithLifecycle(emptyList())
     val allEvents by calendarRepository.observeAllEvents(user.uid).collectAsStateWithLifecycle(emptyList())
     val memories by memoryRepository.observeMemories(user.uid).collectAsStateWithLifecycle(emptyList())
