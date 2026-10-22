@@ -35,6 +35,9 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE userId = :userId AND isSyncedToCloud = 0")
     suspend fun getUnsyncedTasks(userId: String): List<TaskEntity>
 
+    @Query("SELECT * FROM tasks WHERE userId = :userId")
+    suspend fun getAllTasksOnce(userId: String): List<TaskEntity>
+
     @Query("SELECT * FROM tasks WHERE isCompleted = 0 AND reminderSet = 1 AND (reminderEpochMillis > :now OR (reminderEpochMillis IS NULL AND dueDateEpochMillis > :now))")
     suspend fun getPendingTasksWithReminders(now: Long): List<TaskEntity>
 

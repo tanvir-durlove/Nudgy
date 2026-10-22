@@ -21,6 +21,8 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Co
 import com.google.firebase.Firebase
 import android.accounts.AccountManager
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthRecentLoginRequiredException
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.CollectionReference
@@ -428,7 +430,22 @@ class AuthManager(private val context: Context) {
                     purgeLocalData(uid)
                 }
 
-                user.delete().await()
+                // The auth user is deleted LAST because the Firestore purge
+                // above needs the live session (per-user rules). But delete()
+                // refuses on stale sessions — previously that stranded the
+                // user: data already gone, account alive, no way forward.
+                // Now: re-authenticate with Google and retry once. If the
+                // user cancels, fail honestly — the account still exists
+                // (its data already removed) and deletion can be retried
+                // after a fresh sign-in.
+                try {
+                    user.delete().await()
+                } catch (e: FirebaseAuthRecentLoginRequiredException) {
+                    if (!reauthenticateWithGoogle(user)) {
+                        throw Exception("Google requires a fresh sign-in to delete your account. Your data has been removed; please sign in again and retry account deletion to finish.")
+                    }
+                    user.delete().await()
+                }
                 credentialManager.clearCredentialState(ClearCredentialStateRequest())
                 prefs.edit().clear().putBoolean(KEY_EXPLICITLY_SIGNED_OUT, true).apply()
                 _userState.value = null
@@ -448,6 +465,50 @@ class AuthManager(private val context: Context) {
         }
     }
 
+    /**
+     * Fresh Google re-authentication for sensitive operations. Returns true
+     * when the user re-authenticated successfully.
+     */
+    private suspend fun reauthenticateWithGoogle(user: FirebaseUser): Boolean {
+        val clientId = getWebClientId()
+        if (clientId.isEmpty()) return false
+        val googleIdOption = GetGoogleIdOption.Builder()
+            .setFilterByAuthorizedAccounts(true)
+            .setServerClientId(clientId)
+            .setAutoSelectEnabled(true)
+            .build()
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(googleIdOption)
+            .build()
+        return try {
+            val result = credentialManager.getCredential(context, request)
+            val credential = result.credential
+            if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                val idToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
+                user.reauthenticate(GoogleAuthProvider.getCredential(idToken, null)).await()
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Re-authentication failed: ${e.message}")
+            false
+        }
+    }
+
+    /** Cancel every scheduled reminder alarm belonging to a user. */
+    private suspend fun cancelAllRemindersForUser(userId: String) {
+        try {
+            val db = NudgyDatabase.getInstance(context)
+            val reminderManager = com.example.reminders.ReminderManager(context)
+            db.taskDao().getAllTasksOnce(userId).forEach { task ->
+                reminderManager.cancelReminder(task.id)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Reminder cancel error: ${e.message}")
+        }
+    }
+
     private suspend fun purgeFirestoreSubcollection(collection: CollectionReference) {
         try {
             val snapshot = collection.get().await()
@@ -460,6 +521,9 @@ class AuthManager(private val context: Context) {
     }
 
     private suspend fun purgeLocalData(userId: String) = withContext(Dispatchers.IO) {
+        // Alarms first: once the task rows are gone their PendingIntents
+        // can no longer be matched and cancelled.
+        cancelAllRemindersForUser(userId)
         try {
             val db = NudgyDatabase.getInstance(context)
             db.taskDao().clearTasksForUser(userId)
