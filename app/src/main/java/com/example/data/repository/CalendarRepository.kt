@@ -160,7 +160,9 @@ class CalendarRepository(
             CalendarContract.Instances.EVENT_LOCATION,
             CalendarContract.Instances.ALL_DAY
         )
-        val selection = "(${CalendarContract.Instances.DELETED} = 0)"
+        // No selection: deleted events simply have no instances in this
+        // view, and the reconciliation below keys off their absence.
+        val selection: String? = null
 
         try {
             // Remote occurrences, keyed by (google event id, occurrence start)
