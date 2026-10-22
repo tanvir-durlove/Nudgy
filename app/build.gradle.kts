@@ -114,6 +114,8 @@ dependencies {
   implementation(libs.firebase.analytics)
   implementation(libs.firebase.config)
   implementation(libs.firebase.crashlytics)
+  implementation(libs.play.services.ads)
+  implementation(libs.user.messaging.platform)
   implementation(libs.androidx.credentials)
   implementation(libs.androidx.credentials.play.services)
   implementation(libs.googleid)
