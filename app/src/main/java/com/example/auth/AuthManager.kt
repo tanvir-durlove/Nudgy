@@ -10,7 +10,6 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.NoCredentialException
 import com.example.R
-import com.example.ai.WakeWordForegroundService
 import com.example.data.local.NudgyDatabase
 import android.content.Intent
 import android.provider.Settings
@@ -368,7 +367,6 @@ class AuthManager(private val context: Context) {
      * Sign Out
      */
     fun signOut(scope: CoroutineScope, onComplete: () -> Unit = {}) {
-        WakeWordForegroundService.stop(context)
         auth?.signOut()
         prefs.edit()
             .clear()
@@ -394,7 +392,6 @@ class AuthManager(private val context: Context) {
      * and voice/audio file caches.
      */
     fun deleteAccount(scope: CoroutineScope, onComplete: () -> Unit = {}, onError: (String) -> Unit = {}) {
-        WakeWordForegroundService.stop(context)
         val user = auth?.currentUser
         if (user == null) {
             val uid = getActiveUserId(context)
