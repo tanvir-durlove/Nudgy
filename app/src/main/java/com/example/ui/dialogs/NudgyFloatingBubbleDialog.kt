@@ -48,7 +48,6 @@ fun NudgyFloatingBubbleDialog(
     reminderTitle: String = "Call John about the launch",
     onDoneClick: () -> Unit,
     onSnoozeClick: () -> Unit,
-    onOpenChatClick: () -> Unit,
     onDismiss: () -> Unit
 ) {
     Dialog(
@@ -141,17 +140,6 @@ fun NudgyFloatingBubbleDialog(
                     ) {
                         Text("Snooze 30m", color = NudgyCharcoal)
                     }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Button(
-                    onClick = onOpenChatClick,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(100.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary)
-                ) {
-                    Text("Chat with Nudgy", fontWeight = FontWeight.Bold, color = Color.White)
                 }
             }
         }
