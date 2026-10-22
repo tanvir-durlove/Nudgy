@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
+import com.example.auth.AuthManager
 import com.example.R
 import com.example.data.local.NudgyDatabase
 import kotlinx.coroutines.CoroutineScope
@@ -22,7 +23,23 @@ class ReminderReceiver : BroadcastReceiver() {
 
         when (action) {
             ReminderManager.ACTION_TRIGGER_REMINDER -> {
-                showActionableNotification(context, notificationManager, taskId, taskTitle)
+                val pendingResult = goAsync()
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        if (isTaskVisibleToActiveUser(context, taskId)) {
+                            showActionableNotification(context, notificationManager, taskId, taskTitle)
+                        } else {
+                            // Signed out or a different account is active:
+                            // never surface another account's reminder, and
+                            // drop the stale alarm so it cannot fire again.
+                            ReminderManager(context).cancelReminder(taskId)
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("ReminderReceiver", "Error showing reminder: ${e.message}")
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
             }
 
             ReminderManager.ACTION_MARK_DONE -> {
@@ -33,7 +50,9 @@ class ReminderReceiver : BroadcastReceiver() {
                     try {
                         val repository = com.example.data.repository.TaskRepository(context)
                         val task = repository.getTaskById(taskId)
-                        if (task != null) {
+                        if (task != null && task.userId != AuthManager.getActiveUserId(context)) {
+                            // Not the active account's task — ignore the action.
+                        } else if (task != null) {
                             repository.toggleTaskCompletion(task.copy(isCompleted = false)) // sets to true and syncs
                         } else {
                             val db = NudgyDatabase.getInstance(context)
@@ -60,7 +79,10 @@ class ReminderReceiver : BroadcastReceiver() {
                 CoroutineScope(Dispatchers.IO).launch {
                     try {
                         val repository = com.example.data.repository.TaskRepository(context)
-                        repository.snoozeTask(taskId, snoozeTime)
+                        val task = repository.getTaskById(taskId)
+                        if (task == null || task.userId == AuthManager.getActiveUserId(context)) {
+                            repository.snoozeTask(taskId, snoozeTime)
+                        }
                     } catch (e: Exception) {
                         android.util.Log.w("ReminderReceiver", "Error snoozing task: ${e.message}")
                         // Fallback purely via ReminderManager
@@ -72,6 +94,17 @@ class ReminderReceiver : BroadcastReceiver() {
                 }
             }
         }
+    }
+
+    /**
+     * A reminder may only be shown or acted on when its task belongs to the
+     * currently active account on this device.
+     */
+    private suspend fun isTaskVisibleToActiveUser(context: Context, taskId: String): Boolean {
+        val repository = com.example.data.repository.TaskRepository(context)
+        val task = repository.getTaskById(taskId) ?: return false
+        val activeUserId = AuthManager.getActiveUserId(context)
+        return activeUserId.isNotEmpty() && task.userId == activeUserId
     }
 
     private fun showActionableNotification(

@@ -54,6 +54,9 @@ class CalendarRepository(
     private val repoScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var snapshotListener: ListenerRegistration? = null
 
+    private fun syncPrefs() =
+        context.getSharedPreferences("nudgy_sync_prefs", Context.MODE_PRIVATE)
+
     fun observeEventsForDay(userId: String, dayMillis: Long): Flow<List<CalendarEventEntity>> {
         val (startOfDay, endOfDay) = getDayBounds(dayMillis)
         return calendarDao.getEventsForDayFlow(userId, startOfDay, endOfDay)
@@ -252,17 +255,27 @@ class CalendarRepository(
                 }
             }
 
+            // Deletion reconciliation runs only after one fully successful
+            // sync on this device. Right after a reinstall, restored cloud
+            // events can land before the phone's own calendar provider has
+            // finished syncing; reconciling against that still-empty remote
+            // view would delete healthy events (and their cloud docs).
+            val syncSeenKey = "gcal_sync_completed_$userId"
+            val hasSyncedBefore = syncPrefs().getBoolean(syncSeenKey, false)
+
             // Reconcile deletions: a Google-linked local row inside the synced
             // window whose occurrence no longer exists on the device calendar
             // was deleted (or its series was deleted) in Google Calendar —
             // remove it here too. Rows outside the window are never touched.
-            existingEvents.filter { local ->
-                local.googleCalendarEventId != null &&
-                local.startEpochMillis in searchStart..searchEnd &&
-                (local.googleCalendarEventId!! to local.startEpochMillis) !in remote.keys
-            }.forEach { stale ->
-                calendarDao.deleteEventByIdForUser(userId, stale.id)
-                deleteEventFromFirestore(userId, stale.id)
+            if (hasSyncedBefore) {
+                existingEvents.filter { local ->
+                    local.googleCalendarEventId != null &&
+                    local.startEpochMillis in searchStart..searchEnd &&
+                    (local.googleCalendarEventId!! to local.startEpochMillis) !in remote.keys
+                }.forEach { stale ->
+                    calendarDao.deleteEventByIdForUser(userId, stale.id)
+                    deleteEventFromFirestore(userId, stale.id)
+                }
             }
             // Export retry: app-created events that never reached Google
             // (export failed or permission was missing at creation) carry no
@@ -291,6 +304,7 @@ class CalendarRepository(
             } catch (e: Exception) {
                 Log.e(TAG, "Export retry failed: ${e.message}")
             }
+            syncPrefs().edit().putBoolean(syncSeenKey, true).apply()
         } catch (e: Exception) {
             Log.e(TAG, "Error syncing Google Calendar into Nudgy: ${e.message}")
         }
@@ -524,6 +538,13 @@ class CalendarRepository(
                                         val eventType = doc.getString("eventType") ?: "EVENT"
                                         val isAllDay = doc.getBoolean("isAllDay") ?: false
                                         val gId = doc.getLong("googleCalendarEventId")
+                                        // A cloud doc written without the Google
+                                        // link (older payload) must not unlink a
+                                        // locally linked event — otherwise the
+                                        // export retry would duplicate it in
+                                        // Google Calendar.
+                                        val existingEvent = calendarDao.getEventById(doc.id)
+                                        val effectiveGId = gId ?: existingEvent?.googleCalendarEventId
                                         val event = CalendarEventEntity(
                                             id = doc.id,
                                             userId = userId,
@@ -533,8 +554,8 @@ class CalendarRepository(
                                             locationOrLink = location,
                                             eventType = eventType,
                                             isAllDay = isAllDay,
-                                            googleCalendarEventId = gId,
-                                            isFromGoogleCalendar = doc.getBoolean("isFromGoogleCalendar") ?: (gId != null)
+                                            googleCalendarEventId = effectiveGId,
+                                            isFromGoogleCalendar = doc.getBoolean("isFromGoogleCalendar") ?: existingEvent?.isFromGoogleCalendar ?: (effectiveGId != null)
                                         )
                                         calendarDao.insertEvent(event)
                                     }
@@ -549,17 +570,23 @@ class CalendarRepository(
         } catch (e: Exception) {
             Log.w(TAG, "Could not start calendar events sync: ${e.message}")
         }
-        // One-time backfill: events created while cloud sync was unreachable
-        // (e.g. the retired applet database id era) exist only locally.
-        // Re-push them all — the write is an idempotent upsert by document
-        // id, so already-synced events are simply rewritten with themselves.
-        repoScope.launch {
-            try {
-                calendarDao.getAllEventsOnce(userId).forEach { event ->
-                    syncEventToFirestore(userId, event)
+        // One-time backfill (per user, per device): events created while
+        // cloud sync was unreachable (e.g. the retired applet database id
+        // era) exist only locally. Re-push them all — the write is an
+        // idempotent upsert by document id. The completion flag is set only
+        // on success; without it this would re-push everything on every
+        // sync start and could resurrect events deleted on another device.
+        val backfillKey = "events_backfill_v1_$userId"
+        if (!syncPrefs().getBoolean(backfillKey, false)) {
+            repoScope.launch {
+                try {
+                    calendarDao.getAllEventsOnce(userId).forEach { event ->
+                        syncEventToFirestore(userId, event)
+                    }
+                    syncPrefs().edit().putBoolean(backfillKey, true).apply()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Events backfill failed: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Events backfill failed: ${e.message}")
             }
         }
     }

@@ -89,6 +89,7 @@ fun CalendarScreen(
     modifier: Modifier = Modifier
 ) {
     var showAddEventDialog by remember { mutableStateOf(false) }
+    var eventPendingDelete by remember { mutableStateOf<CalendarEventEntity?>(null) }
     var isBlockingTime by remember { mutableStateOf(false) }
 
     LaunchedEffect(events) {
@@ -550,7 +551,7 @@ fun CalendarScreen(
                                     }
 
                                     IconButton(
-                                        onClick = { onDeleteEvent(event.id) },
+                                        onClick = { eventPendingDelete = event },
                                         modifier = Modifier.size(32.dp)
                                     ) {
                                         Icon(
@@ -634,6 +635,43 @@ fun CalendarScreen(
         // Generous bottom spacer so content isn't clipped by bottom nav or floating mascot button
         Spacer(modifier = Modifier.height(84.dp))
     }
+
+        // Delete confirmation: one tap used to delete instantly — and for a
+        // repeating event the repository deletes by the series-level Google
+        // id, so a single occurrence tap wiped the whole series from Google
+        // Calendar. Always confirm, and say plainly when a series is involved.
+        eventPendingDelete?.let { pending ->
+            val isSeries = pending.googleCalendarEventId != null &&
+                events.count { it.googleCalendarEventId == pending.googleCalendarEventId } > 1
+            AlertDialog(
+                onDismissRequest = { eventPendingDelete = null },
+                title = { Text("Delete this event?", fontWeight = FontWeight.Bold, color = NudgyCharcoal) },
+                text = {
+                    Text(
+                        text = when {
+                            isSeries -> "\"${pending.title}\" is one occurrence of a repeating series. Deleting it removes the ENTIRE series, including from Google Calendar."
+                            pending.googleCalendarEventId != null -> "\"${pending.title}\" will be deleted, including from Google Calendar."
+                            else -> "\"${pending.title}\" will be deleted."
+                        },
+                        color = NudgyCharcoal
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        onDeleteEvent(pending.id)
+                        eventPendingDelete = null
+                    }) {
+                        Text("Delete", color = Color(0xFFE85542), fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { eventPendingDelete = null }) {
+                        Text("Cancel", color = NudgyMuted)
+                    }
+                }
+            )
+        }
+
 
     if (showAddEventDialog) {
         val context = LocalContext.current
