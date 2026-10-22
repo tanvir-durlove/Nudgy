@@ -76,7 +76,14 @@ abstract class NudgyDatabase : RoomDatabase() {
                     "nudgy_local_db"
                 )
                     .addMigrations(MIGRATION_3_4)
-                    .fallbackToDestructiveMigrationOnDowngrade(true)
+                    // Pre-launch policy: only MIGRATION_3_4 exists and old
+                    // schemas were never exported (exportSchema = false), so
+                    // a v1/v2 database has no migration path and would
+                    // crash-loop on every launch. Destructive fallback is
+                    // the lesser evil for now — signed-in users restore
+                    // from Firestore. Revisit before public launch: from
+                    // then on, real migrations are mandatory.
+                    .fallbackToDestructiveMigration(true)
                     .build()
                 INSTANCE = instance
                 instance
