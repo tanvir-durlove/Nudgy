@@ -566,12 +566,6 @@ fun NudgyAppScaffold(
                         )
                     }
                 },
-                onOpenChatClick = {
-                    showFloatingBubbleDialog = false
-                    analytics.logNudgeInteracted("chat")
-                    currentDestination = NudgyNavDestination.CHAT
-                    handleUserChat(if (pendingTask != null) "How should I approach '${pendingTask.title}'?" else "Plan my day")
-                },
                 onDismiss = { showFloatingBubbleDialog = false }
             )
         }
