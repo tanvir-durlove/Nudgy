@@ -53,6 +53,7 @@ import com.example.data.repository.CalendarRepository
 import com.example.data.repository.ChatRepository
 import com.example.data.repository.DailyTaskStats
 import com.example.data.repository.GroupRepository
+import com.example.work.GroupPollWorker
 import com.example.data.repository.MemoryRepository
 import com.example.data.repository.TaskRepository
 import com.example.reminders.ReminderManager
@@ -117,6 +118,15 @@ class MainActivity : ComponentActivity() {
 
         authManager.attemptSilentSignIn(lifecycleScope)
 
+        // Group-notification tap: open the Groups tab. The activity has
+        // no onNewIntent routing, so the tap intent uses CLEAR_TASK and
+        // this onCreate read is the single deep-link path.
+        val initialDestination = if (intent.getBooleanExtra(GroupPollWorker.EXTRA_OPEN_GROUPS, false)) {
+            NudgyNavDestination.GROUPS
+        } else {
+            NudgyNavDestination.HOME
+        }
+
         setContent {
             NudgyTheme {
                 NudgyMainFlow(
@@ -131,7 +141,8 @@ class MainActivity : ComponentActivity() {
                     geminiClient = geminiClient,
                     voiceAssistantManager = voiceAssistantManager,
                     analytics = analytics,
-                    remoteConfig = remoteConfig
+                    remoteConfig = remoteConfig,
+                    initialDestination = initialDestination
                 )
             }
         }
@@ -156,7 +167,8 @@ fun NudgyMainFlow(
     geminiClient: GeminiClient,
     voiceAssistantManager: VoiceAssistantManager,
     analytics: NudgyAnalytics,
-    remoteConfig: NudgyRemoteConfig
+    remoteConfig: NudgyRemoteConfig,
+    initialDestination: NudgyNavDestination = NudgyNavDestination.HOME
 ) {
     val user by authManager.userState.collectAsStateWithLifecycle()
     val isLoading by authManager.isLoading.collectAsStateWithLifecycle()
@@ -181,6 +193,12 @@ fun NudgyMainFlow(
     }
 
     if (user == null) {
+        // Signed out (or not yet signed in): stop group polling. This
+        // is the ONLY cancel path — never cancel in onDispose, or
+        // polling would die whenever the activity is destroyed.
+        LaunchedEffect(Unit) {
+            GroupPollWorker.cancel(context)
+        }
         SignInScreen(
             authManager = authManager,
             scope = scope,
@@ -198,6 +216,8 @@ fun NudgyMainFlow(
                 memoryRepository.startCloudSync(currentUser.uid)
                 calendarRepository.startCloudSync(currentUser.uid)
                 groupRepository.startGroupSync(currentUser.uid)
+                // KEEP policy: re-scheduling never duplicates the work.
+                GroupPollWorker.schedule(context)
             }
         }
 
@@ -225,7 +245,8 @@ fun NudgyMainFlow(
             geminiClient = geminiClient,
             voiceAssistantManager = voiceAssistantManager,
             analytics = analytics,
-            remoteConfig = remoteConfig
+            remoteConfig = remoteConfig,
+            initialDestination = initialDestination
         )
     }
 }
@@ -244,11 +265,12 @@ fun NudgyAppScaffold(
     geminiClient: GeminiClient,
     voiceAssistantManager: VoiceAssistantManager,
     analytics: NudgyAnalytics,
-    remoteConfig: NudgyRemoteConfig
+    remoteConfig: NudgyRemoteConfig,
+    initialDestination: NudgyNavDestination = NudgyNavDestination.HOME
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    var currentDestination by remember { mutableStateOf(NudgyNavDestination.HOME) }
+    var currentDestination by remember { mutableStateOf(initialDestination) }
     var showProfileSheet by remember { mutableStateOf(false) }
     var showNotificationsSheet by remember { mutableStateOf(false) }
     var showCreateTaskSheet by remember { mutableStateOf(false) }

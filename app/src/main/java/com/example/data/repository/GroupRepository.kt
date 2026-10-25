@@ -16,6 +16,8 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
+import com.google.firebase.Timestamp
+import java.util.Date
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -66,6 +68,10 @@ class GroupRepository(
         private const val CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
         private const val CODE_LENGTH = 6
         private const val MAX_CODE_ATTEMPTS = 5
+        /** Poll overlap window (plan §3.5): batch writes share timestamps. */
+        private const val POLL_OVERLAP_MS = 60_000L
+        private const val POLL_QUERY_LIMIT = 50L
+        private const val RECONCILE_LIMIT = 500L
     }
 
     private fun firestore(): FirebaseFirestore = FirebaseFirestore.getInstance(dbId)
@@ -511,6 +517,88 @@ class GroupRepository(
             reminderManager.scheduleReminder(task.id, task.title, trigger)
         } else {
             reminderManager.cancelReminder(task.id)
+        }
+    }
+
+    // ---------------------------------------------------------------- polling (GroupPollWorker)
+
+    suspend fun getJoinedGroupIds(): List<String> =
+        withContext(Dispatchers.IO) { groupDao.getGroupIdsOnce() }
+
+    /**
+     * Items changed since [lastSeenMs], with the 60s overlap window
+     * applied here (never in the caller) so every poll tick shares it.
+     * Single-field range on updatedAt — automatic index, no composite
+     * index needed.
+     */
+    suspend fun queryGroupItemsSince(groupId: String, lastSeenMs: Long): List<DocumentSnapshot> =
+        withContext(Dispatchers.IO) {
+            firestore().collection("groups").document(groupId).collection("items")
+                .whereGreaterThan(
+                    "updatedAt",
+                    Timestamp(Date(lastSeenMs - POLL_OVERLAP_MS))
+                )
+                .limit(POLL_QUERY_LIMIT)
+                .get().await().documents
+        }
+
+    /** All item ids of a group, bounded (reconciliation input). */
+    suspend fun queryGroupItemIds(groupId: String): List<String> =
+        withContext(Dispatchers.IO) {
+            firestore().collection("groups").document(groupId).collection("items")
+                .limit(RECONCILE_LIMIT)
+                .get().await().documents.map { it.id }
+        }
+
+    /**
+     * Applies polled docs through the same upsert path as the listeners
+     * (completion preserved, alarms scheduled on arrival). Returns the
+     * count of genuinely NEW item ids — ids already in Room are updates,
+     * not new arrivals, so the overlap window can never re-notify.
+     */
+    suspend fun applyPolledDocs(
+        userId: String,
+        groupId: String,
+        docs: List<DocumentSnapshot>
+    ): Int = withContext(Dispatchers.IO) {
+        var newCount = 0
+        for (doc in docs) {
+            when (doc.getString("kind")) {
+                "TASK" -> {
+                    if (taskDao.getTaskById(doc.id) == null) newCount++
+                    applyGroupTaskDoc(userId, groupId, doc)
+                }
+                "SCHEDULE" -> {
+                    if (calendarDao.getEventById(doc.id) == null) newCount++
+                    applyGroupScheduleDoc(userId, groupId, doc)
+                }
+            }
+        }
+        newCount
+    }
+
+    /**
+     * Deletes local group rows (and cancels their alarms) for ids no
+     * longer present remotely. Only ever called with a fresh remote id
+     * set from queryGroupItemIds — never with a partial or stale set.
+     */
+    suspend fun reconcileGroupItems(
+        userId: String,
+        groupId: String,
+        remoteIds: Set<String>
+    ) {
+        withContext(Dispatchers.IO) {
+            for (id in taskDao.getTaskIdsByGroupId(userId, groupId)) {
+                if (id !in remoteIds) {
+                    taskDao.deleteTaskById(id)
+                    reminderManager.cancelReminder(id)
+                }
+            }
+            for (id in calendarDao.getEventIdsByGroupId(userId, groupId)) {
+                if (id !in remoteIds) {
+                    calendarDao.deleteEventById(id)
+                }
+            }
         }
     }
 }

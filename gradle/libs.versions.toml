@@ -43,6 +43,7 @@ playServicesAds = "24.6.0"
 userMessagingPlatform = "3.2.0"
 credentials = "1.5.0"
 googleid = "1.1.1"
+workmanager = "2.10.2"
 
 
 [libraries]
@@ -102,6 +103,7 @@ user-messaging-platform = { group = "com.google.android.ump", name = "user-messa
 androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
 androidx-credentials-play-services = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }
 googleid = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleid" }
+androidx-work-workmanager-ktx = { group = "androidx.work", name = "workmanager-ktx", version.ref = "workmanager" }
 
 
 [plugins]
