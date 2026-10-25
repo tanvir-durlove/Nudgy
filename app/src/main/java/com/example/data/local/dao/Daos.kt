@@ -8,6 +8,7 @@ import androidx.room.Update
 import com.example.data.local.entity.CalendarEventEntity
 import com.example.data.local.entity.ChatMessageEntity
 import com.example.data.local.entity.DailyBriefEntity
+import com.example.data.local.entity.GroupEntity
 import com.example.data.local.entity.NudgyMemoryEntity
 import com.example.data.local.entity.TaskEntity
 import kotlinx.coroutines.flow.Flow
@@ -65,6 +66,13 @@ interface TaskDao {
     @Query("UPDATE tasks SET isCompleted = :isCompleted, completedAtEpochMillis = :completedAt, isSyncedToCloud = 0, updatedAtEpochMillis = :now WHERE id = :id AND userId = :userId")
     suspend fun setTaskCompletionForUser(userId: String, id: String, isCompleted: Boolean, completedAt: Long?, now: Long)
 
+    // Group rows only: completion is local-only, so it must NOT mark the row
+    // dirty — otherwise the personal sync would upload a group task as a
+    // personal cloud copy. Group rows are inserted with isSyncedToCloud = 1
+    // and must stay that way.
+    @Query("UPDATE tasks SET isCompleted = :isCompleted, completedAtEpochMillis = :completedAt, updatedAtEpochMillis = :now WHERE id = :id AND userId = :userId")
+    suspend fun setTaskCompletionLocal(userId: String, id: String, isCompleted: Boolean, completedAt: Long?, now: Long)
+
     @Query("UPDATE tasks SET isSyncedToCloud = 1 WHERE id = :id")
     suspend fun markTaskSynced(id: String)
 
@@ -76,6 +84,19 @@ interface TaskDao {
 
     @Query("UPDATE tasks SET dueDateEpochMillis = :dueDate, reminderEpochMillis = :reminderDate, reminderSet = 1, isSyncedToCloud = 0, updatedAtEpochMillis = :now WHERE id = :id")
     suspend fun snoozeTask(id: String, dueDate: Long, reminderDate: Long, now: Long)
+
+    // Group rows only: snooze is local-only (same reason as
+    // setTaskCompletionLocal — never mark a group row dirty).
+    @Query("UPDATE tasks SET dueDateEpochMillis = :dueDate, reminderEpochMillis = :reminderDate, reminderSet = 1, updatedAtEpochMillis = :now WHERE id = :id")
+    suspend fun snoozeTaskLocal(id: String, dueDate: Long, reminderDate: Long, now: Long)
+
+    // Group reconciliation helpers (polling worker, Phase 1): ids of local
+    // group rows, and removal of a whole group's local rows.
+    @Query("SELECT id FROM tasks WHERE userId = :userId AND groupId = :groupId")
+    suspend fun getTaskIdsByGroupId(userId: String, groupId: String): List<String>
+
+    @Query("DELETE FROM tasks WHERE userId = :userId AND groupId = :groupId")
+    suspend fun deleteTasksByGroupId(userId: String, groupId: String)
 
     @Query("SELECT * FROM tasks WHERE userId = :userId AND isCompleted = 1")
     suspend fun getCompletedTasksOnce(userId: String): List<TaskEntity>
@@ -125,8 +146,36 @@ interface CalendarDao {
     @Query("DELETE FROM calendar_events WHERE userId = :userId")
     suspend fun clearEventsForUser(userId: String)
 
+    // Group reconciliation helpers (polling worker, Phase 1).
+    @Query("SELECT id FROM calendar_events WHERE userId = :userId AND groupId = :groupId")
+    suspend fun getEventIdsByGroupId(userId: String, groupId: String): List<String>
+
+    @Query("DELETE FROM calendar_events WHERE userId = :userId AND groupId = :groupId")
+    suspend fun deleteEventsByGroupId(userId: String, groupId: String)
+
     @Query("UPDATE calendar_events SET userId = :toUserId WHERE userId = :fromUserId")
     suspend fun reassignUser(fromUserId: String, toUserId: String)
+}
+
+@Dao
+interface GroupDao {
+    @Query("SELECT * FROM groups ORDER BY joinedAtEpochMillis DESC")
+    fun getGroupsFlow(): Flow<List<GroupEntity>>
+
+    @Query("SELECT * FROM groups WHERE groupId = :groupId LIMIT 1")
+    suspend fun getGroupById(groupId: String): GroupEntity?
+
+    @Query("SELECT groupId FROM groups")
+    suspend fun getGroupIdsOnce(): List<String>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertGroup(group: GroupEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertGroups(groups: List<GroupEntity>)
+
+    @Query("DELETE FROM groups WHERE groupId = :groupId")
+    suspend fun deleteGroupById(groupId: String)
 }
 
 @Dao
