@@ -104,6 +104,13 @@ interface TaskDao {
     @Query("DELETE FROM tasks WHERE userId = :userId AND isCompleted = 1")
     suspend fun deleteCompletedTasks(userId: String)
 
+    // Group v1: "clear completed" must NOT delete group rows — the shared group
+    // item still exists in Firestore, so the next listener/poll tick would
+    // resurrect the task. Group rows are cleared only when the group item
+    // itself is deleted by its creator.
+    @Query("DELETE FROM tasks WHERE userId = :userId AND isCompleted = 1 AND groupId IS NULL")
+    suspend fun deleteCompletedPersonalTasks(userId: String)
+
     @Query("DELETE FROM tasks WHERE userId = :userId")
     suspend fun clearTasksForUser(userId: String)
 

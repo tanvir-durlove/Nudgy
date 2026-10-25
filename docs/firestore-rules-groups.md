@@ -19,10 +19,17 @@ service cloud.firestore {
 
     // ---- Groups ----
     match /groups/{gid} {
-      allow read: if request.auth != null &&
-        exists(/databases/$(database)/documents/groups/$(gid)/members/$(request.auth.uid));
+      // Single-doc get is open to any signed-in user: the join flow MUST
+      // read the group doc (name, creatorUid) BEFORE the membership doc
+      // exists, or join is impossible. This is safe because the gid is
+      // only learnable through the code doc, which requires knowing the
+      // code — and list is denied, so groups cannot be enumerated.
+      allow get: if request.auth != null;
+      allow list: if false;
       allow create: if request.auth != null &&
         request.resource.data.creatorUid == request.auth.uid;
+      // Creator-only update: covers the lastUpdatedAt bump that every
+      // item write performs in the same batch (see GroupRepository).
       allow update: if request.auth != null &&
         resource.data.creatorUid == request.auth.uid;
       allow delete: if false; // creator delete is Phase 3; deny in v1
@@ -74,14 +81,19 @@ in the privacy policy.
 ## Pre-release rules test checklist
 
 1. Signed-out user: group read, code read, join write → all DENIED.
-2. Non-member signed-in user: group doc read → DENIED; code read → ALLOWED
-   (needed for join); item read → DENIED.
+2. Non-member signed-in user: group doc single get → ALLOWED (required for
+   the pre-membership join read); group doc list → DENIED; code read →
+   ALLOWED (needed for join); item read → DENIED.
 3. Member: group + items read → ALLOWED; item create/update/delete → DENIED.
 4. Creator: item create/update/delete → ALLOWED; group update → ALLOWED.
 5. Member's membership mirror: own uid → ALLOWED; another uid → DENIED.
-6. Join flow: member doc + mirror written in one batch → succeeds; a
-   second join (already a member) → no-op success in the app, no rule error.
-7. Personal collections: existing per-user rules still pass (no regression).
+6. Join flow: code read → group doc get → member doc + mirror written in
+   one batch → all succeed; a second join (already a member) → no-op
+   success in the app, no rule error.
+7. Creator posts an item: item write + group lastUpdatedAt bump in one
+   batch → succeeds. Non-creator member attempts the same → DENIED
+   (both the item write and the group update fail).
+8. Personal collections: existing per-user rules still pass (no regression).
 
 ## Play Data safety / privacy policy
 

@@ -52,6 +52,7 @@ import com.example.data.model.TaskCategory
 import com.example.data.repository.CalendarRepository
 import com.example.data.repository.ChatRepository
 import com.example.data.repository.DailyTaskStats
+import com.example.data.repository.GroupRepository
 import com.example.data.repository.MemoryRepository
 import com.example.data.repository.TaskRepository
 import com.example.reminders.ReminderManager
@@ -63,11 +64,13 @@ import com.example.ui.navigation.NudgyNavDestination
 import com.example.ui.screens.CalendarScreen
 import com.example.ui.screens.ChatMessage
 import com.example.ui.screens.ChatScreen
+import com.example.ui.screens.GroupsScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.TasksScreen
 import com.example.data.local.entity.TaskEntity
 import com.example.ui.sheets.CreateTaskSheet
 import com.example.ui.sheets.EditTaskSheet
+import com.example.ui.sheets.GroupTaskDetailSheet
 import com.example.ui.sheets.NotificationsSheet
 import com.example.ui.sheets.YourNudgySheet
 import com.example.ui.theme.NudgyCanvas
@@ -80,6 +83,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var authManager: AuthManager
     private lateinit var taskRepository: TaskRepository
     private lateinit var calendarRepository: CalendarRepository
+    private lateinit var groupRepository: GroupRepository
     private lateinit var memoryRepository: MemoryRepository
     private lateinit var chatRepository: ChatRepository
     private lateinit var preFilter: ClientIntentPreFilter
@@ -96,6 +100,7 @@ class MainActivity : ComponentActivity() {
         authManager = AuthManager(this)
         taskRepository = TaskRepository(this)
         calendarRepository = CalendarRepository(this)
+        groupRepository = GroupRepository(this)
         memoryRepository = MemoryRepository(this)
         chatRepository = ChatRepository(this)
         reminderManager = ReminderManager(this)
@@ -118,6 +123,7 @@ class MainActivity : ComponentActivity() {
                     authManager = authManager,
                     taskRepository = taskRepository,
                     calendarRepository = calendarRepository,
+                    groupRepository = groupRepository,
                     memoryRepository = memoryRepository,
                     chatRepository = chatRepository,
                     reminderManager = reminderManager,
@@ -142,6 +148,7 @@ fun NudgyMainFlow(
     authManager: AuthManager,
     taskRepository: TaskRepository,
     calendarRepository: CalendarRepository,
+    groupRepository: GroupRepository,
     memoryRepository: MemoryRepository,
     chatRepository: ChatRepository,
     reminderManager: ReminderManager,
@@ -190,6 +197,7 @@ fun NudgyMainFlow(
                 taskRepository.startCloudSync(currentUser.uid)
                 memoryRepository.startCloudSync(currentUser.uid)
                 calendarRepository.startCloudSync(currentUser.uid)
+                groupRepository.startGroupSync(currentUser.uid)
             }
         }
 
@@ -199,6 +207,7 @@ fun NudgyMainFlow(
                     taskRepository.stopCloudSync()
                     calendarRepository.stopCloudSync()
                     memoryRepository.stopCloudSync()
+                    groupRepository.stopGroupSync()
                 }
             }
         }
@@ -208,6 +217,7 @@ fun NudgyMainFlow(
             authManager = authManager,
             taskRepository = taskRepository,
             calendarRepository = calendarRepository,
+            groupRepository = groupRepository,
             memoryRepository = memoryRepository,
             chatRepository = chatRepository,
             reminderManager = reminderManager,
@@ -226,6 +236,7 @@ fun NudgyAppScaffold(
     authManager: AuthManager,
     taskRepository: TaskRepository,
     calendarRepository: CalendarRepository,
+    groupRepository: GroupRepository,
     memoryRepository: MemoryRepository,
     chatRepository: ChatRepository,
     reminderManager: ReminderManager,
@@ -325,6 +336,26 @@ fun NudgyAppScaffold(
     }
     val todayEvents by calendarRepository.observeEventsForDay(user.uid, System.currentTimeMillis()).collectAsStateWithLifecycle(emptyList())
     val allEvents by calendarRepository.observeAllEvents(user.uid).collectAsStateWithLifecycle(emptyList())
+
+    // Group v1: joined groups + a groupId -> name map for origin badges.
+    val groups by groupRepository.observeGroups().collectAsStateWithLifecycle(emptyList())
+    val groupNames = groups.associate { it.groupId to it.name }
+
+    // Group writes go through Firestore first (GroupRepository); a failure
+    // (offline, not the creator, bad rules) must surface, not crash.
+    fun launchGroupWrite(block: suspend () -> Unit) {
+        scope.launch {
+            try {
+                block()
+            } catch (e: Exception) {
+                Toast.makeText(
+                    context,
+                    "Couldn't save that. Check your connection and try again.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
     val memories by memoryRepository.observeMemories(user.uid).collectAsStateWithLifecycle(emptyList())
 
     val isListening by voiceAssistantManager.isListening.collectAsStateWithLifecycle()
@@ -446,6 +477,7 @@ fun NudgyAppScaffold(
                             onAddTaskClick = { showCreateTaskSheet = true },
                             onTaskClick = { task -> taskToEdit = task },
                             onViewAllTasksClick = { currentDestination = NudgyNavDestination.TASKS },
+                            groupNames = groupNames,
                             onPlanMyDayClick = {
                                 analytics.logMorningBriefViewed()
                                 currentDestination = NudgyNavDestination.CHAT
@@ -509,7 +541,54 @@ fun NudgyAppScaffold(
                                 }
                             },
                             onAddTaskClick = { showCreateTaskSheet = true },
-                            onTaskClick = { task -> taskToEdit = task }
+                            onTaskClick = { task -> taskToEdit = task },
+                            groupNames = groupNames
+                        )
+                    }
+
+                    NudgyNavDestination.GROUPS -> {
+                        GroupsScreen(
+                            user = user,
+                            groups = groups,
+                            allTasks = allTasks,
+                            allEvents = allEvents,
+                            onCreateGroup = { name ->
+                                groupRepository.createGroup(user.uid, user.displayName, name)
+                            },
+                            onJoinGroup = { code ->
+                                groupRepository.joinGroup(user.uid, user.displayName, code)
+                            },
+                            onCreateGroupTask = { groupId, title, description, due, priority, category, reminderSet ->
+                                launchGroupWrite {
+                                    groupRepository.createGroupTask(
+                                        groupId, user.uid, title, description, due,
+                                        priority, category, reminderSet
+                                    )
+                                }
+                            },
+                            onCreateGroupSchedule = { groupId, title, start, end, location, type ->
+                                launchGroupWrite {
+                                    groupRepository.createGroupSchedule(
+                                        groupId, user.uid, title, start, end, location, type
+                                    )
+                                }
+                            },
+                            onUpdateGroupTask = { groupId, task ->
+                                launchGroupWrite {
+                                    groupRepository.updateGroupTask(groupId, task)
+                                }
+                            },
+                            onDeleteGroupItem = { groupId, itemId, isTask ->
+                                launchGroupWrite {
+                                    groupRepository.deleteGroupItem(groupId, user.uid, itemId, isTask)
+                                }
+                            },
+                            onToggleTask = { task ->
+                                scope.launch {
+                                    taskRepository.toggleTaskCompletion(task)
+                                    analytics.logTaskCompleted(task.id, dailyStats.completed + 1)
+                                }
+                            }
                         )
                     }
 
@@ -554,7 +633,8 @@ fun NudgyAppScaffold(
                             },
                             onSelectDay = { dayMillis ->
                                 selectedCalendarDayMillis = dayMillis
-                            }
+                            },
+                            groupNames = groupNames
                         )
                     }
                 }
@@ -661,25 +741,43 @@ fun NudgyAppScaffold(
         }
 
         taskToEdit?.let { task ->
-            EditTaskSheet(
-                task = task,
-                onDismiss = { taskToEdit = null },
-                onUpdateTask = { updated ->
-                    scope.launch {
-                        taskRepository.updateTask(updated)
+            // Group v1 routing: a group row tapped from Home / Tasks / Chat
+            // opens the READ-ONLY detail — never EditTaskSheet. Only the
+            // creator edits/deletes, and only from the Groups tab detail view
+            // (GroupsScreen routes those through GroupRepository). This keeps
+            // exactly one edit path for shared items.
+            if (task.groupId != null) {
+                GroupTaskDetailSheet(
+                    task = task,
+                    groupName = groupNames[task.groupId] ?: "Group",
+                    onDismiss = { taskToEdit = null },
+                    onToggleComplete = { toggledTask ->
+                        scope.launch {
+                            taskRepository.toggleTaskCompletion(toggledTask)
+                        }
                     }
-                },
-                onDeleteTask = { taskId ->
-                    scope.launch {
-                        taskRepository.deleteTask(user.uid, taskId)
+                )
+            } else {
+                EditTaskSheet(
+                    task = task,
+                    onDismiss = { taskToEdit = null },
+                    onUpdateTask = { updated ->
+                        scope.launch {
+                            taskRepository.updateTask(updated)
+                        }
+                    },
+                    onDeleteTask = { taskId ->
+                        scope.launch {
+                            taskRepository.deleteTask(user.uid, taskId)
+                        }
+                    },
+                    onToggleComplete = { toggledTask ->
+                        scope.launch {
+                            taskRepository.toggleTaskCompletion(toggledTask)
+                        }
                     }
-                },
-                onToggleComplete = { toggledTask ->
-                    scope.launch {
-                        taskRepository.toggleTaskCompletion(toggledTask)
-                    }
-                }
-            )
+                )
+            }
         }
     }
 }

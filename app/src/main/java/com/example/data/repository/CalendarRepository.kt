@@ -230,6 +230,7 @@ class CalendarRepository(
                     // event that merely shares title+minute is never swallowed.
                     val legacyDup = existingEvents.any { e ->
                         e.googleCalendarEventId == null &&
+                        e.groupId == null &&
                         e.title.equals(remoteEvent.title, ignoreCase = true) &&
                         Math.abs(e.startEpochMillis - remoteEvent.startEpochMillis) < 60_000L
                     }
@@ -282,8 +283,11 @@ class CalendarRepository(
             // Google id — push them now and record the id, so the two-way
             // sync heals itself on the next sync.
             try {
+                // Group v1: group schedules must NEVER reach Google Calendar —
+                // without the groupId == null clause every class schedule
+                // would land in every member's personal Google Calendar.
                 calendarDao.getAllEventsOnce(userId)
-                    .filter { it.googleCalendarEventId == null && !it.isFromGoogleCalendar }
+                    .filter { it.googleCalendarEventId == null && !it.isFromGoogleCalendar && it.groupId == null }
                     .forEach { local ->
                         val gId = exportEventToGoogleCalendar(
                             title = local.title,
@@ -345,6 +349,14 @@ class CalendarRepository(
 
     suspend fun deleteEvent(eventId: String, userId: String? = null) = withContext(Dispatchers.IO) {
         val target = calendarDao.getEventById(eventId)
+        // Group v1: group schedules are deleted from the shared group item by
+        // the creator (GroupRepository). A member-side delete is local-only —
+        // never touch Google Calendar or the personal events collection.
+        if (target?.groupId != null) {
+            val effectiveUserId = userId ?: target.userId
+            calendarDao.deleteEventByIdForUser(effectiveUserId, eventId)
+            return@withContext
+        }
         target?.googleCalendarEventId?.let { gId ->
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) == PackageManager.PERMISSION_GRANTED) {
                 try {
@@ -555,12 +567,20 @@ class CalendarRepository(
                                             eventType = eventType,
                                             isAllDay = isAllDay,
                                             googleCalendarEventId = effectiveGId,
-                                            isFromGoogleCalendar = doc.getBoolean("isFromGoogleCalendar") ?: existingEvent?.isFromGoogleCalendar ?: (effectiveGId != null)
+                                            isFromGoogleCalendar = doc.getBoolean("isFromGoogleCalendar") ?: existingEvent?.isFromGoogleCalendar ?: (effectiveGId != null),
+                                            // Group v1: never let a personal-collection
+                                            // upsert strip a group row's origin.
+                                            groupId = existingEvent?.groupId
                                         )
                                         calendarDao.insertEvent(event)
                                     }
                                     DocumentChange.Type.REMOVED -> {
-                                        calendarDao.deleteEventByIdForUser(userId, dc.document.id)
+                                        // Group v1: a personal-doc delete must never
+                                        // remove a group row sharing the id.
+                                        val localRow = calendarDao.getEventById(dc.document.id)
+                                        if (localRow?.groupId == null) {
+                                            calendarDao.deleteEventByIdForUser(userId, dc.document.id)
+                                        }
                                     }
                                 }
                             }
@@ -580,9 +600,13 @@ class CalendarRepository(
         if (!syncPrefs().getBoolean(backfillKey, false)) {
             repoScope.launch {
                 try {
-                    calendarDao.getAllEventsOnce(userId).forEach { event ->
-                        syncEventToFirestore(userId, event)
-                    }
+                    // Group v1: group rows must never be pushed to the personal
+                    // events collection (same rule as the export retry).
+                    calendarDao.getAllEventsOnce(userId)
+                        .filter { it.groupId == null }
+                        .forEach { event ->
+                            syncEventToFirestore(userId, event)
+                        }
                     syncPrefs().edit().putBoolean(backfillKey, true).apply()
                 } catch (e: Exception) {
                     Log.w(TAG, "Events backfill failed: ${e.message}")

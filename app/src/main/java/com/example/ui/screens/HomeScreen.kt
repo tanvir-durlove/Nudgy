@@ -81,6 +81,7 @@ fun HomeScreen(
     onFreeTimeSuggestionClick: () -> Unit,
     onTaskClick: (TaskEntity) -> Unit = {},
     onPromoCardClick: (String) -> Unit = {},
+    groupNames: Map<String, String> = emptyMap(),
     modifier: Modifier = Modifier
 ) {
     val isAllComplete = dailyStats.percentage >= 1.0f && dailyStats.total > 0
@@ -394,6 +395,25 @@ fun HomeScreen(
                                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
                                         color = NudgyMuted
                                     )
+                                    // Group v1: origin badge for group tasks.
+                                    if (task.groupId != null) {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(100.dp))
+                                                .background(NudgyPrimary.copy(alpha = 0.12f))
+                                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = groupNames[task.groupId] ?: "Group",
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.SemiBold
+                                                ),
+                                                color = NudgyPrimary
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
