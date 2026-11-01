@@ -11,9 +11,11 @@ import com.example.data.local.entity.TaskEntity
 import com.example.data.model.Priority
 import com.example.data.model.TaskCategory
 import com.example.reminders.ReminderManager
+import com.example.work.GroupPollWorker
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.Timestamp
@@ -29,7 +31,7 @@ import java.security.SecureRandom
 import java.util.UUID
 
 /**
- * Group v1 repository (Phase 1 of the group feature).
+ * Group repository (Phase 1 group core + Phase 3 delete/leave/member list).
  *
  * Firestore layout (shared docs, NOT per-member copies):
  *   groups/{gid}                         — name, code, creatorUid, creatorName, timestamps
@@ -51,8 +53,11 @@ sealed class GroupResult<out T> {
     data class Err(val message: String) : GroupResult<Nothing>()
 }
 
+/** A group member row, as stored in groups/{gid}/members/{uid}. */
+data class GroupMember(val uid: String, val displayName: String)
+
 class GroupRepository(
-    context: Context,
+    private val context: Context,
     database: NudgyDatabase = NudgyDatabase.getInstance(context)
 ) {
     private val groupDao = database.groupDao()
@@ -62,6 +67,7 @@ class GroupRepository(
     private val dbId = context.getString(R.string.firestore_database_id)
     private val repoScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val groupListeners = mutableMapOf<String, ListenerRegistration>()
+    private val groupDocListeners = mutableMapOf<String, ListenerRegistration>()
 
     companion object {
         private const val TAG = "GroupRepository"
@@ -395,6 +401,145 @@ class GroupRepository(
         }
     }
 
+    // ---------------------------------------------------------------- Phase 3: members / leave / delete
+
+    /** One-shot member list for the group detail view. Names are stored at join time. */
+    suspend fun getGroupMembers(groupId: String): List<GroupMember> =
+        withContext(Dispatchers.IO) {
+            try {
+                firestore().collection("groups").document(groupId)
+                    .collection("members")
+                    .get().await().documents.map { doc ->
+                        GroupMember(
+                            uid = doc.getString("uid") ?: doc.id,
+                            displayName = doc.getString("displayName") ?: "Member"
+                        )
+                    }.sortedBy { it.displayName.lowercase() }
+            } catch (e: Exception) {
+                Log.w(TAG, "getGroupMembers failed: ${e.message}")
+                emptyList()
+            }
+        }
+
+    /** True when the group doc still exists remotely. */
+    suspend fun groupDocExists(groupId: String): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                firestore().collection("groups").document(groupId).get().await().exists()
+            } catch (e: Exception) {
+                Log.w(TAG, "groupDocExists failed: ${e.message}")
+                true // never purge on a transient read failure
+            }
+        }
+
+    /**
+     * Local purge for one group: cancel its alarms, delete its local
+     * tasks/events and its group row, drop its listeners, and clear its
+     * poll watermarks (so a later rejoin gets a fresh baseline tick
+     * instead of a notification flood). Remote state is untouched —
+     * callers delete remotely first where required.
+     */
+    suspend fun purgeLocalGroup(userId: String, groupId: String) {
+        withContext(Dispatchers.IO) {
+            try {
+                reconcileGroupItems(userId, groupId, emptySet())
+            } catch (e: Exception) {
+                Log.w(TAG, "purgeLocalGroup reconcile failed: ${e.message}")
+            }
+            groupDao.deleteGroupById(groupId)
+            stopGroupListener(groupId)
+            GroupPollWorker.clearGroupState(context, groupId)
+        }
+    }
+
+    /** Member leave: remote membership + mirror first, local purge second. */
+    suspend fun leaveGroup(userId: String, groupId: String): GroupResult<Unit> =
+        withContext(Dispatchers.IO) {
+            if (userId == AuthManager.GUEST_USER_ID) {
+                return@withContext GroupResult.Err("Sign in to leave a group.")
+            }
+            val local = groupDao.getGroupById(groupId)
+                ?: return@withContext GroupResult.Err("Group not found.")
+            if (local.creatorUid == userId) {
+                return@withContext GroupResult.Err(
+                    "The creator can't leave — delete the group instead."
+                )
+            }
+            try {
+                val fs = firestore()
+                val batch = fs.batch()
+                batch.delete(
+                    fs.collection("groups").document(groupId)
+                        .collection("members").document(userId)
+                )
+                batch.delete(
+                    fs.collection("users").document(userId)
+                        .collection("groupMemberships").document(groupId)
+                )
+                batch.commit().await()
+                purgeLocalGroup(userId, groupId)
+                GroupResult.Ok(Unit)
+            } catch (e: Exception) {
+                Log.w(TAG, "leaveGroup failed: ${e.message}")
+                GroupResult.Err("Could not leave the group. Check your connection and try again.")
+            }
+        }
+
+    /**
+     * Creator delete cascade. Order matters: the code-doc and mirror
+     * delete rules read the group doc, so the group doc is deleted
+     * LAST. Local purge runs only after the full remote cascade
+     * succeeds, so a partial failure leaves local state consistent.
+     */
+    suspend fun deleteGroup(userId: String, groupId: String): GroupResult<Unit> =
+        withContext(Dispatchers.IO) {
+            if (userId == AuthManager.GUEST_USER_ID) {
+                return@withContext GroupResult.Err("Sign in to delete a group.")
+            }
+            val local = groupDao.getGroupById(groupId)
+                ?: return@withContext GroupResult.Err("Group not found.")
+            if (local.creatorUid != userId) {
+                return@withContext GroupResult.Err("Only the creator can delete this group.")
+            }
+            try {
+                val fs = firestore()
+                val groupRef = fs.collection("groups").document(groupId)
+                val groupDoc = groupRef.get().await()
+                val code = groupDoc.getString("code")
+                val memberIds = groupRef.collection("members")
+                    .limit(500).get().await().documents.map { it.id }
+                val itemIds = groupRef.collection("items")
+                    .limit(500).get().await().documents.map { it.id }
+                val itemRefs = itemIds.map { groupRef.collection("items").document(it) }
+                val memberRefs = memberIds.map { groupRef.collection("members").document(it) }
+                val mirrorRefs = memberIds.map { uid ->
+                    fs.collection("users").document(uid)
+                        .collection("groupMemberships").document(groupId)
+                }
+                deleteRefsInBatches(fs, itemRefs)
+                deleteRefsInBatches(fs, memberRefs)
+                deleteRefsInBatches(fs, mirrorRefs)
+                if (code != null) {
+                    fs.collection("groupCodes").document(code).delete().await()
+                }
+                groupRef.delete().await()
+                purgeLocalGroup(userId, groupId)
+                GroupResult.Ok(Unit)
+            } catch (e: Exception) {
+                Log.w(TAG, "deleteGroup failed: ${e.message}")
+                GroupResult.Err("Could not delete the group. Check your connection and try again.")
+            }
+        }
+
+    /** Chunked batch deletes (Firestore caps a batch at 500 writes). */
+    private suspend fun deleteRefsInBatches(fs: FirebaseFirestore, refs: List<DocumentReference>) {
+        for (chunk in refs.chunked(400)) {
+            val batch = fs.batch()
+            for (ref in chunk) batch.delete(ref)
+            batch.commit().await()
+        }
+    }
+
     // ---------------------------------------------------------------- listeners
 
     fun startGroupSync(userId: String) {
@@ -402,14 +547,49 @@ class GroupRepository(
         stopGroupSync()
         repoScope.launch {
             val groupIds = groupDao.getGroupIdsOnce()
-            for (groupId in groupIds) attachGroupListener(userId, groupId)
+            for (groupId in groupIds) {
+                attachGroupListener(userId, groupId)
+                attachGroupDocListener(userId, groupId)
+            }
         }
     }
 
     fun stopGroupSync() {
         groupListeners.values.forEach { it.remove() }
         groupListeners.clear()
+        groupDocListeners.values.forEach { it.remove() }
+        groupDocListeners.clear()
     }
+
+    /** Drops both listeners for one group (leave/delete/purge path). */
+    private fun stopGroupListener(groupId: String) {
+        groupListeners.remove(groupId)?.remove()
+        groupDocListeners.remove(groupId)?.remove()
+    }
+
+    /**
+     * Watches the group doc itself: when the creator deletes the group,
+     * the doc vanishes (the items listener alone cannot see this, since
+     * deleting a parent doc leaves its subcollections behind). Members
+     * then purge locally; the creator's cascade already removed the
+     * remote members/mirrors, so no remote cleanup is needed here.
+     */
+    private fun attachGroupDocListener(userId: String, groupId: String) {
+        try {
+            val registration = firestore().collection("groups").document(groupId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null || snapshot == null) return@addSnapshotListener
+                    if (!snapshot.exists()) {
+                        repoScope.launch { purgeLocalGroup(userId, groupId) }
+                    }
+                }
+            groupDocListeners[groupId] = registration
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to attach group-doc listener for $groupId: ${e.message}")
+        }
+    }
+
+    // ---------------------------------------------------------------- listeners (items)
 
     private fun attachGroupListener(userId: String, groupId: String) {
         try {

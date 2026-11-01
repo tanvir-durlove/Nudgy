@@ -32,7 +32,8 @@ service cloud.firestore {
       // item write performs in the same batch (see GroupRepository).
       allow update: if request.auth != null &&
         resource.data.creatorUid == request.auth.uid;
-      allow delete: if false; // creator delete is Phase 3; deny in v1
+      allow delete: if request.auth != null &&
+        resource.data.creatorUid == request.auth.uid; // creator-only delete (Phase 3)
     }
 
     match /groups/{gid}/members/{uid} {
@@ -43,7 +44,9 @@ service cloud.firestore {
       // Join: any signed-in user may write their OWN membership doc.
       // The join code is the gate (shared secret, by design — see limitation).
       allow create: if request.auth != null && uid == request.auth.uid;
-      allow delete: if false; // leave/remove is Phase 3; deny in v1
+      // Leave: a member may delete their OWN membership doc. Creator
+      // leave is not a thing in v1 — the creator deletes the group.
+      allow delete: if request.auth != null && uid == request.auth.uid;
     }
 
     match /groups/{gid}/items/{itemId} {
@@ -59,16 +62,29 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow create: if request.auth != null &&
         get(/databases/$(database)/documents/groups/$(request.resource.data.groupId)).data.creatorUid == request.auth.uid;
-      allow delete: if false; // no revocation until Phase 3
+      // Creator-only delete (group delete cascade; the group doc must
+      // still exist when this runs — the cascade deletes it LAST).
+      allow delete: if request.auth != null &&
+        get(/databases/$(database)/documents/groups/$(resource.data.groupId)).data.creatorUid == request.auth.uid;
     }
 
     // ---- Per-user group membership mirror ----
     match /users/{uid}/groupMemberships/{gid} {
       allow read, write: if request.auth != null && uid == request.auth.uid;
+      // Delete additionally allows the group's creator, so the delete
+      // cascade can remove every member's mirror (the group doc must
+      // still exist when this runs — the cascade deletes it LAST).
+      allow delete: if request.auth != null && (
+        uid == request.auth.uid ||
+        get(/databases/$(database)/documents/groups/$(gid)).data.creatorUid == request.auth.uid);
     }
   }
 }
 ```
+
+## Delete cascade order (Phase 3)
+
+The app deletes in this order: items → members → mirrors → code doc → group doc LAST. The code-doc and mirror delete rules read the group doc with get(), so deleting the group doc first would make the rest of the cascade fail. The published rules must match this doc before device-testing delete/leave — the older published rules deny all three deletes.
 
 ## Honest limitation
 
@@ -94,6 +110,10 @@ in the privacy policy.
    batch → succeeds. Non-creator member attempts the same → DENIED
    (both the item write and the group update fail).
 8. Personal collections: existing per-user rules still pass (no regression).
+9. Creator delete: group doc + items + members + code doc + every mirror delete → all ALLOWED; a non-creator member attempting group delete → DENIED.
+10. Leave: member deletes own member doc + own mirror → ALLOWED; deleting another member's doc or mirror → DENIED.
+11. Cascade order: mirror/code deletes succeed only while the group doc still exists (their rules read it) — the app deletes the group doc last.
+12. Deleted group: a former member's group-doc listener/poll sees the missing doc and purges local rows; rejoin with the same code recreates membership (no stale local row, fresh poll baseline).
 
 ## Play Data safety / privacy policy
 

@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -34,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,6 +57,7 @@ import com.example.data.local.entity.GroupEntity
 import com.example.data.local.entity.TaskEntity
 import com.example.data.model.Priority
 import com.example.data.model.TaskCategory
+import com.example.data.repository.GroupMember
 import com.example.data.repository.GroupResult
 import com.example.ui.components.NudgyCheckbox
 import com.example.ui.sheets.CreateGroupSheet
@@ -81,6 +85,8 @@ import java.util.Locale
  *   (local completion toggle only).
  * - Schedule edit is not in v1: the creator deletes and re-creates a schedule
  *   to change it (see GroupScheduleSheet note).
+ * - Phase 3: group detail shows the member list and a share-invite button;
+ *   the creator sees Delete group, members see Leave (both confirmed).
  */
 @Composable
 fun GroupsScreen(
@@ -100,6 +106,9 @@ fun GroupsScreen(
     ) -> Unit,
     onUpdateGroupTask: (groupId: String, task: TaskEntity) -> Unit,
     onDeleteGroupItem: (groupId: String, itemId: String, isTask: Boolean) -> Unit,
+    onDeleteGroup: (groupId: String) -> Unit,
+    onLeaveGroup: (groupId: String) -> Unit,
+    onLoadMembers: suspend (groupId: String) -> List<GroupMember>,
     onToggleTask: (TaskEntity) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -120,6 +129,28 @@ fun GroupsScreen(
     var editTask by remember { mutableStateOf<TaskEntity?>(null) }
     var detailTask by remember { mutableStateOf<TaskEntity?>(null) }
     var schedulePendingDelete by remember { mutableStateOf<CalendarEventEntity?>(null) }
+    var deleteGroupTarget by remember { mutableStateOf<GroupEntity?>(null) }
+    var leaveGroupTarget by remember { mutableStateOf<GroupEntity?>(null) }
+    var members by remember { mutableStateOf<List<GroupMember>?>(null) }
+    // A group deleted elsewhere (creator cascade, member purge) must not
+    // linger as a stale detail view.
+    LaunchedEffect(groups) {
+        val selected = selectedGroup
+        if (selected != null && groups.none { it.groupId == selected.groupId }) {
+            selectedGroup = null
+        }
+    }
+    LaunchedEffect(selectedGroup?.groupId) {
+        val groupId = selectedGroup?.groupId
+        members = null
+        if (groupId != null) {
+            members = try {
+                onLoadMembers(groupId)
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
 
     fun copyCode(code: String) {
         clipboardManager.setText(AnnotatedString(code))
@@ -352,6 +383,28 @@ fun GroupsScreen(
                         modifier = Modifier.size(15.dp)
                     )
                 }
+                IconButton(
+                    onClick = {
+                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(
+                                Intent.EXTRA_TEXT,
+                                "Join \"${group.name}\" on Nudgy with code ${group.code}"
+                            )
+                        }
+                        context.startActivity(
+                            Intent.createChooser(sendIntent, "Invite to ${group.name}")
+                        )
+                    },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "Share invite",
+                        tint = NudgyPrimary,
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
                 if (isCreator) {
                     Spacer(modifier = Modifier.width(8.dp))
                     Box(
@@ -398,6 +451,60 @@ fun GroupsScreen(
                             ),
                             color = NudgyPrimary
                         )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+            Text(
+                text = if (members == null) "Members" else "Members · ${members!!.size}",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = NudgyCharcoal
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            if (members == null) {
+                Text(
+                    text = "Loading…",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    color = NudgyMuted
+                )
+            } else if (members!!.isEmpty()) {
+                Text(
+                    text = "No members yet.",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    color = NudgyMuted
+                )
+            } else {
+                members!!.forEach { member ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = member.displayName,
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                            color = NudgyCharcoal,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (member.uid == group.creatorUid) {
+                            Text(
+                                text = "Creator",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontSize = 11.sp, fontWeight = FontWeight.SemiBold
+                                ),
+                                color = NudgyPrimary
+                            )
+                        } else if (member.uid == user.uid) {
+                            Text(
+                                text = "You",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontSize = 11.sp, fontWeight = FontWeight.SemiBold
+                                ),
+                                color = NudgyMuted
+                            )
+                        }
                     }
                 }
             }
@@ -502,6 +609,34 @@ fun GroupsScreen(
                 }
             }
             Spacer(modifier = Modifier.height(24.dp))
+            if (isCreator) {
+                OutlinedButton(
+                    onClick = { deleteGroupTarget = group },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Delete group",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold, fontSize = 14.sp
+                        ),
+                        color = Color(0xFFB3261E)
+                    )
+                }
+            } else {
+                OutlinedButton(
+                    onClick = { leaveGroupTarget = group },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Leave group",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold, fontSize = 14.sp
+                        ),
+                        color = Color(0xFFB3261E)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 
@@ -589,6 +724,58 @@ fun GroupsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { schedulePendingDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+    deleteGroupTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteGroupTarget = null },
+            title = { Text("Delete this group?") },
+            text = {
+                Text(
+                    "\"${target.name}\" and all its tasks and schedules will be deleted " +
+                        "for every member. This cannot be undone."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDeleteGroup(target.groupId)
+                    deleteGroupTarget = null
+                    selectedGroup = null
+                }) {
+                    Text("Delete", color = Color(0xFFB3261E))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteGroupTarget = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+    leaveGroupTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { leaveGroupTarget = null },
+            title = { Text("Leave this group?") },
+            text = {
+                Text(
+                    "You will stop seeing \"${target.name}\"'s tasks and schedules. " +
+                        "You can rejoin later with the join code."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onLeaveGroup(target.groupId)
+                    leaveGroupTarget = null
+                    selectedGroup = null
+                }) {
+                    Text("Leave", color = Color(0xFFB3261E))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { leaveGroupTarget = null }) {
                     Text("Cancel")
                 }
             }
