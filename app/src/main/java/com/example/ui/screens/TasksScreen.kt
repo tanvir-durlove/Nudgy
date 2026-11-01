@@ -64,6 +64,7 @@ fun TasksScreen(
     onToggleTask: (TaskEntity) -> Unit,
     onAddTaskClick: () -> Unit,
     onTaskClick: (TaskEntity) -> Unit = {},
+    groupNames: Map<String, String> = emptyMap(),
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -321,6 +322,26 @@ fun TasksScreen(
                                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
                                 color = NudgyMuted
                             )
+                            // Group v1: origin badge — a group task must be
+                            // visibly distinct from a personal task.
+                            if (task.groupId != null) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(100.dp))
+                                        .background(NudgyPrimary.copy(alpha = 0.12f))
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = groupNames[task.groupId] ?: "Group",
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        ),
+                                        color = NudgyPrimary
+                                    )
+                                }
+                            }
                         }
 
                         Text(

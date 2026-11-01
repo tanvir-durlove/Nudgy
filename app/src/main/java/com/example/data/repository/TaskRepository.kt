@@ -111,13 +111,26 @@ class TaskRepository(
     suspend fun toggleTaskCompletion(task: TaskEntity) = withContext(Dispatchers.IO) {
         val newStatus = !task.isCompleted
         val completedAt = if (newStatus) System.currentTimeMillis() else null
-        taskDao.setTaskCompletionForUser(
-            userId = task.userId,
-            id = task.id,
-            isCompleted = newStatus,
-            completedAt = completedAt,
-            now = System.currentTimeMillis()
-        )
+        // Group v1: member completion is Room-local ONLY. Group rows must never
+        // be dirty-marked or synced — otherwise a member's completion becomes
+        // a personal cloud copy of a shared item.
+        if (task.groupId != null) {
+            taskDao.setTaskCompletionLocal(
+                userId = task.userId,
+                id = task.id,
+                isCompleted = newStatus,
+                completedAt = completedAt,
+                now = System.currentTimeMillis()
+            )
+        } else {
+            taskDao.setTaskCompletionForUser(
+                userId = task.userId,
+                id = task.id,
+                isCompleted = newStatus,
+                completedAt = completedAt,
+                now = System.currentTimeMillis()
+            )
+        }
         if (newStatus) {
             reminderManager.cancelReminder(task.id)
         } else if (task.reminderSet) {
@@ -126,7 +139,9 @@ class TaskRepository(
                 reminderManager.scheduleReminder(task.id, task.title, trigger)
             }
         }
-        syncDirtyTasksToCloud(task.userId)
+        if (task.groupId == null) {
+            syncDirtyTasksToCloud(task.userId)
+        }
     }
 
     suspend fun getTaskById(taskId: String): TaskEntity? = withContext(Dispatchers.IO) {
@@ -134,12 +149,22 @@ class TaskRepository(
     }
 
     suspend fun updateTask(task: TaskEntity) = withContext(Dispatchers.IO) {
-        taskDao.updateTask(
-            task.copy(
-                updatedAtEpochMillis = System.currentTimeMillis(),
-                isSyncedToCloud = false
+        // Group v1: group rows are edited through GroupRepository (cloud write
+        // to the shared group item). This path is a defensive local-only update
+        // that must NOT dirty-mark the row — a dirty group row would be
+        // uploaded as a personal cloud copy by syncDirtyTasksToCloud.
+        if (task.groupId != null) {
+            taskDao.updateTask(
+                task.copy(updatedAtEpochMillis = System.currentTimeMillis())
             )
-        )
+        } else {
+            taskDao.updateTask(
+                task.copy(
+                    updatedAtEpochMillis = System.currentTimeMillis(),
+                    isSyncedToCloud = false
+                )
+            )
+        }
         if (task.reminderSet && !task.isCompleted) {
             val trigger = task.reminderEpochMillis ?: task.dueDateEpochMillis
             if (trigger > System.currentTimeMillis()) {
@@ -150,13 +175,20 @@ class TaskRepository(
         } else {
             reminderManager.cancelReminder(task.id)
         }
-        syncDirtyTasksToCloud(task.userId)
+        if (task.groupId == null) {
+            syncDirtyTasksToCloud(task.userId)
+        }
     }
 
     suspend fun deleteTask(userId: String, taskId: String) = withContext(Dispatchers.IO) {
         reminderManager.cancelReminder(taskId)
+        // Group v1: group rows are deleted from the shared group item by the
+        // creator (GroupRepository). A member-side delete is local-only.
+        val task = taskDao.getTaskById(taskId)
         taskDao.deleteTaskByIdForUser(userId, taskId)
-        deleteTaskFromFirestore(userId, taskId)
+        if (task?.groupId == null) {
+            deleteTaskFromFirestore(userId, taskId)
+        }
     }
 
     suspend fun deleteTask(taskId: String) = withContext(Dispatchers.IO) {
@@ -164,7 +196,9 @@ class TaskRepository(
         val task = taskDao.getTaskById(taskId)
         if (task != null) {
             taskDao.deleteTaskByIdForUser(task.userId, taskId)
-            deleteTaskFromFirestore(task.userId, taskId)
+            if (task.groupId == null) {
+                deleteTaskFromFirestore(task.userId, taskId)
+            }
         } else {
             taskDao.deleteTaskById(taskId)
         }
@@ -172,16 +206,30 @@ class TaskRepository(
 
     suspend fun snoozeTask(taskId: String, snoozeEpochMillis: Long) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        taskDao.snoozeTask(
-            id = taskId,
-            dueDate = snoozeEpochMillis,
-            reminderDate = snoozeEpochMillis,
-            now = now
-        )
+        // Group v1: snoozing a group task is a local-only change (same rule as
+        // completion) — never dirty-mark a group row.
+        val existing = taskDao.getTaskById(taskId)
+        if (existing?.groupId != null) {
+            taskDao.snoozeTaskLocal(
+                id = taskId,
+                dueDate = snoozeEpochMillis,
+                reminderDate = snoozeEpochMillis,
+                now = now
+            )
+        } else {
+            taskDao.snoozeTask(
+                id = taskId,
+                dueDate = snoozeEpochMillis,
+                reminderDate = snoozeEpochMillis,
+                now = now
+            )
+        }
         val task = taskDao.getTaskById(taskId)
         if (task != null) {
             reminderManager.scheduleReminder(task.id, task.title, snoozeEpochMillis)
-            syncDirtyTasksToCloud(task.userId)
+            if (task.groupId == null) {
+                syncDirtyTasksToCloud(task.userId)
+            }
         }
     }
 
@@ -201,7 +249,11 @@ class TaskRepository(
     }
 
     suspend fun clearCompletedTasks(userId: String) = withContext(Dispatchers.IO) {
+        // Group v1: completed group rows are NOT cleared here — the shared
+        // group item still exists, so a listener/poll tick would resurrect
+        // them. Only personal completed tasks are purged (local + cloud).
         val completed = taskDao.getCompletedTasksOnce(userId)
+            .filter { it.groupId == null }
         if (completed.isNotEmpty() && userId != com.example.auth.AuthManager.GUEST_USER_ID) {
             repoScope.launch {
                 try {
@@ -216,7 +268,7 @@ class TaskRepository(
                 }
             }
         }
-        taskDao.deleteCompletedTasks(userId)
+        taskDao.deleteCompletedPersonalTasks(userId)
     }
 
     fun startCloudSync(userId: String) {
@@ -271,12 +323,21 @@ class TaskRepository(
                                             reminderSet = reminderSet,
                                             reminderEpochMillis = reminderEpoch,
                                             recurrenceRule = recurrence,
-                                            isSyncedToCloud = true
+                                            isSyncedToCloud = true,
+                                            // Group v1: never let a personal-collection
+                                            // upsert strip a group row's origin.
+                                            groupId = localTask?.groupId
                                         )
                                         taskDao.insertTask(entity)
                                     }
                                     DocumentChange.Type.REMOVED -> {
-                                        taskDao.deleteTaskByIdForUser(userId, dc.document.id)
+                                        // Group v1: a personal-doc delete must never
+                                        // remove a group row that happens to share
+                                        // the id (defensive; ids are UUIDs).
+                                        val localRow = taskDao.getTaskById(dc.document.id)
+                                        if (localRow?.groupId == null) {
+                                            taskDao.deleteTaskByIdForUser(userId, dc.document.id)
+                                        }
                                     }
                                 }
                             }
@@ -308,7 +369,11 @@ class TaskRepository(
         if (userId == com.example.auth.AuthManager.GUEST_USER_ID) return
         scope.launch(Dispatchers.IO) {
             try {
+                // Group v1 (belt-and-braces): group rows are stored with
+                // isSyncedToCloud = true, but never upload one even if a
+                // future code path dirty-marks it by mistake.
                 val unsynced = taskDao.getUnsyncedTasks(userId)
+                    .filter { it.groupId == null }
                 if (unsynced.isEmpty()) return@launch
 
                 val dbId = context.getString(R.string.firestore_database_id)

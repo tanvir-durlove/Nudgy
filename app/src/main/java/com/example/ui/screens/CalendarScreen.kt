@@ -86,6 +86,7 @@ fun CalendarScreen(
     onAddEvent: (title: String, startTime: Long, endTime: Long, location: String?, type: String) -> Unit = { _, _, _, _, _ -> },
     onDeleteEvent: (eventId: String) -> Unit = {},
     onSelectDay: (Long) -> Unit = {},
+    groupNames: Map<String, String> = emptyMap(),
     modifier: Modifier = Modifier
 ) {
     var showAddEventDialog by remember { mutableStateOf(false) }
@@ -548,18 +549,42 @@ fun CalendarScreen(
                                                 )
                                             }
                                         }
+                                        // Group v1: origin badge for group schedules.
+                                        if (event.groupId != null) {
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(100.dp))
+                                                    .background(NudgyPrimary.copy(alpha = 0.12f))
+                                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = groupNames[event.groupId] ?: "Group",
+                                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.SemiBold
+                                                    ),
+                                                    color = NudgyPrimary
+                                                )
+                                            }
+                                        }
                                     }
 
-                                    IconButton(
-                                        onClick = { eventPendingDelete = event },
-                                        modifier = Modifier.size(32.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.DeleteOutline,
-                                            contentDescription = "Delete event",
-                                            tint = NudgyMuted,
-                                            modifier = Modifier.size(18.dp)
-                                        )
+                                    // Group v1: members never delete a group schedule
+                                    // from here — only the creator, from the Groups
+                                    // tab, can delete the shared item.
+                                    if (event.groupId == null) {
+                                        IconButton(
+                                            onClick = { eventPendingDelete = event },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.DeleteOutline,
+                                                contentDescription = "Delete event",
+                                                tint = NudgyMuted,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }

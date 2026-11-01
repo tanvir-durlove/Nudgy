@@ -22,7 +22,11 @@ data class TaskEntity(
     val recurrenceRule: String? = null,
     val isSyncedToCloud: Boolean = false,
     val createdAtEpochMillis: Long = System.currentTimeMillis(),
-    val updatedAtEpochMillis: Long = System.currentTimeMillis()
+    val updatedAtEpochMillis: Long = System.currentTimeMillis(),
+    // Group feature (v5): null for personal tasks. A non-null groupId marks
+    // a group row — it is local-only for completion/sync purposes and must
+    // never be uploaded via the personal sync path (see TaskRepository).
+    val groupId: String? = null
 )
 
 @Entity(tableName = "calendar_events")
@@ -36,7 +40,20 @@ data class CalendarEventEntity(
     val eventType: String = "MEETING", // "MEETING", "FOCUS_TIME"
     val isAllDay: Boolean = false,
     val googleCalendarEventId: Long? = null,
-    val isFromGoogleCalendar: Boolean = false
+    val isFromGoogleCalendar: Boolean = false,
+    // Group feature (v5): null for personal events. A non-null groupId marks
+    // a group schedule — it must never be exported to Google Calendar and
+    // never be uploaded via the personal sync path (see CalendarRepository).
+    val groupId: String? = null
+)
+
+@Entity(tableName = "groups")
+data class GroupEntity(
+    @PrimaryKey val groupId: String,
+    val name: String,
+    val code: String,
+    val creatorUid: String,
+    val joinedAtEpochMillis: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "nudgy_memories")
