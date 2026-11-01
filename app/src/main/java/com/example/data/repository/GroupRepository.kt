@@ -540,6 +540,58 @@ class GroupRepository(
         }
     }
 
+    /**
+     * Restores groups from the membership mirror after a fresh install or a
+     * new-device sign-in. Room is wiped on uninstall, and startGroupSync only
+     * knows local group ids — without this, groups that still exist in
+     * Firestore stay invisible. The mirror is the source of truth for
+     * membership and already carries groupId + groupName + code, so no extra
+     * reads are needed for the local rows (one group-doc get per group only
+     * verifies the group still exists).
+     *
+     * Additive only and idempotent: existing local rows are never touched
+     * (re-sign-in never duplicates). A mirror whose group doc is gone is
+     * stale, so it is skipped locally and its mirror doc deleted, so it can
+     * never resurrect the group. Empty mirror list = no-op. Guests = no-op.
+     * Failures are logged, never thrown, so a restore failure can never
+     * block the sync that follows.
+     */
+    suspend fun restoreGroupsFromMirror(userId: String) {
+        if (userId == AuthManager.GUEST_USER_ID) return
+        try {
+            withContext(Dispatchers.IO) {
+                val fs = firestore()
+                val mirrors = fs.collection("users").document(userId)
+                    .collection("groupMemberships").get().await().documents
+                for (mirror in mirrors) {
+                    val groupId = mirror.getString("groupId") ?: continue
+                    if (groupDao.getGroupById(groupId) != null) continue
+                    val groupDoc = fs.collection("groups").document(groupId).get().await()
+                    if (!groupDoc.exists()) {
+                        // Stale mirror: the group is gone, so drop the mirror too.
+                        mirror.reference.delete().await()
+                        continue
+                    }
+                    val name = mirror.getString("groupName")
+                        ?: groupDoc.getString("name") ?: continue
+                    val code = mirror.getString("code")
+                        ?: groupDoc.getString("code") ?: ""
+                    groupDao.insertGroup(
+                        GroupEntity(
+                            groupId = groupId,
+                            name = name,
+                            code = code,
+                            creatorUid = groupDoc.getString("creatorUid") ?: "",
+                            joinedAtEpochMillis = System.currentTimeMillis()
+                        )
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "restoreGroupsFromMirror failed: ${e.message}")
+        }
+    }
+
     // ---------------------------------------------------------------- listeners
 
     fun startGroupSync(userId: String) {

@@ -216,6 +216,9 @@ fun NudgyMainFlow(
                 taskRepository.startCloudSync(currentUser.uid)
                 memoryRepository.startCloudSync(currentUser.uid)
                 calendarRepository.startCloudSync(currentUser.uid)
+                // Restore first: a fresh install has no local groups yet,
+                // so sync alone would attach nothing.
+                groupRepository.restoreGroupsFromMirror(currentUser.uid)
                 groupRepository.startGroupSync(currentUser.uid)
                 // KEEP policy: re-scheduling never duplicates the work.
                 GroupPollWorker.schedule(context)
