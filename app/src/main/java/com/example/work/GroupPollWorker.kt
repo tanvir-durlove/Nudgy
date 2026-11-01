@@ -116,6 +116,13 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
         groupId: String,
         now: Long
     ) {
+        // A deleted group must never resurrect: its items query could
+        // still return docs if the creator's cascade is mid-flight, and
+        // the baseline tick would otherwise leave the group row forever.
+        if (!repo.groupDocExists(groupId)) {
+            repo.purgeLocalGroup(uid, groupId)
+            return
+        }
         val lastSeenKey = KEY_LAST_SEEN_PREFIX + groupId
         val lastSeen = prefs.getLong(lastSeenKey, 0L)
         if (lastSeen == 0L) {
@@ -230,6 +237,16 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
                 ExistingPeriodicWorkPolicy.KEEP,
                 request
             )
+        }
+
+        /** Clears one group's poll watermarks (leave/delete/purge path),
+         * so a later rejoin gets a fresh baseline tick, not a flood. */
+        fun clearGroupState(context: Context, groupId: String) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit()
+                .remove(KEY_LAST_SEEN_PREFIX + groupId)
+                .remove(KEY_LAST_RECONCILE_PREFIX + groupId)
+                .apply()
         }
 
         /** Cancel the periodic poll (sign-out path only). */

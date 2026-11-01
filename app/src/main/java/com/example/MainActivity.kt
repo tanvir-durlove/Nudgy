@@ -53,6 +53,7 @@ import com.example.data.repository.CalendarRepository
 import com.example.data.repository.ChatRepository
 import com.example.data.repository.DailyTaskStats
 import com.example.data.repository.GroupRepository
+import com.example.data.repository.GroupResult
 import com.example.work.GroupPollWorker
 import com.example.data.repository.MemoryRepository
 import com.example.data.repository.TaskRepository
@@ -604,6 +605,29 @@ fun NudgyAppScaffold(
                                 launchGroupWrite {
                                     groupRepository.deleteGroupItem(groupId, user.uid, itemId, isTask)
                                 }
+                            },
+                            onDeleteGroup = { groupId ->
+                                scope.launch {
+                                    when (val result = groupRepository.deleteGroup(user.uid, groupId)) {
+                                        is GroupResult.Err -> Toast.makeText(
+                                            context, result.message, Toast.LENGTH_LONG
+                                        ).show()
+                                        is GroupResult.Ok -> Unit
+                                    }
+                                }
+                            },
+                            onLeaveGroup = { groupId ->
+                                scope.launch {
+                                    when (val result = groupRepository.leaveGroup(user.uid, groupId)) {
+                                        is GroupResult.Err -> Toast.makeText(
+                                            context, result.message, Toast.LENGTH_LONG
+                                        ).show()
+                                        is GroupResult.Ok -> Unit
+                                    }
+                                }
+                            },
+                            onLoadMembers = { groupId ->
+                                groupRepository.getGroupMembers(groupId)
                             },
                             onToggleTask = { task ->
                                 scope.launch {
