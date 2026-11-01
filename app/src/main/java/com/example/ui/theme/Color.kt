@@ -31,3 +31,12 @@ val MascotCoral = Color(0xFFF06449)
 val MascotCheek = Color(0xFFFF9F92)
 val MascotSnout = Color(0xFFFF8875)
 val MascotDark = Color(0xFF1C1B1F)
+
+// Groups UI tokens (Figma redesign; Groups screens only for now)
+val NudgyMemberPillText = Color(0xFF6C5CE7)
+val NudgyAvatarPalettes: List<Pair<Color, Color>> = listOf(
+    NudgyPeach to NudgyPrimaryDark,
+    NudgyLavender to NudgyMemberPillText,
+    NudgySageBorder to NudgyGreen,
+    NudgyButterBorder to NudgyButterText
+)

@@ -48,6 +48,7 @@ import com.example.ui.theme.NudgyCard
 import com.example.ui.theme.NudgyCardBorder
 import com.example.ui.theme.NudgyCharcoal
 import com.example.ui.theme.NudgyMuted
+import com.example.ui.theme.NudgyPeach
 import com.example.ui.theme.NudgyPrimary
 import java.util.Calendar
 import java.util.Locale
@@ -115,6 +116,21 @@ fun GroupScheduleSheet(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 24.dp)
         ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(NudgyPeach)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Schedule,
+                    contentDescription = null,
+                    tint = NudgyPrimary,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = "Add a group schedule",
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
@@ -132,7 +148,7 @@ fun GroupScheduleSheet(
                 value = title,
                 onValueChange = { title = it },
                 label = { Text("Title") },
-                placeholder = { Text("e.g. Class test review") },
+                placeholder = { Text("e.g. Team review session") },
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = NudgyPrimary,
@@ -392,6 +408,7 @@ fun GroupScheduleSheet(
                 },
                 enabled = title.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary),
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
