@@ -72,6 +72,9 @@ fun CreateTaskSheet(
         category: TaskCategory,
         reminderSet: Boolean
     ) -> Unit,
+    headerTitle: String = "New Task",
+    headerSubtitle: String? = null,
+    saveButtonText: String = "Add Task",
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -117,7 +120,7 @@ fun CreateTaskSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "New Task",
+                    text = headerTitle,
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                     color = NudgyCharcoal
                 )
@@ -130,6 +133,14 @@ fun CreateTaskSheet(
                 }
             }
 
+            headerSubtitle?.let { subtitle ->
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    color = NudgyMuted
+                )
+            }
             Spacer(modifier = Modifier.height(16.dp))
 
             // Title input
@@ -491,7 +502,7 @@ fun CreateTaskSheet(
                 colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary)
             ) {
                 Text(
-                    text = "Add Task",
+                    text = saveButtonText,
                     style = MaterialTheme.typography.titleMedium.copy(color = Color.White, fontWeight = FontWeight.Bold)
                 )
             }
