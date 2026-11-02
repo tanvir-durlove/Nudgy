@@ -38,6 +38,19 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- App Links: group-join deep link. Verification (autoVerify)
+                 needs the matching assetlinks.json on tanvir-durlove.github.io. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:host="tanvir-durlove.github.io"
+                    android:pathPrefix="/nudgy/join"
+                    android:scheme="https" />
+            </intent-filter>
         </activity>
 
         <receiver

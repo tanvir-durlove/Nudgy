@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.app.Activity
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -77,9 +79,15 @@ import com.example.ui.sheets.NotificationsSheet
 import com.example.ui.sheets.YourNudgySheet
 import com.example.ui.theme.NudgyCanvas
 import com.example.ui.theme.NudgyTheme
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.UUID
+
+// SharedPreferences key for a group-join code stashed while signed out
+// (App Links); consumed right after sign-in, then cleared.
+private const val KEY_PENDING_GROUP_CODE = "pending_group_code"
 
 class MainActivity : ComponentActivity() {
     private lateinit var authManager: AuthManager
@@ -94,6 +102,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var reminderManager: ReminderManager
     private lateinit var analytics: NudgyAnalytics
     private lateinit var remoteConfig: NudgyRemoteConfig
+    private val deepLinkJoinCodeFlow = MutableStateFlow<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -119,14 +128,18 @@ class MainActivity : ComponentActivity() {
 
         authManager.attemptSilentSignIn(lifecycleScope)
 
-        // Group-notification tap: open the Groups tab. The activity has
-        // no onNewIntent routing, so the tap intent uses CLEAR_TASK and
-        // this onCreate read is the single deep-link path.
+        // Group-notification tap: open the Groups tab. The tap intent uses
+        // CLEAR_TASK, so this onCreate read handles it; App Links intents
+        // are additionally routed via onNewIntent (see parseGroupJoinCode).
         val initialDestination = if (intent.getBooleanExtra(GroupPollWorker.EXTRA_OPEN_GROUPS, false)) {
             NudgyNavDestination.GROUPS
         } else {
             NudgyNavDestination.HOME
         }
+
+        // App Links group-join: the launch intent may already carry a
+        // /nudgy/join code (cold start, or a fresh instance on top).
+        parseGroupJoinCode(intent)?.let { deepLinkJoinCodeFlow.value = it }
 
         setContent {
             NudgyTheme {
@@ -143,9 +156,35 @@ class MainActivity : ComponentActivity() {
                     voiceAssistantManager = voiceAssistantManager,
                     analytics = analytics,
                     remoteConfig = remoteConfig,
-                    initialDestination = initialDestination
+                    initialDestination = initialDestination,
+                    deepLinkJoinCodeFlow = deepLinkJoinCodeFlow,
+                    onDeepLinkCodeConsumed = { deepLinkJoinCodeFlow.value = null }
                 )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        parseGroupJoinCode(intent)?.let { deepLinkJoinCodeFlow.value = it }
+    }
+
+    /**
+     * App Links group-join parser. Returns the code only for an exact
+     * https://tanvir-durlove.github.io/nudgy/join?code=... VIEW intent;
+     * anything else is ignored (never a crash, never a silent join).
+     */
+    private fun parseGroupJoinCode(intent: Intent?): String? {
+        return try {
+            if (intent?.action != Intent.ACTION_VIEW) return null
+            val uri = intent.data ?: return null
+            if (uri.scheme != "https") return null
+            if (uri.host != "tanvir-durlove.github.io") return null
+            if (uri.path != "/nudgy/join") return null
+            uri.getQueryParameter("code")?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -169,9 +208,14 @@ fun NudgyMainFlow(
     voiceAssistantManager: VoiceAssistantManager,
     analytics: NudgyAnalytics,
     remoteConfig: NudgyRemoteConfig,
-    initialDestination: NudgyNavDestination = NudgyNavDestination.HOME
+    initialDestination: NudgyNavDestination = NudgyNavDestination.HOME,
+    deepLinkJoinCodeFlow: StateFlow<String?>,
+    onDeepLinkCodeConsumed: () -> Unit
 ) {
     val user by authManager.userState.collectAsStateWithLifecycle()
+    val deepLinkCode by deepLinkJoinCodeFlow.collectAsStateWithLifecycle()
+    // Stashed deep-link code, delivered to the scaffold once per user.
+    var stashedJoinCode by remember { mutableStateOf<String?>(null) }
     val isLoading by authManager.isLoading.collectAsStateWithLifecycle()
     val errorMessage by authManager.errorMessage.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -200,6 +244,17 @@ fun NudgyMainFlow(
         LaunchedEffect(Unit) {
             GroupPollWorker.cancel(context)
         }
+        // App Links while signed out: stash the code; the signed-in branch
+        // below completes the join right after sign-in, then clears it.
+        LaunchedEffect(deepLinkCode) {
+            if (deepLinkCode != null) {
+                context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(KEY_PENDING_GROUP_CODE, deepLinkCode)
+                    .apply()
+                onDeepLinkCodeConsumed()
+            }
+        }
         SignInScreen(
             authManager = authManager,
             scope = scope,
@@ -222,6 +277,17 @@ fun NudgyMainFlow(
                 groupRepository.startGroupSync(currentUser.uid)
                 // KEEP policy: re-scheduling never duplicates the work.
                 GroupPollWorker.schedule(context)
+                // App Links stashed while signed out: complete the join now
+                // (prefilled sheet, never silent), then clear the stash.
+                val stashed = context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE)
+                    .getString(KEY_PENDING_GROUP_CODE, null)
+                if (!stashed.isNullOrBlank()) {
+                    context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE)
+                        .edit()
+                        .remove(KEY_PENDING_GROUP_CODE)
+                        .apply()
+                    stashedJoinCode = stashed
+                }
             }
         }
 
@@ -250,7 +316,12 @@ fun NudgyMainFlow(
             voiceAssistantManager = voiceAssistantManager,
             analytics = analytics,
             remoteConfig = remoteConfig,
-            initialDestination = initialDestination
+            initialDestination = initialDestination,
+            pendingJoinCode = stashedJoinCode ?: deepLinkCode,
+            onPendingJoinCodeConsumed = {
+                stashedJoinCode = null
+                onDeepLinkCodeConsumed()
+            }
         )
     }
 }
@@ -270,11 +341,30 @@ fun NudgyAppScaffold(
     voiceAssistantManager: VoiceAssistantManager,
     analytics: NudgyAnalytics,
     remoteConfig: NudgyRemoteConfig,
-    initialDestination: NudgyNavDestination = NudgyNavDestination.HOME
+    initialDestination: NudgyNavDestination = NudgyNavDestination.HOME,
+    pendingJoinCode: String? = null,
+    onPendingJoinCodeConsumed: () -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var currentDestination by remember { mutableStateOf(initialDestination) }
+    // App Links join: one-shot prefill for the Groups Join sheet. Guests get
+    // the Groups tab's sign-in prompt instead (code stashed for after sign-in).
+    var groupJoinPrefill by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(pendingJoinCode) {
+        if (pendingJoinCode != null) {
+            currentDestination = NudgyNavDestination.GROUPS
+            if (user.isGuest) {
+                context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(KEY_PENDING_GROUP_CODE, pendingJoinCode)
+                    .apply()
+            } else {
+                groupJoinPrefill = pendingJoinCode
+            }
+            onPendingJoinCodeConsumed()
+        }
+    }
     var showProfileSheet by remember { mutableStateOf(false) }
     var showNotificationsSheet by remember { mutableStateOf(false) }
     var showCreateTaskSheet by remember { mutableStateOf(false) }
@@ -637,7 +727,9 @@ fun NudgyAppScaffold(
                                     taskRepository.toggleTaskCompletion(task)
                                     analytics.logTaskCompleted(task.id, dailyStats.completed + 1)
                                 }
-                            }
+                            },
+                            prefillJoinCode = groupJoinPrefill,
+                            onPrefillJoinCodeConsumed = { groupJoinPrefill = null }
                         )
                     }
 

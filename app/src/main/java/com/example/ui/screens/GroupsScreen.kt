@@ -134,6 +134,8 @@ fun GroupsScreen(
     onLeaveGroup: (groupId: String) -> Unit,
     onLoadMembers: suspend (groupId: String) -> List<GroupMember>,
     onToggleTask: (TaskEntity) -> Unit,
+    prefillJoinCode: String? = null,
+    onPrefillJoinCodeConsumed: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -148,6 +150,16 @@ fun GroupsScreen(
     var selectedGroup by remember { mutableStateOf<GroupEntity?>(null) }
     var showCreateGroup by remember { mutableStateOf(false) }
     var showJoinGroup by remember { mutableStateOf(false) }
+    // Deep-link prefill (one-shot): MainActivity delivers a join code from an
+    // App Links intent; the sheet opens prefilled and the user still taps Join.
+    var joinPrefill by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(prefillJoinCode) {
+        if (prefillJoinCode != null) {
+            joinPrefill = prefillJoinCode
+            showJoinGroup = true
+            onPrefillJoinCodeConsumed()
+        }
+    }
     var showCreateTask by remember { mutableStateOf(false) }
     var showCreateSchedule by remember { mutableStateOf(false) }
     var editTask by remember { mutableStateOf<TaskEntity?>(null) }
@@ -500,7 +512,7 @@ fun GroupsScreen(
                 }
             }
             Spacer(modifier = Modifier.height(20.dp))
-            // Invite code card (dashed border). Share stays for later deep-link work.
+            // Invite code card (dashed border). Share sends an App Links deep link.
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -560,7 +572,7 @@ fun GroupsScreen(
                                     type = "text/plain"
                                     putExtra(
                                         Intent.EXTRA_TEXT,
-                                        "Join \"${group.name}\" on Nudgy with code ${group.code}"
+                                        "Join \"${group.name}\" on Nudgy: https://tanvir-durlove.github.io/nudgy/join?code=${group.code}"
                                     )
                                 }
                                 context.startActivity(
@@ -956,8 +968,9 @@ fun GroupsScreen(
     }
     if (showJoinGroup) {
         JoinGroupSheet(
-            onDismiss = { showJoinGroup = false },
-            onJoinGroup = onJoinGroup
+            onDismiss = { showJoinGroup = false; joinPrefill = null },
+            onJoinGroup = onJoinGroup,
+            initialCode = joinPrefill ?: ""
         )
     }
     val activeGroup = selectedGroup
