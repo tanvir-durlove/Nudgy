@@ -30,7 +30,7 @@ val MascotDark = Color(0xFF1C1B1F)
 // composable call site follows the theme with no per-screen changes.
 // Dark palette: dark blue-grey surfaces (NOT pure black), retained elevation
 // feel via the card/background step, accent sparing.
-private data class NudgyPalette(
+internal data class NudgyPalette(
     val canvas: Color,
     val card: Color,
     val charcoal: Color,
@@ -126,7 +126,7 @@ val NudgyAvatarPalettes: List<Pair<Color, Color>> = listOf(
     Color(0xFFFDF1F0) to Color(0xFFBE3B24),
     Color(0xFFF1F0FD) to Color(0xFF5D4FD6),
     NudgySageBorder to Color(0xFF2E7D32),
-    NudgyButterBorder to Color(0xFF8D6200)
+    Color(0xFFF5E8B9) to Color(0xFF8D6200)
 )
 
 // M3 shape tokens for this app (defined in Theme.kt as NudgyShapes):

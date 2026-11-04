@@ -240,7 +240,7 @@ fun CreateTaskSheet(
                     ) {
                         Text(
                             text = label,
-                            color = if (isSelected) MaterialTheme.colorScheme.onInverseSurface else NudgyCharcoal,
+                            color = if (isSelected) MaterialTheme.colorScheme.inverseOnSurface else NudgyCharcoal,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             fontSize = 13.sp
                         )
@@ -553,7 +553,7 @@ fun CreateTaskSheet(
                     ) {
                         Text(
                             text = c.name.lowercase().replaceFirstChar { it.uppercase() },
-                            color = if (isSelected) MaterialTheme.colorScheme.onInverseSurface else NudgyCharcoal,
+                            color = if (isSelected) MaterialTheme.colorScheme.inverseOnSurface else NudgyCharcoal,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             fontSize = 13.sp
                         )

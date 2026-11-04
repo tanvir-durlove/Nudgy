@@ -688,7 +688,7 @@ fun ChatScreen(
             Icon(
                 imageVector = Icons.Outlined.GraphicEq,
                 contentDescription = "Push to talk",
-                tint = if (isListening) Color.White else MaterialTheme.colorScheme.onInverseSurface,
+                tint = if (isListening) Color.White else MaterialTheme.colorScheme.inverseOnSurface,
                 modifier = Modifier.size(26.dp)
             )
         }

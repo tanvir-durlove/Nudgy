@@ -302,7 +302,7 @@ fun CalendarScreen(
                 Icon(
                     imageVector = Icons.Default.Add,
                     contentDescription = "Add event",
-                    tint = MaterialTheme.colorScheme.onInverseSurface,
+                    tint = MaterialTheme.colorScheme.inverseOnSurface,
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -350,7 +350,7 @@ fun CalendarScreen(
                             text = day.dayOfWeek,
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontSize = 12.sp,
-                                color = if (isSelected) MaterialTheme.colorScheme.onInverseSurface.copy(alpha = 0.8f) else NudgyMuted
+                                color = if (isSelected) MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f) else NudgyMuted
                             )
                         )
                         Spacer(modifier = Modifier.height(6.dp))
@@ -358,7 +358,7 @@ fun CalendarScreen(
                             text = "${day.dayOfMonth}",
                             style = MaterialTheme.typography.titleLarge.copy(
                                 fontWeight = FontWeight.Bold,
-                                color = if (isSelected) MaterialTheme.colorScheme.onInverseSurface else NudgyCharcoal
+                                color = if (isSelected) MaterialTheme.colorScheme.inverseOnSurface else NudgyCharcoal
                             )
                         )
                     }
@@ -957,7 +957,7 @@ fun CalendarScreen(
                             ) {
                                 Text(
                                     text = typeLabel,
-                                    color = if (isSelected) MaterialTheme.colorScheme.onInverseSurface else NudgyCharcoal,
+                                    color = if (isSelected) MaterialTheme.colorScheme.inverseOnSurface else NudgyCharcoal,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                     fontSize = 12.sp
                                 )

@@ -158,7 +158,7 @@ fun HomeScreen(
                 Icon(
                     imageVector = Icons.Default.Add,
                     contentDescription = "Add task",
-                    tint = MaterialTheme.colorScheme.onInverseSurface,
+                    tint = MaterialTheme.colorScheme.inverseOnSurface,
                     modifier = Modifier.size(24.dp)
                 )
             }
