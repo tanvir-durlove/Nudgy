@@ -45,6 +45,8 @@ import kotlinx.coroutines.launch
 
 /**
  * Join-by-code sheet. Codes are 6 characters; input is uppercased as typed.
+ * initialCode prefills the field (App Links deep-link join); the user still
+ * taps Join to confirm — never auto-joined.
  * Re-joining an already-joined group is a no-op success.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -52,11 +54,12 @@ import kotlinx.coroutines.launch
 fun JoinGroupSheet(
     onDismiss: () -> Unit,
     onJoinGroup: suspend (code: String) -> GroupResult<GroupEntity>,
+    initialCode: String = "",
     modifier: Modifier = Modifier
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
-    var code by remember { mutableStateOf("") }
+    var code by remember { mutableStateOf(initialCode.uppercase().filter { it.isLetterOrDigit() }) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isBusy by remember { mutableStateOf(false) }
 
