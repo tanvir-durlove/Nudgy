@@ -571,13 +571,18 @@ fun CalendarScreen(
                                             color = NudgyCharcoal
                                         )
                                         Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                text = event.locationOrLink ?: "Google Meet",
-                                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
-                                                color = NudgyMuted
-                                            )
+                                            val locationText = event.locationOrLink?.takeIf { it.isNotBlank() }
+                                            if (locationText != null) {
+                                                Text(
+                                                    text = locationText,
+                                                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                                    color = NudgyMuted
+                                                )
+                                            }
                                             if (event.isFromGoogleCalendar) {
-                                                Spacer(modifier = Modifier.width(6.dp))
+                                                if (locationText != null) {
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                }
                                                 Text(
                                                     text = "· Google Calendar",
                                                     style = MaterialTheme.typography.bodyMedium.copy(
