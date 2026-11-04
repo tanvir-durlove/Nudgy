@@ -620,7 +620,7 @@ fun GroupsScreen(
                                 .fillMaxWidth()
                                 .height(8.dp)
                                 .clip(RoundedCornerShape(100.dp))
-                                .background(Color.White)
+                                .background(NudgyCard)
                         ) {
                             Box(
                                 modifier = Modifier

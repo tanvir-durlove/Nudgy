@@ -13,8 +13,8 @@ enum class NudgyNavDestination(
     val icon: ImageVector
 ) {
     HOME("Home", Icons.Outlined.Home),
-    CHAT("Chat", Icons.Outlined.ChatBubbleOutline),
     TASKS("Tasks", Icons.Outlined.Checklist),
+    CHAT("Chat", Icons.Outlined.ChatBubbleOutline),
     CALENDAR("Calendar", Icons.Outlined.CalendarMonth),
     GROUPS("Groups", Icons.Outlined.Group)
 }

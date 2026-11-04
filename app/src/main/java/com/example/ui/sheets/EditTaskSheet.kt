@@ -63,6 +63,7 @@ import com.example.data.model.TaskCategory
 import com.example.ui.theme.NudgyCard
 import com.example.ui.theme.NudgyCardBorder
 import com.example.ui.theme.NudgyCharcoal
+import com.example.ui.theme.NudgyChipBackground
 import com.example.ui.theme.NudgyMuted
 import com.example.ui.theme.NudgyPrimary
 import com.example.ui.theme.NudgyPrimaryDark
@@ -191,7 +192,7 @@ fun EditTaskSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFFF3EFE6))
+                    .background(NudgyChipBackground)
                     .border(1.dp, NudgyCardBorder, RoundedCornerShape(14.dp))
                     .clickable {
                         val cal = Calendar.getInstance().apply { timeInMillis = currentDueDateMillis }
@@ -300,9 +301,10 @@ fun EditTaskSheet(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(100.dp))
-                            .background(if (isSelected) pColor else Color(0xFFF3EFE6))
+                            .clip(CircleShape)
+                            .background(if (isSelected) pColor else NudgyChipBackground)
                             .clickable { priority = p }
+                            .height(48.dp)
                             .padding(vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
@@ -334,15 +336,16 @@ fun EditTaskSheet(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(100.dp))
-                            .background(if (isSelected) NudgyCharcoal else Color(0xFFF3EFE6))
+                            .clip(CircleShape)
+                            .background(if (isSelected) MaterialTheme.colorScheme.inverseSurface else NudgyChipBackground)
                             .clickable { category = c }
+                            .height(48.dp)
                             .padding(vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = c.name.lowercase().replaceFirstChar { it.uppercase() },
-                            color = if (isSelected) Color.White else NudgyCharcoal,
+                            color = if (isSelected) MaterialTheme.colorScheme.onInverseSurface else NudgyCharcoal,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             fontSize = 13.sp
                         )
@@ -357,7 +360,7 @@ fun EditTaskSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFFFBF8F2))
+                    .background(NudgyCard)
                     .border(1.dp, NudgyCardBorder, RoundedCornerShape(16.dp))
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,

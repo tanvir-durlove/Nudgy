@@ -681,14 +681,14 @@ fun ChatScreen(
                 .padding(end = 20.dp, bottom = 74.dp)
                 .size(54.dp)
                 .clip(CircleShape)
-                .background(if (isListening) NudgyPrimary else NudgyCharcoal)
+                .background(if (isListening) NudgyPrimary else MaterialTheme.colorScheme.inverseSurface)
                 .clickable { handleVoiceClick() },
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Outlined.GraphicEq,
                 contentDescription = "Push to talk",
-                tint = Color.White,
+                tint = if (isListening) Color.White else MaterialTheme.colorScheme.onInverseSurface,
                 modifier = Modifier.size(26.dp)
             )
         }

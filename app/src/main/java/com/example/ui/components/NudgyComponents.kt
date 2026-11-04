@@ -52,6 +52,7 @@ import com.example.ui.theme.NudgyButterText
 import com.example.ui.theme.NudgyCard
 import com.example.ui.theme.NudgyCardBorder
 import com.example.ui.theme.NudgyCharcoal
+import com.example.ui.theme.NudgyChipBackground
 import com.example.ui.theme.NudgyGreen
 import com.example.ui.theme.NudgyCanvas
 import com.example.ui.theme.NudgyMuted
@@ -103,7 +104,7 @@ fun NudgyTopBar(
                 if (isGuest) {
                     Surface(
                         color = Color(0xFFFFF3E0),
-                        shape = RoundedCornerShape(100.dp),
+                        shape = CircleShape,
                         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFB74D)),
                         modifier = Modifier.clickable { onGuestBadgeClick() }
                     ) {
@@ -129,9 +130,9 @@ fun NudgyTopBar(
             // Notification bell with badge
             Box(
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
-                    .background(Color.White)
+                    .background(NudgyCard)
                     .border(1.dp, NudgyCardBorder, CircleShape)
                     .clickable(role = Role.Button) { onNotificationsClick() },
                 contentAlignment = Alignment.Center
@@ -146,7 +147,7 @@ fun NudgyTopBar(
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(top = 10.dp, end = 11.dp)
+                            .padding(top = 12.dp, end = 13.dp)
                             .size(7.dp)
                             .clip(CircleShape)
                             .background(NudgyPrimary)
@@ -157,7 +158,7 @@ fun NudgyTopBar(
             // User Avatar (Matches the "AR" yellow circle in designs)
             Box(
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .background(NudgyAvatarGold)
                     .clickable(role = Role.Button) { onProfileClick() },
@@ -295,14 +296,14 @@ fun NudgyProgressBar(
         modifier = modifier
             .fillMaxWidth()
             .height(height)
-            .clip(RoundedCornerShape(100.dp))
+            .clip(CircleShape)
             .background(trackColor)
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth(animatedProgress)
                 .height(height)
-                .clip(RoundedCornerShape(100.dp))
+                .clip(CircleShape)
                 .background(progressColor)
         )
     }
@@ -320,8 +321,8 @@ fun NudgyPillTabs(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(100.dp),
-        color = Color(0xFFEFECE3)
+        shape = CircleShape,
+        color = NudgyChipBackground
     ) {
         Row(
             modifier = Modifier.padding(4.dp),
@@ -330,7 +331,7 @@ fun NudgyPillTabs(
             tabs.forEachIndexed { index, title ->
                 val isSelected = index == selectedIndex
                 val bgColor by animateColorAsState(
-                    targetValue = if (isSelected) Color.White else Color.Transparent,
+                    targetValue = if (isSelected) NudgyCard else Color.Transparent,
                     animationSpec = tween(200),
                     label = "tabBg"
                 )
@@ -343,9 +344,10 @@ fun NudgyPillTabs(
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(100.dp))
+                        .clip(CircleShape)
                         .background(bgColor)
                         .clickable(role = Role.Tab) { onTabSelected(index) }
+                        .height(48.dp)
                         .padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -380,7 +382,7 @@ fun NudgyInsightCard(
             .then(
                 if (onClick != null) Modifier.clickable { onClick() } else Modifier
             ),
-        shape = RoundedCornerShape(20.dp),
+        shape = MaterialTheme.shapes.large,
         color = NudgyButter,
         border = androidx.compose.foundation.BorderStroke(1.dp, NudgyButterBorder)
     ) {
@@ -391,8 +393,8 @@ fun NudgyInsightCard(
             Box(
                 modifier = Modifier
                     .size(38.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFFF3E5A6)),
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(NudgyButterBorder),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(

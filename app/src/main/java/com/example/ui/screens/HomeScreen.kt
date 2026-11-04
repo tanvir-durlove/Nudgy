@@ -149,16 +149,16 @@ fun HomeScreen(
 
             Box(
                 modifier = Modifier
-                    .size(46.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
-                    .background(NudgyCharcoal)
+                    .background(MaterialTheme.colorScheme.inverseSurface)
                     .clickable { onAddTaskClick() },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Add,
                     contentDescription = "Add task",
-                    tint = Color.White,
+                    tint = MaterialTheme.colorScheme.onInverseSurface,
                     modifier = Modifier.size(24.dp)
                 )
             }
@@ -552,8 +552,8 @@ fun HomeScreen(
                 Box(
                     modifier = Modifier
                         .size(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color.White)
+                        .clip(MaterialTheme.shapes.medium)
+                        .background(NudgyCard)
                         .border(1.dp, NudgyCardBorder, RoundedCornerShape(12.dp))
                         .clickable { onCalendarClick() },
                     contentAlignment = Alignment.Center
