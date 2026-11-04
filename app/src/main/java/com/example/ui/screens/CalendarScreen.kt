@@ -21,6 +21,8 @@ import android.app.TimePickerDialog
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Schedule
@@ -100,14 +102,18 @@ fun CalendarScreen(
     val timeFormatter = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
     val monthFormatter = remember { SimpleDateFormat("MMMM yyyy", Locale.getDefault()) }
 
-    // Dynamically compute the current 7 days of this week, keyed by day of year so midnight updates cleanly
+    // Dynamically compute the 7 days of the shown week, keyed by day of
+    // year so midnight updates cleanly; weekOffset shifts whole weeks so
+    // events beyond the current week can be created (week nav buttons).
     val currentDayOfYear = Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
-    val (_, daysList) = remember(currentDayOfYear) {
+    var weekOffset by remember { mutableIntStateOf(0) }
+    val (_, daysList) = remember(currentDayOfYear, weekOffset) {
         val cal = Calendar.getInstance()
         val monthStr = monthFormatter.format(cal.time).uppercase()
         val dayOfWeekToday = cal.get(Calendar.DAY_OF_WEEK)
         val diffToMonday = if (dayOfWeekToday == Calendar.SUNDAY) -6 else Calendar.MONDAY - dayOfWeekToday
         cal.add(Calendar.DAY_OF_MONTH, diffToMonday)
+        cal.add(Calendar.DAY_OF_MONTH, weekOffset * 7)
 
         val days = mutableListOf<DynamicDayItem>()
         val dayFormat = SimpleDateFormat("EEE", Locale.getDefault())
@@ -297,42 +303,75 @@ fun CalendarScreen(
             }
         }
 
-        // Horizontal Weekly Date Selector
+        // Horizontal Weekly Date Selector (with prev/next week controls)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            daysList.forEachIndexed { index, day ->
-                val isSelected = index == selectedDayIndex
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(100.dp))
+                    .clickable { weekOffset-- },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ChevronLeft,
+                    contentDescription = "Previous week",
+                    tint = NudgyCharcoal,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                daysList.forEachIndexed { index, day ->
+                    val isSelected = index == selectedDayIndex
 
-                Column(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(if (isSelected) NudgyCharcoal else Color.Transparent)
-                        .clickable {
-                            selectedDayIndex = index
-                            onSelectDay(day.epochMillis)
-                        }
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = day.dayOfWeek,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = 12.sp,
-                            color = if (isSelected) Color.White.copy(alpha = 0.8f) else NudgyMuted
+                    Column(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (isSelected) NudgyCharcoal else Color.Transparent)
+                            .clickable {
+                                selectedDayIndex = index
+                                onSelectDay(day.epochMillis)
+                            }
+                            .padding(horizontal = 10.dp, vertical = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = day.dayOfWeek,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = 12.sp,
+                                color = if (isSelected) Color.White.copy(alpha = 0.8f) else NudgyMuted
+                            )
                         )
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "${day.dayOfMonth}",
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = if (isSelected) Color.White else NudgyCharcoal
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "${day.dayOfMonth}",
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) Color.White else NudgyCharcoal
+                            )
                         )
-                    )
+                    }
                 }
+            }
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(100.dp))
+                    .clickable { weekOffset++ },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = "Next week",
+                    tint = NudgyCharcoal,
+                    modifier = Modifier.size(22.dp)
+                )
             }
         }
 
@@ -657,8 +696,8 @@ fun CalendarScreen(
             }
         }
 
-        // Generous bottom spacer so content isn't clipped by bottom nav or floating mascot button
-        Spacer(modifier = Modifier.height(84.dp))
+        // (No bottom clearance spacer: the floating mascot button is gone;
+        // Scaffold innerPadding + navigationBarsPadding handle the nav bar.)
     }
 
         // Delete confirmation: one tap used to delete instantly — and for a
@@ -701,7 +740,7 @@ fun CalendarScreen(
     if (showAddEventDialog) {
         val context = LocalContext.current
         var eventTitle by remember { mutableStateOf("") }
-        var eventLocation by remember { mutableStateOf("Google Meet") }
+        var eventLocation by remember { mutableStateOf("") }
         var selectedDurationMinutes by remember { mutableIntStateOf(30) }
         var eventType by remember { mutableStateOf("MEETING") }
 

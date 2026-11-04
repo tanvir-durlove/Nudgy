@@ -1,5 +1,6 @@
 package com.example.ui.sheets
 
+import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -19,6 +20,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -50,6 +54,7 @@ import com.example.ui.theme.NudgyCharcoal
 import com.example.ui.theme.NudgyMuted
 import com.example.ui.theme.NudgyPeach
 import com.example.ui.theme.NudgyPrimary
+import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 
@@ -81,12 +86,28 @@ fun GroupScheduleSheet(
     var title by remember { mutableStateOf("") }
     var location by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf("EVENT") }
-    var selectedDayOption by remember { mutableIntStateOf(0) } // 0: Today, 1: Tomorrow, 2: In 2 days
+    var selectedDayOption by remember { mutableIntStateOf(0) } // Shortcuts: 0: Today, 1: Tomorrow, 2: In 2 days (a picked date overrides these)
     var selectedTimeOption by remember { mutableIntStateOf(1) } // 0: 9 AM, 1: 2 PM, 2: 7 PM
     var hasCustomTime by remember { mutableStateOf(false) }
     var customHour by remember { mutableIntStateOf(14) }
     var customMinute by remember { mutableIntStateOf(0) }
     var selectedDurationOption by remember { mutableIntStateOf(1) } // 0: 30 min, 1: 1 hour, 2: 2 hours
+    var hasCustomDate by remember { mutableStateOf(false) }
+    var customDueDateMillis by remember { mutableStateOf<Long?>(null) }
+    var showMoreOptions by remember { mutableStateOf(false) }
+
+    val dueDateFormatter = remember { SimpleDateFormat("EEEE, MMM d", Locale.getDefault()) }
+
+    // Effective day: a picked date overrides the day-chip shortcuts.
+    fun effectiveDayCalendar(): Calendar {
+        val cal = Calendar.getInstance()
+        if (hasCustomDate && customDueDateMillis != null) {
+            cal.timeInMillis = customDueDateMillis!!
+        } else {
+            cal.add(Calendar.DAY_OF_YEAR, selectedDayOption)
+        }
+        return cal
+    }
 
     val dayOptions = listOf("Today", "Tomorrow", "In 2 days")
     val timeOptions = listOf("9:00 AM", "2:00 PM", "7:00 PM")
@@ -157,21 +178,46 @@ fun GroupScheduleSheet(
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(12.dp))
-            OutlinedTextField(
-                value = location,
-                onValueChange = { location = it },
-                label = { Text("Location or link (optional)") },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = NudgyPrimary,
-                    unfocusedBorderColor = NudgyMuted.copy(alpha = 0.4f)
-                ),
-                modifier = Modifier.fillMaxWidth()
-            )
 
-            Spacer(modifier = Modifier.height(18.dp))
-            Text(
-                text = "TYPE",
+            // MORE OPTIONS TOGGLE (collapsed by default)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable { showMoreOptions = !showMoreOptions }
+                    .padding(horizontal = 4.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "More options",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = NudgyCharcoal
+                )
+                Icon(
+                    imageVector = if (showMoreOptions) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (showMoreOptions) "Hide more options" else "Show more options",
+                    tint = NudgyPrimary
+                )
+            }
+
+            if (showMoreOptions) {
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = location,
+                    onValueChange = { location = it },
+                    label = { Text("Location or link (optional)") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = NudgyPrimary,
+                        unfocusedBorderColor = NudgyMuted.copy(alpha = 0.4f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+                Text(
+                    text = "TYPE",
                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                 color = NudgyMuted
             )
@@ -205,6 +251,8 @@ fun GroupScheduleSheet(
                 }
             }
 
+            }
+
             Spacer(modifier = Modifier.height(18.dp))
             Text(
                 text = "DAY",
@@ -214,7 +262,7 @@ fun GroupScheduleSheet(
             Spacer(modifier = Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 dayOptions.forEachIndexed { index, label ->
-                    val isSelected = selectedDayOption == index
+                    val isSelected = !hasCustomDate && selectedDayOption == index
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(100.dp))
@@ -224,7 +272,7 @@ fun GroupScheduleSheet(
                                 if (isSelected) NudgyPrimary else NudgyCardBorder,
                                 RoundedCornerShape(100.dp)
                             )
-                            .clickable { selectedDayOption = index }
+                            .clickable { hasCustomDate = false; selectedDayOption = index }
                             .padding(horizontal = 14.dp, vertical = 8.dp)
                     ) {
                         Text(
@@ -236,6 +284,67 @@ fun GroupScheduleSheet(
                         )
                     }
                 }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Pick a specific date (any date — the chips above are shortcuts)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .border(1.dp, if (hasCustomDate) NudgyPrimary else NudgyCardBorder, RoundedCornerShape(12.dp))
+                    .clickable {
+                        val base = if (hasCustomDate && customDueDateMillis != null) {
+                            Calendar.getInstance().apply { timeInMillis = customDueDateMillis!! }
+                        } else {
+                            Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, selectedDayOption) }
+                        }
+                        DatePickerDialog(
+                            context,
+                            { _, y, m, d ->
+                                val picked = Calendar.getInstance().apply {
+                                    set(Calendar.YEAR, y)
+                                    set(Calendar.MONTH, m)
+                                    set(Calendar.DAY_OF_MONTH, d)
+                                    set(Calendar.HOUR_OF_DAY, 0)
+                                    set(Calendar.MINUTE, 0)
+                                    set(Calendar.SECOND, 0)
+                                    set(Calendar.MILLISECOND, 0)
+                                }
+                                customDueDateMillis = picked.timeInMillis
+                                hasCustomDate = true
+                            },
+                            base.get(Calendar.YEAR),
+                            base.get(Calendar.MONTH),
+                            base.get(Calendar.DAY_OF_MONTH)
+                        ).show()
+                    }
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.DateRange,
+                    contentDescription = "Pick a date",
+                    tint = NudgyPrimary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (hasCustomDate && customDueDateMillis != null) {
+                        "Date: ${dueDateFormatter.format(customDueDateMillis!!)}"
+                    } else {
+                        "Pick a specific date"
+                    },
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    color = NudgyCharcoal,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = if (hasCustomDate) "Change" else "Pick",
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = NudgyPrimary
+                )
             }
 
             Spacer(modifier = Modifier.height(18.dp))
@@ -314,8 +423,7 @@ fun GroupScheduleSheet(
             }
 
             // Past-time guard: same rule as CreateTaskSheet — roll to tomorrow.
-            val previewCalendar = Calendar.getInstance()
-            previewCalendar.add(Calendar.DAY_OF_YEAR, selectedDayOption)
+            val previewCalendar = effectiveDayCalendar()
             val (previewHour, previewMinute) = if (hasCustomTime) {
                 customHour to customMinute
             } else {
@@ -329,8 +437,7 @@ fun GroupScheduleSheet(
             previewCalendar.set(Calendar.MINUTE, previewMinute)
             previewCalendar.set(Calendar.SECOND, 0)
             previewCalendar.set(Calendar.MILLISECOND, 0)
-            val willRollToTomorrow = selectedDayOption == 0 &&
-                previewCalendar.timeInMillis <= System.currentTimeMillis()
+            val willRollToTomorrow = previewCalendar.timeInMillis <= System.currentTimeMillis()
             if (willRollToTomorrow) {
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
@@ -340,9 +447,10 @@ fun GroupScheduleSheet(
                 )
             }
 
-            Spacer(modifier = Modifier.height(18.dp))
-            Text(
-                text = "DURATION",
+            if (showMoreOptions) {
+                Spacer(modifier = Modifier.height(18.dp))
+                Text(
+                    text = "DURATION",
                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                 color = NudgyMuted
             )
@@ -373,26 +481,21 @@ fun GroupScheduleSheet(
                 }
             }
 
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
             Button(
                 onClick = {
                     if (title.isBlank()) return@Button
-                    val startCalendar = Calendar.getInstance()
-                    var dayOffset = selectedDayOption
-                    if (dayOffset == 0) {
-                        startCalendar.set(Calendar.HOUR_OF_DAY, previewHour)
-                        startCalendar.set(Calendar.MINUTE, previewMinute)
-                        startCalendar.set(Calendar.SECOND, 0)
-                        startCalendar.set(Calendar.MILLISECOND, 0)
-                        if (startCalendar.timeInMillis <= System.currentTimeMillis()) {
-                            dayOffset = 1
-                        }
-                    }
-                    startCalendar.add(Calendar.DAY_OF_YEAR, dayOffset)
+                    val startCalendar = effectiveDayCalendar()
                     startCalendar.set(Calendar.HOUR_OF_DAY, previewHour)
                     startCalendar.set(Calendar.MINUTE, previewMinute)
                     startCalendar.set(Calendar.SECOND, 0)
                     startCalendar.set(Calendar.MILLISECOND, 0)
+                    // Past time rolls to tomorrow (same rule as before).
+                    if (startCalendar.timeInMillis <= System.currentTimeMillis()) {
+                        startCalendar.add(Calendar.DAY_OF_YEAR, 1)
+                    }
                     val durationMillis = when (selectedDurationOption) {
                         0 -> 30 * 60 * 1000L
                         2 -> 2 * 60 * 60 * 1000L
