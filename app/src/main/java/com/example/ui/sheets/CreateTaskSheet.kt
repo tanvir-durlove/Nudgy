@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
@@ -56,9 +55,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Priority
 import com.example.data.model.TaskCategory
+import com.example.ui.theme.NudgyAccent
 import com.example.ui.theme.NudgyCard
 import com.example.ui.theme.NudgyCardBorder
 import com.example.ui.theme.NudgyCharcoal
+import com.example.ui.theme.NudgyChipBackground
+import com.example.ui.theme.NudgyFieldBorder
 import com.example.ui.theme.NudgyMuted
 import com.example.ui.theme.NudgyPrimary
 import com.example.ui.theme.NudgyPrimaryDark
@@ -127,8 +129,7 @@ fun CreateTaskSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = NudgyCard,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        dragHandle = null
+        shape = MaterialTheme.shapes.extraLarge,
     ) {
         Column(
             modifier = modifier
@@ -172,15 +173,43 @@ fun CreateTaskSheet(
                 onValueChange = { title = it },
                 placeholder = { Text("What needs to get done?", color = NudgyMuted) },
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.large,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = NudgyPrimary,
-                    unfocusedBorderColor = NudgyCardBorder
+                    unfocusedBorderColor = NudgyFieldBorder
                 ),
                 singleLine = true
             )
 
             Spacer(modifier = Modifier.height(18.dp))
+
+            // Custom-date picker (shared by the calendar button and the banner row).
+            val showDatePicker = {
+                val base = if (hasCustomDate && customDueDateMillis != null) {
+                    Calendar.getInstance().apply { timeInMillis = customDueDateMillis!! }
+                } else {
+                    Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, selectedDayOption) }
+                }
+                DatePickerDialog(
+                    context,
+                    { _, y, m, d ->
+                        val picked = Calendar.getInstance().apply {
+                            set(Calendar.YEAR, y)
+                            set(Calendar.MONTH, m)
+                            set(Calendar.DAY_OF_MONTH, d)
+                            set(Calendar.HOUR_OF_DAY, 0)
+                            set(Calendar.MINUTE, 0)
+                            set(Calendar.SECOND, 0)
+                            set(Calendar.MILLISECOND, 0)
+                        }
+                        customDueDateMillis = picked.timeInMillis
+                        hasCustomDate = true
+                    },
+                    base.get(Calendar.YEAR),
+                    base.get(Calendar.MONTH),
+                    base.get(Calendar.DAY_OF_MONTH)
+                ).show()
+            }
 
             // DUE DATE SELECTOR
             Text(
@@ -199,60 +228,55 @@ fun CreateTaskSheet(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(100.dp))
-                            .background(if (isSelected) NudgyCharcoal else Color(0xFFF3EFE6))
+                            .clip(CircleShape)
+                            .background(if (isSelected) MaterialTheme.colorScheme.inverseSurface else NudgyChipBackground)
                             .clickable {
                                 hasCustomDate = false
                                 selectedDayOption = index
                             }
+                            .height(48.dp)
                             .padding(vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = label,
-                            color = if (isSelected) Color.White else NudgyCharcoal,
+                            color = if (isSelected) MaterialTheme.colorScheme.inverseOnSurface else NudgyCharcoal,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             fontSize = 13.sp
                         )
                     }
                 }
+                // Custom-date picker entry (shown only when no custom date is picked;
+                // once picked, the banner row below shows it with Change).
+                if (!hasCustomDate) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .border(1.dp, NudgyFieldBorder, CircleShape)
+                            .clickable { showDatePicker() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DateRange,
+                            contentDescription = "Pick a specific date",
+                            tint = NudgyCharcoal,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
 
+            // Pick a specific date banner — only when the picked date is NOT a chip option.
+            if (hasCustomDate) {
             Spacer(modifier = Modifier.height(8.dp))
-
-            // Pick a specific date (any date — the chips above are shortcuts)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(if (hasCustomDate) NudgyPrimary.copy(alpha = 0.12f) else Color(0xFFF3EFE6))
-                    .border(1.dp, if (hasCustomDate) NudgyPrimary else NudgyCardBorder, RoundedCornerShape(14.dp))
-                    .clickable {
-                        val base = if (hasCustomDate && customDueDateMillis != null) {
-                            Calendar.getInstance().apply { timeInMillis = customDueDateMillis!! }
-                        } else {
-                            Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, selectedDayOption) }
-                        }
-                        DatePickerDialog(
-                            context,
-                            { _, y, m, d ->
-                                val picked = Calendar.getInstance().apply {
-                                    set(Calendar.YEAR, y)
-                                    set(Calendar.MONTH, m)
-                                    set(Calendar.DAY_OF_MONTH, d)
-                                    set(Calendar.HOUR_OF_DAY, 0)
-                                    set(Calendar.MINUTE, 0)
-                                    set(Calendar.SECOND, 0)
-                                    set(Calendar.MILLISECOND, 0)
-                                }
-                                customDueDateMillis = picked.timeInMillis
-                                hasCustomDate = true
-                            },
-                            base.get(Calendar.YEAR),
-                            base.get(Calendar.MONTH),
-                            base.get(Calendar.DAY_OF_MONTH)
-                        ).show()
-                    }
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(NudgyPrimary.copy(alpha = 0.12f))
+                    .border(1.dp, NudgyPrimary, MaterialTheme.shapes.medium)
+                    .clickable { showDatePicker() }
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -261,30 +285,46 @@ fun CreateTaskSheet(
                     Icon(
                         imageVector = Icons.Default.DateRange,
                         contentDescription = "Pick a due date",
-                        tint = if (hasCustomDate) NudgyPrimary else NudgyCharcoal,
+                        tint = NudgyPrimary,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (hasCustomDate && customDueDateMillis != null) {
+                        text = if (customDueDateMillis != null) {
                             "Due date: ${dueDateFormatter.format(customDueDateMillis!!)}"
                         } else {
                             "Pick a specific date"
                         },
                         style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = if (hasCustomDate) FontWeight.Bold else FontWeight.Normal,
-                            color = if (hasCustomDate) NudgyPrimary else NudgyCharcoal
+                            fontWeight = FontWeight.Bold,
+                            color = NudgyPrimary
                         )
                     )
                 }
                 Text(
-                    text = if (hasCustomDate) "Change" else "Pick",
+                    text = "Change",
                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = NudgyPrimary
+                    color = NudgyAccent
                 )
+            }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
+
+            // Custom-time picker (shared by the clock button and the banner row).
+            val showTimePicker = {
+                TimePickerDialog(
+                    context,
+                    { _, h, m ->
+                        customHour = h
+                        customMinute = m
+                        hasCustomTime = true
+                    },
+                    if (hasCustomTime) customHour else 14,
+                    if (hasCustomTime) customMinute else 0,
+                    false
+                ).show()
+            }
 
             // TIME OF DAY SELECTOR
             Text(
@@ -303,12 +343,13 @@ fun CreateTaskSheet(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(100.dp))
-                            .background(if (isSelected) NudgyPrimary else Color(0xFFF3EFE6))
+                            .clip(CircleShape)
+                            .background(if (isSelected) NudgyPrimary else NudgyChipBackground)
                             .clickable {
                                 hasCustomTime = false
                                 selectedTimeOption = index
                             }
+                            .height(48.dp)
                             .padding(vertical = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {
@@ -316,34 +357,40 @@ fun CreateTaskSheet(
                             text = label,
                             color = if (isSelected) Color.White else NudgyCharcoal,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            fontSize = 11.sp
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+                // Custom-time picker entry (shown only when no custom time is picked).
+                if (!hasCustomTime) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .border(1.dp, NudgyFieldBorder, CircleShape)
+                            .clickable { showTimePicker() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Schedule,
+                            contentDescription = "Pick a custom time",
+                            tint = NudgyCharcoal,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
             }
 
+            // Custom Exact Time Picker Row — only when the picked time is NOT a chip time.
+            if (hasCustomTime) {
             Spacer(modifier = Modifier.height(8.dp))
-
-            // Custom Exact Time Picker Row
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(if (hasCustomTime) NudgyPrimary.copy(alpha = 0.12f) else Color(0xFFF3EFE6))
-                    .border(1.dp, if (hasCustomTime) NudgyPrimary else NudgyCardBorder, RoundedCornerShape(14.dp))
-                    .clickable {
-                        TimePickerDialog(
-                            context,
-                            { _, h, m ->
-                                customHour = h
-                                customMinute = m
-                                hasCustomTime = true
-                            },
-                            if (hasCustomTime) customHour else 14,
-                            if (hasCustomTime) customMinute else 0,
-                            false
-                        ).show()
-                    }
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(NudgyPrimary.copy(alpha = 0.12f))
+                    .border(1.dp, NudgyPrimary, MaterialTheme.shapes.medium)
+                    .clickable { showTimePicker() }
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -352,23 +399,24 @@ fun CreateTaskSheet(
                     Icon(
                         imageVector = Icons.Default.Schedule,
                         contentDescription = "Pick custom time",
-                        tint = if (hasCustomTime) NudgyPrimary else NudgyCharcoal,
+                        tint = NudgyPrimary,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (hasCustomTime) "Custom Time: ${formatCustomTime(customHour, customMinute)}" else "Set Exact Time (e.g. 10:30 AM)",
+                        text = "Custom Time: ${formatCustomTime(customHour, customMinute)}",
                         style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = if (hasCustomTime) FontWeight.Bold else FontWeight.Normal,
-                            color = if (hasCustomTime) NudgyPrimary else NudgyCharcoal
+                            fontWeight = FontWeight.Bold,
+                            color = NudgyPrimary
                         )
                     )
                 }
                 Text(
-                    text = if (hasCustomTime) "Change" else "Pick",
+                    text = "Change",
                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = NudgyPrimary
+                    color = NudgyAccent
                 )
+            }
             }
 
             // Past-time guard: "Today" + a time that has already passed would
@@ -403,7 +451,7 @@ fun CreateTaskSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(MaterialTheme.shapes.medium)
                     .clickable { showMoreOptions = !showMoreOptions }
                     .padding(horizontal = 4.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -430,10 +478,10 @@ fun CreateTaskSheet(
                     onValueChange = { description = it },
                     placeholder = { Text("Add notes or details (optional)...", color = NudgyMuted) },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = MaterialTheme.shapes.large,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = NudgyPrimary,
-                        unfocusedBorderColor = NudgyCardBorder
+                        unfocusedBorderColor = NudgyFieldBorder
                     ),
                     maxLines = 3
                 )
@@ -461,9 +509,10 @@ fun CreateTaskSheet(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(100.dp))
-                            .background(if (isSelected) pColor else Color(0xFFF3EFE6))
+                            .clip(CircleShape)
+                            .background(if (isSelected) pColor else NudgyChipBackground)
                             .clickable { priority = p }
+                            .height(48.dp)
                             .padding(vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
@@ -495,15 +544,16 @@ fun CreateTaskSheet(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(100.dp))
-                            .background(if (isSelected) NudgyCharcoal else Color(0xFFF3EFE6))
+                            .clip(CircleShape)
+                            .background(if (isSelected) MaterialTheme.colorScheme.inverseSurface else NudgyChipBackground)
                             .clickable { category = c }
+                            .height(48.dp)
                             .padding(vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = c.name.lowercase().replaceFirstChar { it.uppercase() },
-                            color = if (isSelected) Color.White else NudgyCharcoal,
+                            color = if (isSelected) MaterialTheme.colorScheme.inverseOnSurface else NudgyCharcoal,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             fontSize = 13.sp
                         )
@@ -517,9 +567,9 @@ fun CreateTaskSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFFFBF8F2))
-                    .border(1.dp, NudgyCardBorder, RoundedCornerShape(16.dp))
+                    .clip(MaterialTheme.shapes.large)
+                    .background(NudgyCard)
+                    .border(1.dp, NudgyCardBorder, MaterialTheme.shapes.large)
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -614,7 +664,7 @@ fun CreateTaskSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
-                shape = RoundedCornerShape(100.dp),
+                shape = CircleShape,
                 colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary)
             ) {
                 Text(

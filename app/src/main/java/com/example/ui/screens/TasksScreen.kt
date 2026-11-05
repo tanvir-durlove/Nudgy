@@ -111,16 +111,16 @@ fun TasksScreen(
 
                 Box(
                     modifier = Modifier
-                        .size(46.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
-                        .background(NudgyCharcoal)
+                        .background(MaterialTheme.colorScheme.inverseSurface)
                         .clickable { onAddTaskClick() },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Add,
                         contentDescription = "Add task",
-                        tint = Color.White,
+                        tint = MaterialTheme.colorScheme.inverseOnSurface,
                         modifier = Modifier.size(24.dp)
                     )
                 }

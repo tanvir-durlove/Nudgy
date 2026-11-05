@@ -16,7 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.imePadding
 import android.app.TimePickerDialog
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -59,13 +59,18 @@ import com.example.R
 import com.example.data.local.entity.TaskEntity
 import com.example.data.model.Priority
 import com.example.data.local.entity.CalendarEventEntity
+import com.example.ui.theme.NudgyAccent
 import com.example.ui.theme.NudgyCard
 import com.example.ui.theme.NudgyCardBorder
 import com.example.ui.theme.NudgyCharcoal
+import com.example.ui.theme.NudgyChipBackground
+import com.example.ui.theme.NudgyFieldBorder
+import com.example.ui.theme.NudgyGreen
 import com.example.ui.theme.NudgyLavender
 import com.example.ui.theme.NudgyMuted
 import com.example.ui.theme.NudgyPeach
 import com.example.ui.theme.NudgyPrimary
+import com.example.ui.theme.NudgySage
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -288,16 +293,16 @@ fun CalendarScreen(
 
             Box(
                 modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(NudgyCharcoal)
+                    .size(48.dp)
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(MaterialTheme.colorScheme.inverseSurface)
                     .clickable { showAddEventDialog = true },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Add,
                     contentDescription = "Add event",
-                    tint = Color.White,
+                    tint = MaterialTheme.colorScheme.inverseOnSurface,
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -310,8 +315,8 @@ fun CalendarScreen(
         ) {
             Box(
                 modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(100.dp))
+                    .size(48.dp)
+                    .clip(CircleShape)
                     .clickable { weekOffset-- },
                 contentAlignment = Alignment.Center
             ) {
@@ -332,8 +337,8 @@ fun CalendarScreen(
 
                     Column(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(if (isSelected) NudgyCharcoal else Color.Transparent)
+                            .clip(MaterialTheme.shapes.large)
+                            .background(if (isSelected) MaterialTheme.colorScheme.inverseSurface else Color.Transparent)
                             .clickable {
                                 selectedDayIndex = index
                                 onSelectDay(day.epochMillis)
@@ -345,7 +350,7 @@ fun CalendarScreen(
                             text = day.dayOfWeek,
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontSize = 12.sp,
-                                color = if (isSelected) Color.White.copy(alpha = 0.8f) else NudgyMuted
+                                color = if (isSelected) MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f) else NudgyMuted
                             )
                         )
                         Spacer(modifier = Modifier.height(6.dp))
@@ -353,7 +358,7 @@ fun CalendarScreen(
                             text = "${day.dayOfMonth}",
                             style = MaterialTheme.typography.titleLarge.copy(
                                 fontWeight = FontWeight.Bold,
-                                color = if (isSelected) Color.White else NudgyCharcoal
+                                color = if (isSelected) MaterialTheme.colorScheme.inverseOnSurface else NudgyCharcoal
                             )
                         )
                     }
@@ -361,8 +366,8 @@ fun CalendarScreen(
             }
             Box(
                 modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(100.dp))
+                    .size(48.dp)
+                    .clip(CircleShape)
                     .clickable { weekOffset++ },
                 contentAlignment = Alignment.Center
             ) {
@@ -378,8 +383,8 @@ fun CalendarScreen(
         // Google Calendar Connect & Sync Card
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            color = if (isCalendarConnected) Color(0xFFF1F8E9) else NudgyCard,
+            shape = MaterialTheme.shapes.large,
+            color = if (isCalendarConnected) NudgySage else NudgyCard,
             border = androidx.compose.foundation.BorderStroke(1.dp, if (isCalendarConnected) Color(0xFFA5D6A7) else NudgyCardBorder)
         ) {
             Row(
@@ -390,9 +395,9 @@ fun CalendarScreen(
                 Box(
                     modifier = Modifier
                         .size(44.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .border(1.dp, if (isCalendarConnected) Color(0xFFA5D6A7) else NudgyCardBorder, RoundedCornerShape(12.dp))
-                        .background(if (isCalendarConnected) Color.White else Color.Transparent),
+                        .clip(MaterialTheme.shapes.medium)
+                        .border(1.dp, if (isCalendarConnected) Color(0xFFA5D6A7) else NudgyCardBorder, MaterialTheme.shapes.medium)
+                        .background(if (isCalendarConnected) NudgyCard else Color.Transparent),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -424,10 +429,10 @@ fun CalendarScreen(
                 if (isCalendarConnected) {
                     OutlinedButton(
                         onClick = onSyncNow,
-                        shape = RoundedCornerShape(100.dp),
-                        modifier = Modifier.height(38.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF2E7D32)),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2E7D32))
+                        shape = CircleShape,
+                        modifier = Modifier.height(48.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NudgyGreen),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, NudgyGreen)
                     ) {
                         Text(
                             text = "Sync now",
@@ -440,9 +445,9 @@ fun CalendarScreen(
                 } else {
                     Button(
                         onClick = onConnectGoogleCalendar,
-                        shape = RoundedCornerShape(100.dp),
+                        shape = CircleShape,
                         colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary),
-                        modifier = Modifier.height(38.dp)
+                        modifier = Modifier.height(48.dp)
                     ) {
                         Text(
                             text = "Connect",
@@ -459,7 +464,7 @@ fun CalendarScreen(
         // Schedule Timeline Section
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(22.dp),
+            shape = MaterialTheme.shapes.large,
             color = NudgyCard,
             border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
         ) {
@@ -489,8 +494,8 @@ fun CalendarScreen(
                     Box(
                         modifier = Modifier
                             .size(38.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .border(1.dp, NudgyCardBorder, RoundedCornerShape(10.dp)),
+                            .clip(MaterialTheme.shapes.small)
+                            .border(1.dp, NudgyCardBorder, MaterialTheme.shapes.small),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -545,7 +550,7 @@ fun CalendarScreen(
 
                             Surface(
                                 modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(16.dp),
+                                shape = MaterialTheme.shapes.large,
                                 color = cardBg
                             ) {
                                 Row(
@@ -598,7 +603,7 @@ fun CalendarScreen(
                                             Spacer(modifier = Modifier.height(6.dp))
                                             Box(
                                                 modifier = Modifier
-                                                    .clip(RoundedCornerShape(100.dp))
+                                                    .clip(CircleShape)
                                                     .background(NudgyPrimary.copy(alpha = 0.12f))
                                                     .padding(horizontal = 8.dp, vertical = 2.dp)
                                             ) {
@@ -645,7 +650,7 @@ fun CalendarScreen(
 
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
+            shape = MaterialTheme.shapes.large,
             color = NudgyCard,
             border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
         ) {
@@ -684,11 +689,11 @@ fun CalendarScreen(
                         }
                     },
                     enabled = !hasBlockedSuggestedTime && !isBlockingTime,
-                    shape = RoundedCornerShape(100.dp),
+                    shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (hasBlockedSuggestedTime) Color(0xFFE0E0E0) else NudgyPrimary
                     ),
-                    modifier = Modifier.height(40.dp)
+                    modifier = Modifier.height(48.dp)
                 ) {
                     Text(
                         text = if (hasBlockedSuggestedTime) "Blocked" else "Block time",
@@ -775,7 +780,9 @@ fun CalendarScreen(
             title = { Text("Schedule Event", fontWeight = FontWeight.Bold, color = NudgyCharcoal) },
             text = {
                 Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    modifier = Modifier
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     OutlinedTextField(
@@ -784,10 +791,10 @@ fun CalendarScreen(
                         label = { Text("Event Name") },
                         placeholder = { Text("e.g. Design review") },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
+                        shape = MaterialTheme.shapes.medium,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = NudgyPrimary,
-                            unfocusedBorderColor = NudgyCardBorder
+                            unfocusedBorderColor = NudgyFieldBorder
                         ),
                         singleLine = true
                     )
@@ -798,10 +805,10 @@ fun CalendarScreen(
                         label = { Text("Location / Link") },
                         placeholder = { Text("Google Meet or Room 4B") },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
+                        shape = MaterialTheme.shapes.medium,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = NudgyPrimary,
-                            unfocusedBorderColor = NudgyCardBorder
+                            unfocusedBorderColor = NudgyFieldBorder
                         ),
                         singleLine = true
                     )
@@ -811,9 +818,9 @@ fun CalendarScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFFF3EFE6))
-                            .border(1.dp, NudgyCardBorder, RoundedCornerShape(14.dp))
+                            .clip(MaterialTheme.shapes.medium)
+                            .background(NudgyChipBackground)
+                            .border(1.dp, NudgyCardBorder, MaterialTheme.shapes.medium)
                             .clickable {
                                 TimePickerDialog(
                                     context,
@@ -847,7 +854,7 @@ fun CalendarScreen(
                         Text(
                             text = "Tap to pick",
                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                            color = NudgyPrimary
+                            color = NudgyAccent
                         )
                     }
 
@@ -866,18 +873,19 @@ fun CalendarScreen(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(100.dp))
-                                    .background(if (isSelected) NudgyPrimary else Color(0xFFF3EFE6))
+                                    .clip(CircleShape)
+                                    .background(if (isSelected) NudgyPrimary else NudgyChipBackground)
                                     .clickable {
                                         selectedHour = pair.first
                                         selectedMinute = pair.second
                                     }
+                                    .height(48.dp)
                                     .padding(vertical = 6.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = label,
-                                    fontSize = 10.sp,
+                                    fontSize = 12.sp,
                                     color = if (isSelected) Color.White else NudgyCharcoal,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                 )
@@ -895,9 +903,10 @@ fun CalendarScreen(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(100.dp))
-                                    .background(if (isSelected) NudgyPrimary else Color(0xFFF3EFE6))
+                                    .clip(CircleShape)
+                                    .background(if (isSelected) NudgyPrimary else NudgyChipBackground)
                                     .clickable { selectedDurationMinutes = mins }
+                                    .height(48.dp)
                                     .padding(vertical = 8.dp),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -914,7 +923,7 @@ fun CalendarScreen(
                     // Schedule Time Slot Summary
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
+                        shape = MaterialTheme.shapes.small,
                         color = NudgyPrimary.copy(alpha = 0.08f)
                     ) {
                         Row(
@@ -939,15 +948,16 @@ fun CalendarScreen(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(100.dp))
-                                    .background(if (isSelected) NudgyCharcoal else Color(0xFFF3EFE6))
+                                    .clip(CircleShape)
+                                    .background(if (isSelected) MaterialTheme.colorScheme.inverseSurface else NudgyChipBackground)
                                     .clickable { eventType = typeKey }
+                                    .height(48.dp)
                                     .padding(vertical = 8.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = typeLabel,
-                                    color = if (isSelected) Color.White else NudgyCharcoal,
+                                    color = if (isSelected) MaterialTheme.colorScheme.inverseOnSurface else NudgyCharcoal,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                     fontSize = 12.sp
                                 )

@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
@@ -48,9 +47,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.theme.NudgyAccent
 import com.example.ui.theme.NudgyCard
 import com.example.ui.theme.NudgyCardBorder
 import com.example.ui.theme.NudgyCharcoal
+import com.example.ui.theme.NudgyFieldBorder
 import com.example.ui.theme.NudgyMuted
 import com.example.ui.theme.NudgyPeach
 import com.example.ui.theme.NudgyPrimary
@@ -128,8 +129,7 @@ fun GroupScheduleSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = NudgyCard,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        dragHandle = null
+        shape = MaterialTheme.shapes.extraLarge,
     ) {
         Column(
             modifier = modifier
@@ -141,7 +141,7 @@ fun GroupScheduleSheet(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .size(48.dp)
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(MaterialTheme.shapes.medium)
                     .background(NudgyPeach)
             ) {
                 Icon(
@@ -173,7 +173,7 @@ fun GroupScheduleSheet(
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = NudgyPrimary,
-                    unfocusedBorderColor = NudgyMuted.copy(alpha = 0.4f)
+                    unfocusedBorderColor = NudgyFieldBorder
                 ),
                 modifier = Modifier.fillMaxWidth()
             )
@@ -183,7 +183,7 @@ fun GroupScheduleSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(MaterialTheme.shapes.medium)
                     .clickable { showMoreOptions = !showMoreOptions }
                     .padding(horizontal = 4.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -210,7 +210,7 @@ fun GroupScheduleSheet(
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = NudgyPrimary,
-                        unfocusedBorderColor = NudgyMuted.copy(alpha = 0.4f)
+                        unfocusedBorderColor = NudgyFieldBorder
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -227,17 +227,19 @@ fun GroupScheduleSheet(
                     val isSelected = selectedType == type
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(100.dp))
+                            .clip(CircleShape)
                             .background(
                                 if (isSelected) NudgyPrimary else Color.Transparent
                             )
                             .border(
                                 1.dp,
                                 if (isSelected) NudgyPrimary else NudgyCardBorder,
-                                RoundedCornerShape(100.dp)
+                                CircleShape
                             )
                             .clickable { selectedType = type }
-                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                            .height(48.dp)
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = type.replace("_", " ").lowercase()
@@ -253,6 +255,34 @@ fun GroupScheduleSheet(
 
             }
 
+            // Custom-date picker (shared by the calendar button and the banner row).
+            val showDatePicker = {
+                val base = if (hasCustomDate && customDueDateMillis != null) {
+                    Calendar.getInstance().apply { timeInMillis = customDueDateMillis!! }
+                } else {
+                    Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, selectedDayOption) }
+                }
+                DatePickerDialog(
+                    context,
+                    { _, y, m, d ->
+                        val picked = Calendar.getInstance().apply {
+                            set(Calendar.YEAR, y)
+                            set(Calendar.MONTH, m)
+                            set(Calendar.DAY_OF_MONTH, d)
+                            set(Calendar.HOUR_OF_DAY, 0)
+                            set(Calendar.MINUTE, 0)
+                            set(Calendar.SECOND, 0)
+                            set(Calendar.MILLISECOND, 0)
+                        }
+                        customDueDateMillis = picked.timeInMillis
+                        hasCustomDate = true
+                    },
+                    base.get(Calendar.YEAR),
+                    base.get(Calendar.MONTH),
+                    base.get(Calendar.DAY_OF_MONTH)
+                ).show()
+            }
+
             Spacer(modifier = Modifier.height(18.dp))
             Text(
                 text = "DAY",
@@ -265,15 +295,17 @@ fun GroupScheduleSheet(
                     val isSelected = !hasCustomDate && selectedDayOption == index
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(100.dp))
+                            .clip(CircleShape)
                             .background(if (isSelected) NudgyPrimary else Color.Transparent)
                             .border(
                                 1.dp,
                                 if (isSelected) NudgyPrimary else NudgyCardBorder,
-                                RoundedCornerShape(100.dp)
+                                CircleShape
                             )
                             .clickable { hasCustomDate = false; selectedDayOption = index }
-                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                            .height(48.dp)
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = label,
@@ -284,43 +316,36 @@ fun GroupScheduleSheet(
                         )
                     }
                 }
+                // Custom-date picker entry (shown only when no custom date is picked).
+                if (!hasCustomDate) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .border(1.dp, NudgyFieldBorder, CircleShape)
+                            .clickable { showDatePicker() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DateRange,
+                            contentDescription = "Pick a specific date",
+                            tint = NudgyCharcoal,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
 
+            // Pick a specific date banner — only when the picked date is NOT a chip option.
+            if (hasCustomDate) {
             Spacer(modifier = Modifier.height(8.dp))
-
-            // Pick a specific date (any date — the chips above are shortcuts)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .border(1.dp, if (hasCustomDate) NudgyPrimary else NudgyCardBorder, RoundedCornerShape(12.dp))
-                    .clickable {
-                        val base = if (hasCustomDate && customDueDateMillis != null) {
-                            Calendar.getInstance().apply { timeInMillis = customDueDateMillis!! }
-                        } else {
-                            Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, selectedDayOption) }
-                        }
-                        DatePickerDialog(
-                            context,
-                            { _, y, m, d ->
-                                val picked = Calendar.getInstance().apply {
-                                    set(Calendar.YEAR, y)
-                                    set(Calendar.MONTH, m)
-                                    set(Calendar.DAY_OF_MONTH, d)
-                                    set(Calendar.HOUR_OF_DAY, 0)
-                                    set(Calendar.MINUTE, 0)
-                                    set(Calendar.SECOND, 0)
-                                    set(Calendar.MILLISECOND, 0)
-                                }
-                                customDueDateMillis = picked.timeInMillis
-                                hasCustomDate = true
-                            },
-                            base.get(Calendar.YEAR),
-                            base.get(Calendar.MONTH),
-                            base.get(Calendar.DAY_OF_MONTH)
-                        ).show()
-                    }
+                    .clip(MaterialTheme.shapes.medium)
+                    .border(1.dp, NudgyPrimary, MaterialTheme.shapes.medium)
+                    .clickable { showDatePicker() }
                     .padding(horizontal = 14.dp, vertical = 12.dp)
             ) {
                 Icon(
@@ -331,7 +356,7 @@ fun GroupScheduleSheet(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = if (hasCustomDate && customDueDateMillis != null) {
+                    text = if (customDueDateMillis != null) {
                         "Date: ${dueDateFormatter.format(customDueDateMillis!!)}"
                     } else {
                         "Pick a specific date"
@@ -341,10 +366,26 @@ fun GroupScheduleSheet(
                     modifier = Modifier.weight(1f)
                 )
                 Text(
-                    text = if (hasCustomDate) "Change" else "Pick",
+                    text = "Change",
                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = NudgyPrimary
+                    color = NudgyAccent
                 )
+            }
+            }
+
+            // Custom-time picker (shared by the clock button and the banner row).
+            val showTimePicker = {
+                TimePickerDialog(
+                    context,
+                    { _, h, m ->
+                        customHour = h
+                        customMinute = m
+                        hasCustomTime = true
+                    },
+                    if (hasCustomTime) customHour else 14,
+                    if (hasCustomTime) customMinute else 0,
+                    false
+                ).show()
             }
 
             Spacer(modifier = Modifier.height(18.dp))
@@ -359,15 +400,17 @@ fun GroupScheduleSheet(
                     val isSelected = !hasCustomTime && selectedTimeOption == index
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(100.dp))
+                            .clip(CircleShape)
                             .background(if (isSelected) NudgyPrimary else Color.Transparent)
                             .border(
                                 1.dp,
                                 if (isSelected) NudgyPrimary else NudgyCardBorder,
-                                RoundedCornerShape(100.dp)
+                                CircleShape
                             )
                             .clickable { hasCustomTime = false; selectedTimeOption = index }
-                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                            .height(48.dp)
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = label,
@@ -378,27 +421,35 @@ fun GroupScheduleSheet(
                         )
                     }
                 }
+                // Custom-time picker entry (shown only when no custom time is picked).
+                if (!hasCustomTime) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .border(1.dp, NudgyFieldBorder, CircleShape)
+                            .clickable { showTimePicker() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Schedule,
+                            contentDescription = "Pick a custom time",
+                            tint = NudgyCharcoal,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
+            // Custom-time banner — only when the picked time is NOT a chip time.
+            if (hasCustomTime) {
             Spacer(modifier = Modifier.height(8.dp))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .border(1.dp, NudgyCardBorder, RoundedCornerShape(12.dp))
-                    .clickable {
-                        TimePickerDialog(
-                            context,
-                            { _, h, m ->
-                                customHour = h
-                                customMinute = m
-                                hasCustomTime = true
-                            },
-                            if (hasCustomTime) customHour else 14,
-                            if (hasCustomTime) customMinute else 0,
-                            false
-                        ).show()
-                    }
+                    .clip(MaterialTheme.shapes.medium)
+                    .border(1.dp, NudgyPrimary, MaterialTheme.shapes.medium)
+                    .clickable { showTimePicker() }
                     .padding(horizontal = 14.dp, vertical = 12.dp)
             ) {
                 Icon(
@@ -409,17 +460,17 @@ fun GroupScheduleSheet(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = if (hasCustomTime) "Custom Time: ${formatCustomTime(customHour, customMinute)}"
-                        else "Set Exact Time (e.g. 10:30 AM)",
+                    text = "Custom Time: ${formatCustomTime(customHour, customMinute)}",
                     style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
                     color = NudgyCharcoal,
                     modifier = Modifier.weight(1f)
                 )
                 Text(
-                    text = if (hasCustomTime) "Change" else "Pick",
+                    text = "Change",
                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = NudgyPrimary
+                    color = NudgyAccent
                 )
+            }
             }
 
             // Past-time guard: same rule as CreateTaskSheet — roll to tomorrow.
@@ -443,7 +494,7 @@ fun GroupScheduleSheet(
                 Text(
                     text = "⚠ This time has already passed today — it will be scheduled for tomorrow at the same time.",
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                    color = NudgyPrimary
+                    color = NudgyAccent
                 )
             }
 
@@ -460,15 +511,17 @@ fun GroupScheduleSheet(
                     val isSelected = selectedDurationOption == index
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(100.dp))
+                            .clip(CircleShape)
                             .background(if (isSelected) NudgyPrimary else Color.Transparent)
                             .border(
                                 1.dp,
                                 if (isSelected) NudgyPrimary else NudgyCardBorder,
-                                RoundedCornerShape(100.dp)
+                                CircleShape
                             )
                             .clickable { selectedDurationOption = index }
-                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                            .height(48.dp)
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = label,
@@ -511,7 +564,7 @@ fun GroupScheduleSheet(
                 },
                 enabled = title.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary),
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.large,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
