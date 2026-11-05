@@ -133,7 +133,7 @@ fun NotificationsSheet(
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp),
-                    color = Color.White,
+                    color = NudgyCard,
                     border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
                 ) {
                     Column(
@@ -166,7 +166,7 @@ fun NotificationsSheet(
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(18.dp),
-                            color = Color.White,
+                            color = NudgyCard,
                             border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {

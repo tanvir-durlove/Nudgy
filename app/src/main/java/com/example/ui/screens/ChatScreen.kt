@@ -68,6 +68,7 @@ import com.example.data.local.entity.TaskEntity
 import com.example.ui.components.MascotMood
 import com.example.ui.components.NudgyMascot
 import com.example.ui.theme.NudgyCard
+import com.example.ui.theme.NudgyButter
 import com.example.ui.theme.NudgyCardBorder
 import com.example.ui.theme.NudgyCharcoal
 import com.example.ui.theme.NudgyLavender
@@ -257,7 +258,7 @@ fun ChatScreen(
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(16.dp),
-                            color = Color(0xFFFEF9E7)
+                            color = NudgyButter
                         ) {
                             Row(
                                 modifier = Modifier.padding(14.dp),
@@ -270,7 +271,7 @@ fun ChatScreen(
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Text(
-                                    text = "🎙️ Listening... Speak now (English or বাংলা)",
+                                    text = "🎙️ Listening... Speak now",
                                     style = MaterialTheme.typography.titleMedium.copy(fontSize = 14.sp),
                                     color = NudgyCharcoal
                                 )
@@ -531,7 +532,7 @@ fun ChatScreen(
                                             message.quickSuggestions.forEach { suggestion ->
                                                 Surface(
                                                     shape = RoundedCornerShape(100.dp),
-                                                    color = Color.White,
+                                                    color = NudgyCard,
                                                     border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder),
                                                     modifier = Modifier.clickable { onSendMessage(suggestion) }
                                                 ) {
@@ -564,7 +565,7 @@ fun ChatScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Surface(
                                 shape = RoundedCornerShape(18.dp),
-                                color = Color.White,
+                                color = NudgyCard,
                                 border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
                             ) {
                                 Row(

@@ -17,8 +17,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import android.app.DatePickerDialog
-import android.app.TimePickerDialog
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -26,7 +24,6 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -41,6 +38,11 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -69,6 +71,7 @@ import com.example.ui.theme.NudgyPrimary
 import com.example.ui.theme.NudgyPrimaryDark
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.TimeZone
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -81,13 +84,15 @@ fun EditTaskSheet(
     onToggleComplete: (TaskEntity) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var title by remember { mutableStateOf(task.title) }
     var description by remember { mutableStateOf(task.description ?: "") }
     var priority by remember { mutableStateOf(task.priority) }
     var category by remember { mutableStateOf(task.category) }
     var currentDueDateMillis by remember { mutableLongStateOf(task.dueDateEpochMillis) }
+    var showM3DatePicker by remember { mutableStateOf(false) }
+    var showM3TimePicker by remember { mutableStateOf(false) }
+    var editPickedDateMillis by remember { mutableStateOf<Long?>(null) }
     var reminderSet by remember { mutableStateOf(task.reminderSet) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
 
@@ -194,35 +199,7 @@ fun EditTaskSheet(
                     .clip(RoundedCornerShape(14.dp))
                     .background(NudgyChipBackground)
                     .border(1.dp, NudgyCardBorder, RoundedCornerShape(14.dp))
-                    .clickable {
-                        val cal = Calendar.getInstance().apply { timeInMillis = currentDueDateMillis }
-                        DatePickerDialog(
-                            context,
-                            { _, y, m, d ->
-                                TimePickerDialog(
-                                    context,
-                                    { _, hourOfDay, minute ->
-                                        val newCal = Calendar.getInstance().apply {
-                                            set(Calendar.YEAR, y)
-                                            set(Calendar.MONTH, m)
-                                            set(Calendar.DAY_OF_MONTH, d)
-                                            set(Calendar.HOUR_OF_DAY, hourOfDay)
-                                            set(Calendar.MINUTE, minute)
-                                            set(Calendar.SECOND, 0)
-                                            set(Calendar.MILLISECOND, 0)
-                                        }
-                                        currentDueDateMillis = newCal.timeInMillis
-                                    },
-                                    cal.get(Calendar.HOUR_OF_DAY),
-                                    cal.get(Calendar.MINUTE),
-                                    false
-                                ).show()
-                            },
-                            cal.get(Calendar.YEAR),
-                            cal.get(Calendar.MONTH),
-                            cal.get(Calendar.DAY_OF_MONTH)
-                        ).show()
-                    }
+                    .clickable { showM3DatePicker = true }
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -252,6 +229,69 @@ fun EditTaskSheet(
                     text = "Change",
                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
                     color = NudgyPrimary
+                )
+            }
+
+            if (showM3DatePicker) {
+                val currentCal = Calendar.getInstance().apply { timeInMillis = currentDueDateMillis }
+                val initialUtc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                    set(Calendar.YEAR, currentCal.get(Calendar.YEAR))
+                    set(Calendar.MONTH, currentCal.get(Calendar.MONTH))
+                    set(Calendar.DAY_OF_MONTH, currentCal.get(Calendar.DAY_OF_MONTH))
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialUtc.timeInMillis)
+                DatePickerDialog(
+                    onDismissRequest = { showM3DatePicker = false },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            editPickedDateMillis = datePickerState.selectedDateMillis
+                            showM3DatePicker = false
+                            if (datePickerState.selectedDateMillis != null) showM3TimePicker = true
+                        }) { Text("OK") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showM3DatePicker = false }) { Text("Cancel") }
+                    }
+                ) {
+                    DatePicker(state = datePickerState)
+                }
+            }
+            if (showM3TimePicker) {
+                val timeCal = Calendar.getInstance().apply { timeInMillis = currentDueDateMillis }
+                val timePickerState = rememberTimePickerState(
+                    initialHour = timeCal.get(Calendar.HOUR_OF_DAY),
+                    initialMinute = timeCal.get(Calendar.MINUTE),
+                    is24Hour = false
+                )
+                AlertDialog(
+                    onDismissRequest = { showM3TimePicker = false; editPickedDateMillis = null },
+                    title = { Text("Pick due time", fontWeight = FontWeight.Bold, color = NudgyCharcoal) },
+                    text = { TimePicker(state = timePickerState) },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            editPickedDateMillis?.let { picked ->
+                                val utc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = picked }
+                                currentDueDateMillis = Calendar.getInstance().apply {
+                                    set(Calendar.YEAR, utc.get(Calendar.YEAR))
+                                    set(Calendar.MONTH, utc.get(Calendar.MONTH))
+                                    set(Calendar.DAY_OF_MONTH, utc.get(Calendar.DAY_OF_MONTH))
+                                    set(Calendar.HOUR_OF_DAY, timePickerState.hour)
+                                    set(Calendar.MINUTE, timePickerState.minute)
+                                    set(Calendar.SECOND, 0)
+                                    set(Calendar.MILLISECOND, 0)
+                                }.timeInMillis
+                            }
+                            editPickedDateMillis = null
+                            showM3TimePicker = false
+                        }) { Text("OK") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showM3TimePicker = false; editPickedDateMillis = null }) { Text("Cancel") }
+                    }
                 )
             }
 

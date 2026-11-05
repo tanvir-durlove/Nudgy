@@ -59,7 +59,7 @@ class VoiceAssistantManager(private val context: Context) : TextToSpeech.OnInitL
     }
 
     /**
-     * Start Speech Recognition (Bilingual English / Bengali)
+     * Start Speech Recognition (English-only)
      */
     fun startListening(
         languageCode: String = "en-US",
@@ -157,19 +157,12 @@ class VoiceAssistantManager(private val context: Context) : TextToSpeech.OnInitL
     }
 
     /**
-     * Speak response with dynamic language detection (Bengali / English)
+     * Speak response in English (voice language is English-only).
      */
     fun speak(text: String) {
         if (!isTtsInitialized || tts == null) return
 
-        val isBengali = text.any { it in '\u0980'..'\u09FF' }
-        val locale = if (isBengali) {
-            Locale.forLanguageTag("bn-BD")
-        } else {
-            Locale.US
-        }
-
-        val available = tts?.setLanguage(locale)
+        val available = tts?.setLanguage(Locale.US)
         if (available == TextToSpeech.LANG_MISSING_DATA || available == TextToSpeech.LANG_NOT_SUPPORTED) {
             tts?.language = Locale.US
         }

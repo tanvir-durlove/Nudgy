@@ -16,8 +16,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import android.app.DatePickerDialog
-import android.app.TimePickerDialog
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
@@ -25,7 +23,6 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.ui.platform.LocalContext
 import java.util.Locale
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -39,6 +36,13 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -66,6 +70,7 @@ import com.example.ui.theme.NudgyPrimary
 import com.example.ui.theme.NudgyPrimaryDark
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.TimeZone
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,7 +89,6 @@ fun CreateTaskSheet(
     saveButtonText: String = "Add Task",
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
@@ -183,32 +187,51 @@ fun CreateTaskSheet(
 
             Spacer(modifier = Modifier.height(18.dp))
 
+            var showM3DatePicker by remember { mutableStateOf(false) }
             // Custom-date picker (shared by the calendar button and the banner row).
-            val showDatePicker = {
-                val base = if (hasCustomDate && customDueDateMillis != null) {
+            val showDatePicker = { showM3DatePicker = true }
+            if (showM3DatePicker) {
+                val baseLocal = if (hasCustomDate && customDueDateMillis != null) {
                     Calendar.getInstance().apply { timeInMillis = customDueDateMillis!! }
                 } else {
                     Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, selectedDayOption) }
                 }
+                val baseUtc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                    set(Calendar.YEAR, baseLocal.get(Calendar.YEAR))
+                    set(Calendar.MONTH, baseLocal.get(Calendar.MONTH))
+                    set(Calendar.DAY_OF_MONTH, baseLocal.get(Calendar.DAY_OF_MONTH))
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                val datePickerState = rememberDatePickerState(initialSelectedDateMillis = baseUtc.timeInMillis)
                 DatePickerDialog(
-                    context,
-                    { _, y, m, d ->
-                        val picked = Calendar.getInstance().apply {
-                            set(Calendar.YEAR, y)
-                            set(Calendar.MONTH, m)
-                            set(Calendar.DAY_OF_MONTH, d)
-                            set(Calendar.HOUR_OF_DAY, 0)
-                            set(Calendar.MINUTE, 0)
-                            set(Calendar.SECOND, 0)
-                            set(Calendar.MILLISECOND, 0)
-                        }
-                        customDueDateMillis = picked.timeInMillis
-                        hasCustomDate = true
+                    onDismissRequest = { showM3DatePicker = false },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            datePickerState.selectedDateMillis?.let { picked ->
+                                val utc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = picked }
+                                customDueDateMillis = Calendar.getInstance().apply {
+                                    set(Calendar.YEAR, utc.get(Calendar.YEAR))
+                                    set(Calendar.MONTH, utc.get(Calendar.MONTH))
+                                    set(Calendar.DAY_OF_MONTH, utc.get(Calendar.DAY_OF_MONTH))
+                                    set(Calendar.HOUR_OF_DAY, 0)
+                                    set(Calendar.MINUTE, 0)
+                                    set(Calendar.SECOND, 0)
+                                    set(Calendar.MILLISECOND, 0)
+                                }.timeInMillis
+                                hasCustomDate = true
+                            }
+                            showM3DatePicker = false
+                        }) { Text("OK") }
                     },
-                    base.get(Calendar.YEAR),
-                    base.get(Calendar.MONTH),
-                    base.get(Calendar.DAY_OF_MONTH)
-                ).show()
+                    dismissButton = {
+                        TextButton(onClick = { showM3DatePicker = false }) { Text("Cancel") }
+                    }
+                ) {
+                    DatePicker(state = datePickerState)
+                }
             }
 
             // DUE DATE SELECTOR
@@ -311,19 +334,31 @@ fun CreateTaskSheet(
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            var showM3TimePicker by remember { mutableStateOf(false) }
             // Custom-time picker (shared by the clock button and the banner row).
-            val showTimePicker = {
-                TimePickerDialog(
-                    context,
-                    { _, h, m ->
-                        customHour = h
-                        customMinute = m
-                        hasCustomTime = true
+            val showTimePicker = { showM3TimePicker = true }
+            if (showM3TimePicker) {
+                val timePickerState = rememberTimePickerState(
+                    initialHour = if (hasCustomTime) customHour else 14,
+                    initialMinute = if (hasCustomTime) customMinute else 0,
+                    is24Hour = false
+                )
+                AlertDialog(
+                    onDismissRequest = { showM3TimePicker = false },
+                    title = { Text("Pick time", fontWeight = FontWeight.Bold, color = NudgyCharcoal) },
+                    text = { TimePicker(state = timePickerState) },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            customHour = timePickerState.hour
+                            customMinute = timePickerState.minute
+                            hasCustomTime = true
+                            showM3TimePicker = false
+                        }) { Text("OK") }
                     },
-                    if (hasCustomTime) customHour else 14,
-                    if (hasCustomTime) customMinute else 0,
-                    false
-                ).show()
+                    dismissButton = {
+                        TextButton(onClick = { showM3TimePicker = false }) { Text("Cancel") }
+                    }
+                )
             }
 
             // TIME OF DAY SELECTOR
