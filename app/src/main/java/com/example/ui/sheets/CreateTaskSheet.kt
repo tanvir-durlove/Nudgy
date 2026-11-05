@@ -17,9 +17,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.ui.platform.LocalContext
@@ -58,6 +62,7 @@ import com.example.ui.theme.NudgyCharcoal
 import com.example.ui.theme.NudgyMuted
 import com.example.ui.theme.NudgyPrimary
 import com.example.ui.theme.NudgyPrimaryDark
+import java.text.SimpleDateFormat
 import java.util.Calendar
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -83,12 +88,30 @@ fun CreateTaskSheet(
     var description by remember { mutableStateOf("") }
     var priority by remember { mutableStateOf(Priority.MEDIUM) }
     var category by remember { mutableStateOf(TaskCategory.WORK) }
-    var selectedDayOption by remember { mutableIntStateOf(0) } // 0: Today, 1: Tomorrow, 2: In 2 Days
+    var selectedDayOption by remember { mutableIntStateOf(0) } // Shortcuts: 0: Today, 1: Tomorrow, 2: In 2 Days (a picked date overrides these)
     var selectedTimeOption by remember { mutableIntStateOf(1) } // 0: 9 AM, 1: 2 PM, 2: 7 PM
     var customHour by remember { mutableIntStateOf(14) }
     var customMinute by remember { mutableIntStateOf(0) }
     var hasCustomTime by remember { mutableStateOf(false) }
     var reminderSet by remember { mutableStateOf(true) }
+    var hasCustomDate by remember { mutableStateOf(false) }
+    var customDueDateMillis by remember { mutableStateOf<Long?>(null) }
+    var showMoreOptions by remember { mutableStateOf(false) }
+
+    val dueDateFormatter = remember { SimpleDateFormat("EEEE, MMM d", Locale.getDefault()) }
+
+    // Effective due day: a picked date overrides the day-chip shortcuts.
+    // The returned calendar carries the picked/chip day; callers set the
+    // time-of-day fields from the time selection afterwards.
+    fun effectiveDueCalendar(): Calendar {
+        val cal = Calendar.getInstance()
+        if (hasCustomDate && customDueDateMillis != null) {
+            cal.timeInMillis = customDueDateMillis!!
+        } else {
+            cal.add(Calendar.DAY_OF_YEAR, selectedDayOption)
+        }
+        return cal
+    }
 
     fun formatCustomTime(h: Int, m: Int): String {
         val amPm = if (h < 12) "AM" else "PM"
@@ -157,22 +180,6 @@ fun CreateTaskSheet(
                 singleLine = true
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Description / Notes input
-            OutlinedTextField(
-                value = description,
-                onValueChange = { description = it },
-                placeholder = { Text("Add notes or details (optional)...", color = NudgyMuted) },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = NudgyPrimary,
-                    unfocusedBorderColor = NudgyCardBorder
-                ),
-                maxLines = 3
-            )
-
             Spacer(modifier = Modifier.height(18.dp))
 
             // DUE DATE SELECTOR
@@ -188,13 +195,16 @@ fun CreateTaskSheet(
             ) {
                 val dayOptions = listOf("Today", "Tomorrow", "In 2 days")
                 dayOptions.forEachIndexed { index, label ->
-                    val isSelected = selectedDayOption == index
+                    val isSelected = !hasCustomDate && selectedDayOption == index
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(100.dp))
                             .background(if (isSelected) NudgyCharcoal else Color(0xFFF3EFE6))
-                            .clickable { selectedDayOption = index }
+                            .clickable {
+                                hasCustomDate = false
+                                selectedDayOption = index
+                            }
                             .padding(vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
@@ -206,6 +216,72 @@ fun CreateTaskSheet(
                         )
                     }
                 }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Pick a specific date (any date — the chips above are shortcuts)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (hasCustomDate) NudgyPrimary.copy(alpha = 0.12f) else Color(0xFFF3EFE6))
+                    .border(1.dp, if (hasCustomDate) NudgyPrimary else NudgyCardBorder, RoundedCornerShape(14.dp))
+                    .clickable {
+                        val base = if (hasCustomDate && customDueDateMillis != null) {
+                            Calendar.getInstance().apply { timeInMillis = customDueDateMillis!! }
+                        } else {
+                            Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, selectedDayOption) }
+                        }
+                        DatePickerDialog(
+                            context,
+                            { _, y, m, d ->
+                                val picked = Calendar.getInstance().apply {
+                                    set(Calendar.YEAR, y)
+                                    set(Calendar.MONTH, m)
+                                    set(Calendar.DAY_OF_MONTH, d)
+                                    set(Calendar.HOUR_OF_DAY, 0)
+                                    set(Calendar.MINUTE, 0)
+                                    set(Calendar.SECOND, 0)
+                                    set(Calendar.MILLISECOND, 0)
+                                }
+                                customDueDateMillis = picked.timeInMillis
+                                hasCustomDate = true
+                            },
+                            base.get(Calendar.YEAR),
+                            base.get(Calendar.MONTH),
+                            base.get(Calendar.DAY_OF_MONTH)
+                        ).show()
+                    }
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.DateRange,
+                        contentDescription = "Pick a due date",
+                        tint = if (hasCustomDate) NudgyPrimary else NudgyCharcoal,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (hasCustomDate && customDueDateMillis != null) {
+                            "Due date: ${dueDateFormatter.format(customDueDateMillis!!)}"
+                        } else {
+                            "Pick a specific date"
+                        },
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = if (hasCustomDate) FontWeight.Bold else FontWeight.Normal,
+                            color = if (hasCustomDate) NudgyPrimary else NudgyCharcoal
+                        )
+                    )
+                }
+                Text(
+                    text = if (hasCustomDate) "Change" else "Pick",
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = NudgyPrimary
+                )
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -297,8 +373,7 @@ fun CreateTaskSheet(
 
             // Past-time guard: "Today" + a time that has already passed would
             // silently kill the reminder, so warn here and roll to tomorrow.
-            val previewCalendar = Calendar.getInstance()
-            previewCalendar.add(Calendar.DAY_OF_YEAR, selectedDayOption)
+            val previewCalendar = effectiveDueCalendar()
             val (previewHour, previewMinute) = if (hasCustomTime) {
                 customHour to customMinute
             } else {
@@ -312,8 +387,7 @@ fun CreateTaskSheet(
             previewCalendar.set(Calendar.MINUTE, previewMinute)
             previewCalendar.set(Calendar.SECOND, 0)
             previewCalendar.set(Calendar.MILLISECOND, 0)
-            val willRollToTomorrow = selectedDayOption == 0 &&
-                previewCalendar.timeInMillis <= System.currentTimeMillis()
+            val willRollToTomorrow = previewCalendar.timeInMillis <= System.currentTimeMillis()
             if (willRollToTomorrow) {
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
@@ -325,7 +399,48 @@ fun CreateTaskSheet(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // PRIORITY SELECTOR
+            // MORE OPTIONS TOGGLE (collapsed by default)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable { showMoreOptions = !showMoreOptions }
+                    .padding(horizontal = 4.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "More options",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = NudgyCharcoal
+                )
+                Icon(
+                    imageVector = if (showMoreOptions) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (showMoreOptions) "Hide more options" else "Show more options",
+                    tint = NudgyPrimary
+                )
+            }
+
+            if (showMoreOptions) {
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Description / Notes input
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    placeholder = { Text("Add notes or details (optional)...", color = NudgyMuted) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = NudgyPrimary,
+                        unfocusedBorderColor = NudgyCardBorder
+                    ),
+                    maxLines = 3
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // PRIORITY SELECTOR
             Text(
                 text = "PRIORITY",
                 style = MaterialTheme.typography.labelSmall,
@@ -451,14 +566,15 @@ fun CreateTaskSheet(
                 )
             }
 
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
 
             // Save Button
             Button(
                 onClick = {
                     if (title.isNotBlank()) {
-                        val calendar = Calendar.getInstance()
-                        calendar.add(Calendar.DAY_OF_YEAR, selectedDayOption)
+                        val calendar = effectiveDueCalendar()
                         val (finalHour, finalMinute) = if (hasCustomTime) {
                             customHour to customMinute
                         } else {

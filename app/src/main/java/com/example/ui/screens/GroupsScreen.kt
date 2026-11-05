@@ -103,7 +103,7 @@ import java.util.Locale
  * - Restyle: one card system (20dp radius, 2dp elevation, 16dp card padding,
  *   20dp section gaps). Every section lives inside its own card (header +
  *   divider + rows) so no title is bare text on the background; member rows
- *   are avatar rows in a card; detail bottom padding clears the mascot FAB.
+ *   are avatar rows in a card.
  * - Tapping a group task opens EditTaskSheet for the creator (cloud write via
  *   GroupRepository) and the read-only GroupTaskDetailSheet for members
  *   (local completion toggle only).
@@ -953,9 +953,6 @@ fun GroupsScreen(
                     )
                 }
             }
-            // Bottom clearance: keeps Delete/Leave above the floating
-            // mascot button (16dp margin + ~72dp button) at any scroll position.
-            Spacer(modifier = Modifier.height(96.dp))
         }
     }
 

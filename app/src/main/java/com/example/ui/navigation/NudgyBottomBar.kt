@@ -1,10 +1,8 @@
 package com.example.ui.navigation
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,7 +25,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.components.NudgyMascot
 import com.example.ui.theme.NudgyBorder
 import com.example.ui.theme.NudgyCanvas
 import com.example.ui.theme.NudgyCharcoal
@@ -85,29 +82,5 @@ fun NudgyBottomBar(
                 }
             }
         }
-    }
-}
-
-/**
- * Floating Mascot Shortcut Button (seen at bottom-right in Figma screens)
- */
-@Composable
-fun FloatingMascotButton(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .size(54.dp)
-            .clip(CircleShape)
-            .background(NudgyCharcoal)
-            .clickable { onClick() }
-            .padding(4.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        NudgyMascot(
-            size = 38.dp,
-            showRosyCheeks = true
-        )
     }
 }

@@ -62,7 +62,6 @@ import com.example.data.repository.TaskRepository
 import com.example.reminders.ReminderManager
 import com.example.ui.components.NudgyTopBar
 import com.example.ui.dialogs.NudgyFloatingBubbleDialog
-import com.example.ui.navigation.FloatingMascotButton
 import com.example.ui.navigation.NudgyBottomBar
 import com.example.ui.navigation.NudgyNavDestination
 import com.example.ui.screens.CalendarScreen
@@ -780,14 +779,6 @@ fun NudgyAppScaffold(
                     }
                 }
 
-                if (currentDestination != NudgyNavDestination.CHAT) {
-                    FloatingMascotButton(
-                        onClick = { showFloatingBubbleDialog = true },
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(end = 20.dp, bottom = 16.dp)
-                    )
-                }
             }
         }
 
