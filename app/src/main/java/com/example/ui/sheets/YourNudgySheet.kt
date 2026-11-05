@@ -31,9 +31,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material.icons.outlined.GraphicEq
+import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -93,25 +92,23 @@ fun YourNudgySheet(
     onAddMemory: (String) -> Unit = {},
     onDeleteMemory: (String) -> Unit = {},
     modifier: Modifier = Modifier,
-    onNavigateCalendar: () -> Unit = {}
+    onNavigateCalendar: () -> Unit = {},
+    themeMode: String = "system",
+    onThemeModeChange: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val settingsPrefs = remember { context.getSharedPreferences("nudgy_settings", android.content.Context.MODE_PRIVATE) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
-    var showPreferencesDialog by remember { mutableStateOf(false) }
     var showNotificationsDialog by remember { mutableStateOf(false) }
-    var showVoiceDialog by remember { mutableStateOf(false) }
     var showMemoriesDialog by remember { mutableStateOf(false) }
+    var showThemeDialog by remember { mutableStateOf(false) }
     var showApiKeyDialog by remember { mutableStateOf(false) }
     var customApiKeyInput by remember { mutableStateOf(settingsPrefs.getString("custom_gemini_api_key", "") ?: "") }
     var newMemoryInput by remember { mutableStateOf("") }
 
-    var selectedPersona by remember { mutableStateOf("Gentle & Encouraging") }
     var morningBriefEnabled by remember { mutableStateOf(true) }
     var reminderSoundEnabled by remember { mutableStateOf(true) }
-    var voiceRepliesEnabled by remember { mutableStateOf(true) }
-    var selectedLanguage by remember { mutableStateOf("English (US)") }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -314,13 +311,7 @@ fun YourNudgySheet(
 
             // Menu Items List
             NudgyMenuItem(
-                icon = Icons.Outlined.Person,
-                title = "Profile & preferences",
-                onClick = { showPreferencesDialog = true }
-            )
-            HorizontalDivider(color = NudgyBorder.copy(alpha = 0.5f))
 
-            NudgyMenuItem(
                 icon = Icons.Outlined.Notifications,
                 title = "Notifications & Reminders",
                 onClick = { showNotificationsDialog = true }
@@ -328,9 +319,9 @@ fun YourNudgySheet(
             HorizontalDivider(color = NudgyBorder.copy(alpha = 0.5f))
 
             NudgyMenuItem(
-                icon = Icons.Outlined.GraphicEq,
-                title = "Voice & language",
-                onClick = { showVoiceDialog = true }
+                icon = Icons.Outlined.DarkMode,
+                title = "Appearance",
+                onClick = { showThemeDialog = true }
             )
             HorizontalDivider(color = NudgyBorder.copy(alpha = 0.5f))
 
@@ -411,43 +402,6 @@ fun YourNudgySheet(
         }
     }
 
-    if (showPreferencesDialog) {
-        AlertDialog(
-            onDismissRequest = { showPreferencesDialog = false },
-            title = { Text("Profile & Persona", fontWeight = FontWeight.Bold, color = NudgyCharcoal) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("CHOOSE NUDGY'S PERSONA", style = MaterialTheme.typography.labelSmall, color = NudgyMuted)
-                    listOf("Gentle & Encouraging", "Direct & Focused", "Sassy & Playful").forEach { persona ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { selectedPersona = persona }
-                                .padding(vertical = 4.dp)
-                        ) {
-                            RadioButton(
-                                selected = selectedPersona == persona,
-                                onClick = { selectedPersona = persona },
-                                colors = RadioButtonDefaults.colors(selectedColor = NudgyPrimary)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(persona, style = MaterialTheme.typography.bodyMedium, color = NudgyCharcoal)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = { showPreferencesDialog = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary)
-                ) {
-                    Text("Save", color = Color.White)
-                }
-            }
-        )
-    }
-
     if (showNotificationsDialog) {
         AlertDialog(
             onDismissRequest = { showNotificationsDialog = false },
@@ -498,54 +452,37 @@ fun YourNudgySheet(
         )
     }
 
-    if (showVoiceDialog) {
+    if (showThemeDialog) {
         AlertDialog(
-            onDismissRequest = { showVoiceDialog = false },
-            title = { Text("Voice & Speech", fontWeight = FontWeight.Bold, color = NudgyCharcoal) },
+            onDismissRequest = { showThemeDialog = false },
+            title = { Text("Appearance", fontWeight = FontWeight.Bold, color = NudgyCharcoal) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Spoken Audio Replies", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                            Text("Nudgy speaks responses aloud", fontSize = 12.sp, color = NudgyMuted)
-                        }
-                        Switch(
-                            checked = voiceRepliesEnabled,
-                            onCheckedChange = { voiceRepliesEnabled = it },
-                            colors = SwitchDefaults.colors(checkedTrackColor = NudgyPrimary)
-                        )
-                    }
-
-                    Text("SPEECH LANGUAGE", style = MaterialTheme.typography.labelSmall, color = NudgyMuted)
-                    listOf("English (US)", "Bengali (Bangladesh)").forEach { lang ->
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    listOf("system" to "System default", "light" to "Light", "dark" to "Dark").forEach { (mode, label) ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { selectedLanguage = lang }
+                                .clickable { onThemeModeChange(mode) }
                                 .padding(vertical = 4.dp)
                         ) {
                             RadioButton(
-                                selected = selectedLanguage == lang,
-                                onClick = { selectedLanguage = lang },
+                                selected = themeMode == mode,
+                                onClick = { onThemeModeChange(mode) },
                                 colors = RadioButtonDefaults.colors(selectedColor = NudgyPrimary)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(lang, style = MaterialTheme.typography.bodyMedium, color = NudgyCharcoal)
+                            Text(label, style = MaterialTheme.typography.bodyMedium, color = NudgyCharcoal)
                         }
                     }
                 }
             },
             confirmButton = {
                 Button(
-                    onClick = { showVoiceDialog = false },
+                    onClick = { showThemeDialog = false },
                     colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary)
                 ) {
-                    Text("Save", color = Color.White)
+                    Text("Done", color = Color.White)
                 }
             }
         )

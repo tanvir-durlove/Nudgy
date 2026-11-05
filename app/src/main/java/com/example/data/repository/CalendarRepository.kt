@@ -167,11 +167,47 @@ class CalendarRepository(
             CalendarContract.Instances.BEGIN,
             CalendarContract.Instances.END,
             CalendarContract.Instances.EVENT_LOCATION,
-            CalendarContract.Instances.ALL_DAY
+            CalendarContract.Instances.ALL_DAY,
+            CalendarContract.Instances.CALENDAR_ID
         )
         // No selection: deleted events simply have no instances in this
         // view, and the reconciliation below keys off their absence.
         val selection: String? = null
+
+        // Holiday calendars (e.g. "Holidays in Bangladesh") are read-only
+        // Google calendars whose events would otherwise pollute the
+        // schedule. Exclude them by calendar id: the name contains
+        // "holiday" AND access is below contributor, so writable calendars
+        // are never treated as holidays, even if oddly named. If this
+        // lookup fails, the set stays empty and sync behaves as before.
+        val holidayCalendarIds = mutableSetOf<Long>()
+        try {
+            context.contentResolver.query(
+                CalendarContract.Calendars.CONTENT_URI,
+                arrayOf(
+                    CalendarContract.Calendars._ID,
+                    CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+                    CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL
+                ),
+                null, null, null
+            )?.use { calCursor ->
+                val hIdIndex = calCursor.getColumnIndex(CalendarContract.Calendars._ID)
+                val hNameIndex = calCursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME)
+                val hAccessIndex = calCursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL)
+                while (calCursor.moveToNext()) {
+                    if (hIdIndex < 0) continue
+                    val hName = if (hNameIndex >= 0) calCursor.getString(hNameIndex) else null
+                    val hAccess = if (hAccessIndex >= 0) calCursor.getInt(hAccessIndex) else 0
+                    if (hName != null && hName.contains("holiday", ignoreCase = true) &&
+                        hAccess < CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR
+                    ) {
+                        holidayCalendarIds.add(calCursor.getLong(hIdIndex))
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error finding holiday calendars: ${e.message}")
+        }
 
         try {
             // Remote occurrences, keyed by (google event id, occurrence start)
@@ -185,6 +221,7 @@ class CalendarRepository(
                 "${CalendarContract.Instances.BEGIN} ASC"
             )?.use { cursor ->
                 val idIndex = cursor.getColumnIndex(CalendarContract.Instances.EVENT_ID)
+                val calIdIndex = cursor.getColumnIndex(CalendarContract.Instances.CALENDAR_ID)
                 val titleIndex = cursor.getColumnIndex(CalendarContract.Instances.TITLE)
                 val beginIndex = cursor.getColumnIndex(CalendarContract.Instances.BEGIN)
                 val endIndex = cursor.getColumnIndex(CalendarContract.Instances.END)
@@ -193,6 +230,7 @@ class CalendarRepository(
 
                 while (cursor.moveToNext()) {
                     val gId = cursor.getLong(idIndex)
+                    if (calIdIndex >= 0 && cursor.getLong(calIdIndex) in holidayCalendarIds) continue
                     val rawTitle = cursor.getString(titleIndex) ?: "Untitled Event"
                     val start = cursor.getLong(beginIndex)
                     var end = cursor.getLong(endIndex)

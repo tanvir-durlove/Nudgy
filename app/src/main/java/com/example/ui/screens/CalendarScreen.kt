@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.imePadding
-import android.app.TimePickerDialog
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -27,7 +26,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -40,6 +38,9 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -83,6 +84,7 @@ data class DynamicDayItem(
 )
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun CalendarScreen(
     events: List<CalendarEventEntity>,
     tasks: List<TaskEntity> = emptyList(),
@@ -412,13 +414,13 @@ fun CalendarScreen(
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (isCalendarConnected) "Google Calendar Synced" else "Bring your calendar in",
+                        text = if (isCalendarConnected) "Calendar synced" else "Bring your calendar in",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = NudgyCharcoal
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = if (isCalendarConnected) "Events two-way synced with Google Calendar." else "Connect Google Calendar to spot conflicts and find open time.",
+                        text = if (isCalendarConnected) "Events from your device calendar stay in sync." else "Allow calendar access to spot conflicts and find open time.",
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
                         color = NudgyMuted
                     )
@@ -450,7 +452,7 @@ fun CalendarScreen(
                         modifier = Modifier.height(48.dp)
                     ) {
                         Text(
-                            text = "Connect",
+                            text = "Allow access",
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
@@ -748,7 +750,6 @@ fun CalendarScreen(
 
 
     if (showAddEventDialog) {
-        val context = LocalContext.current
         var eventTitle by remember { mutableStateOf("") }
         var eventLocation by remember { mutableStateOf("") }
         var selectedDurationMinutes by remember { mutableIntStateOf(30) }
@@ -759,6 +760,7 @@ fun CalendarScreen(
         val defaultHour = now.get(Calendar.HOUR_OF_DAY).let { if (it in 7..21) (it + 1) % 24 else 10 }
         var selectedHour by remember { mutableIntStateOf(defaultHour) }
         var selectedMinute by remember { mutableIntStateOf(0) }
+        var showTimePicker by remember { mutableStateOf(false) }
 
         fun formatTimeStr(h: Int, m: Int): String {
             val amPm = if (h < 12) "AM" else "PM"
@@ -821,18 +823,7 @@ fun CalendarScreen(
                             .clip(MaterialTheme.shapes.medium)
                             .background(NudgyChipBackground)
                             .border(1.dp, NudgyCardBorder, MaterialTheme.shapes.medium)
-                            .clickable {
-                                TimePickerDialog(
-                                    context,
-                                    { _, h, m ->
-                                        selectedHour = h
-                                        selectedMinute = m
-                                    },
-                                    selectedHour,
-                                    selectedMinute,
-                                    false
-                                ).show()
-                            }
+                            .clickable { showTimePicker = true }
                             .padding(horizontal = 14.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
@@ -1003,5 +994,28 @@ fun CalendarScreen(
                 }
             }
         )
+
+        if (showTimePicker) {
+            val timePickerState = rememberTimePickerState(
+                initialHour = selectedHour,
+                initialMinute = selectedMinute,
+                is24Hour = false
+            )
+            AlertDialog(
+                onDismissRequest = { showTimePicker = false },
+                title = { Text("Pick start time", fontWeight = FontWeight.Bold, color = NudgyCharcoal) },
+                text = { TimePicker(state = timePickerState) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        selectedHour = timePickerState.hour
+                        selectedMinute = timePickerState.minute
+                        showTimePicker = false
+                    }) { Text("OK", color = NudgyPrimary) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showTimePicker = false }) { Text("Cancel", color = NudgyCharcoal) }
+                }
+            )
+        }
     }
 }

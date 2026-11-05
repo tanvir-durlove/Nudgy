@@ -16,6 +16,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.Scaffold
 import android.util.Log
 import androidx.compose.runtime.Composable
@@ -81,7 +82,6 @@ import com.example.ui.theme.NudgyTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import java.util.Locale
 import java.util.UUID
 
 // SharedPreferences key for a group-join code stashed while signed out
@@ -141,7 +141,15 @@ class MainActivity : ComponentActivity() {
         parseGroupJoinCode(intent)?.let { deepLinkJoinCodeFlow.value = it }
 
         setContent {
-            NudgyTheme {
+            val themePrefs = remember { getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE) }
+            var themeMode by remember { mutableStateOf(themePrefs.getString("theme_mode", "system") ?: "system") }
+            NudgyTheme(
+                darkTheme = when (themeMode) {
+                    "light" -> false
+                    "dark" -> true
+                    else -> isSystemInDarkTheme()
+                }
+            ) {
                 NudgyMainFlow(
                     authManager = authManager,
                     taskRepository = taskRepository,
@@ -157,7 +165,12 @@ class MainActivity : ComponentActivity() {
                     remoteConfig = remoteConfig,
                     initialDestination = initialDestination,
                     deepLinkJoinCodeFlow = deepLinkJoinCodeFlow,
-                    onDeepLinkCodeConsumed = { deepLinkJoinCodeFlow.value = null }
+                    onDeepLinkCodeConsumed = { deepLinkJoinCodeFlow.value = null },
+                    themeMode = themeMode,
+                    onThemeModeChange = { mode ->
+                        themeMode = mode
+                        themePrefs.edit().putString("theme_mode", mode).apply()
+                    }
                 )
             }
         }
@@ -209,7 +222,9 @@ fun NudgyMainFlow(
     remoteConfig: NudgyRemoteConfig,
     initialDestination: NudgyNavDestination = NudgyNavDestination.HOME,
     deepLinkJoinCodeFlow: StateFlow<String?>,
-    onDeepLinkCodeConsumed: () -> Unit
+    onDeepLinkCodeConsumed: () -> Unit,
+    themeMode: String = "system",
+    onThemeModeChange: (String) -> Unit = {}
 ) {
     val user by authManager.userState.collectAsStateWithLifecycle()
     val deepLinkCode by deepLinkJoinCodeFlow.collectAsStateWithLifecycle()
@@ -624,10 +639,8 @@ fun NudgyAppScaffold(
                             onSendMessage = { prompt -> handleUserChat(prompt) },
                             onStartVoice = {
                                 analytics.logVoiceUsed("voice_input")
-                                val deviceLocale = Locale.getDefault()
-                                val speechLanguage = if (deviceLocale.language == "bn") "bn-BD" else deviceLocale.toLanguageTag()
                                 voiceAssistantManager.startListening(
-                                    languageCode = speechLanguage,
+                                    languageCode = "en-US",
                                     onResult = { voiceText -> handleUserChat(voiceText) }
                                 )
                             },
@@ -846,7 +859,9 @@ fun NudgyAppScaffold(
                     }
                 },
                 onDismiss = { showProfileSheet = false },
-                onNavigateCalendar = { currentDestination = NudgyNavDestination.CALENDAR }
+                onNavigateCalendar = { currentDestination = NudgyNavDestination.CALENDAR },
+                themeMode = themeMode,
+                onThemeModeChange = onThemeModeChange
             )
         }
 
