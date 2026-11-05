@@ -29,7 +29,11 @@ service cloud.firestore {
       allow create: if request.auth != null &&
         request.resource.data.creatorUid == request.auth.uid;
       // Creator-only update: covers the lastUpdatedAt bump that every
-      // item write performs in the same batch (see GroupRepository).
+      // item write performs in the same batch, and the lastDeleteAt bump
+      // that every item delete performs in the same batch (minimization:
+      // the poll worker gates its full reconcile on lastDeleteAt). The
+      // rule is field-agnostic, so no rule change was needed for the
+      // new field — only this comment (see GroupRepository).
       allow update: if request.auth != null &&
         resource.data.creatorUid == request.auth.uid;
       allow delete: if request.auth != null &&
@@ -109,6 +113,9 @@ in the privacy policy.
 7. Creator posts an item: item write + group lastUpdatedAt bump in one
    batch → succeeds. Non-creator member attempts the same → DENIED
    (both the item write and the group update fail).
+7b. Creator deletes an item: item delete + group lastDeleteAt bump in one
+    batch → succeeds (minimization: reconcile gate signal). Non-creator
+    member attempts the same → DENIED.
 8. Personal collections: existing per-user rules still pass (no regression).
 9. Creator delete: group doc + items + members + code doc + every mirror delete → all ALLOWED; a non-creator member attempting group delete → DENIED.
 10. Leave: member deletes own member doc + own mirror → ALLOWED; deleting another member's doc or mirror → DENIED.

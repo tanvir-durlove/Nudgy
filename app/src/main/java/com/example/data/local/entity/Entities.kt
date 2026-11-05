@@ -47,6 +47,17 @@ data class CalendarEventEntity(
     val groupId: String? = null
 )
 
+@Entity(
+    tableName = "group_members",
+    primaryKeys = ["groupId", "uid"]
+)
+data class GroupMemberEntity(
+    val groupId: String,
+    val uid: String,
+    val displayName: String,
+    val cachedAtEpochMillis: Long = System.currentTimeMillis()
+)
+
 @Entity(tableName = "groups")
 data class GroupEntity(
     @PrimaryKey val groupId: String,

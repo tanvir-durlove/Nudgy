@@ -50,14 +50,25 @@ import java.util.concurrent.TimeUnit
  *   tick inserted genuinely new item ids. Updates to already-known items
  *   refresh the lists silently (v1 scope — see dev log). No notification
  *   is posted when nothing new arrived, or on the baseline tick.
- * - Deletes are invisible to the updatedAt query, so at most once per
- *   day per group the worker reconciles: it fetches the group's item ids
- *   (limit 500; the mobile SDKs have no field projection, so these are
- *   full docs — bounded by the limit and the daily cadence) and deletes
- *   local group rows (cancelling their alarms) for ids no longer present.
- *   Creator deletes are rare; daily reconciliation is enough, and the
- *   foreground listener already reports REMOVED in real time while the
- *   app is open.
+ * - Deletes are invisible to the updatedAt query, so the worker
+ *   reconciles against the group's lastDeleteAt signal (minimization):
+ *   it fetches the group's item ids (limit 500; the mobile SDKs have no
+ *   field projection, so these are full docs) and deletes local group
+ *   rows (cancelling their alarms) for ids no longer present — but ONLY
+ *   when lastDeleteAt advanced past what the last reconcile processed.
+ *   Deletes are rare, so this removes ~99% of reconcile reads. A group
+ *   doc without the field (created before gating) falls back to the old
+ *   at-most-daily reconcile. The foreground listener already reports
+ *   REMOVED in real time while the app is open.
+ * - Existence check, at most once per day per group (minimization): the
+ *   app-wide group-doc listener purges on app open, so this check only
+ *   matters while the app is dead. The same doc get carries the
+ *   lastDeleteAt signal, so gating costs no extra read.
+ * - Inactive pause (minimization): when the app has not been opened for
+ *   30 days (INACTIVE_PAUSE_DAYS), the tick is skipped entirely — no
+ *   queries, no lastPoll advance, and the periodic work is never
+ *   cancelled, so the next tick re-checks and the next app open resumes
+ *   polling.
  *
  * This schedule affects ONLY new-item discovery. Reminders for group
  * tasks at their scheduled time fire via the exact-alarm path once the
@@ -85,6 +96,15 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
         }
         val now = System.currentTimeMillis()
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        // Inactive pause (minimization): a user who has not opened the
+        // app in 30 days gets no poll ticks — background reads with $0
+        // revenue. SKIP only, never cancel: the next tick re-checks and
+        // the next app open resumes polling. lastAppOpen == 0 means
+        // "never recorded" (upgrade before this release) — fail open.
+        val lastAppOpen = prefs.getLong(KEY_LAST_APP_OPEN, 0L)
+        if (lastAppOpen > 0L && now - lastAppOpen > INACTIVE_PAUSE_MS) {
+            return Result.success()
+        }
         val lastPoll = prefs.getLong(KEY_LAST_POLL, 0L)
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
         val isNight = hour >= NIGHT_START_HOUR || hour < NIGHT_END_HOUR
@@ -116,12 +136,28 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
         groupId: String,
         now: Long
     ) {
-        // A deleted group must never resurrect: its items query could
-        // still return docs if the creator's cascade is mid-flight, and
-        // the baseline tick would otherwise leave the group row forever.
-        if (!repo.groupDocExists(groupId)) {
-            repo.purgeLocalGroup(uid, groupId)
-            return
+        // Existence check, at most once per day per group (minimization):
+        // the app-wide group-doc listener already purges on app open, so
+        // this only matters while the app is dead. The same doc get also
+        // carries the lastDeleteAt signal for the reconcile gate below,
+        // so gating costs no extra read. A deleted group must never
+        // resurrect: its items query could still return docs if the
+        // creator's cascade is mid-flight, and the baseline tick would
+        // otherwise leave the group row forever.
+        val existenceKey = KEY_LAST_EXISTENCE_CHECK_PREFIX + groupId
+        val deleteAtKey = KEY_LAST_DELETE_AT_PREFIX + groupId
+        var lastDeleteAt = prefs.getLong(deleteAtKey, UNKNOWN_DELETE_AT)
+        if (now - prefs.getLong(existenceKey, 0L) > EXISTENCE_CHECK_INTERVAL_MS) {
+            val (exists, signal) = repo.getGroupDeleteSignal(groupId)
+            if (!exists) {
+                repo.purgeLocalGroup(uid, groupId)
+                return
+            }
+            prefs.edit()
+                .putLong(existenceKey, now)
+                .putLong(deleteAtKey, signal)
+                .apply()
+            lastDeleteAt = signal
         }
         val lastSeenKey = KEY_LAST_SEEN_PREFIX + groupId
         val lastSeen = prefs.getLong(lastSeenKey, 0L)
@@ -146,11 +182,26 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
             val groupName = repo.getGroupById(groupId)?.name ?: "A group"
             postSummaryNotification(context, groupId, groupName, newCount)
         }
+        // Reconcile gating (minimization): the full id fetch runs only
+        // when a delete actually happened — lastDeleteAt advanced past
+        // what the last reconcile processed. Unknown signal (pre-gating
+        // group doc, field absent) keeps the old daily cadence as a safe
+        // fallback instead of never reconciling.
         val reconcileKey = KEY_LAST_RECONCILE_PREFIX + groupId
-        if (now - prefs.getLong(reconcileKey, 0L) > RECONCILE_INTERVAL_MS) {
+        val processedKey = KEY_LAST_PROCESSED_DELETE_AT_PREFIX + groupId
+        val lastProcessed = prefs.getLong(processedKey, 0L)
+        val shouldReconcile = if (lastDeleteAt == UNKNOWN_DELETE_AT) {
+            now - prefs.getLong(reconcileKey, 0L) > RECONCILE_INTERVAL_MS
+        } else {
+            lastDeleteAt > lastProcessed
+        }
+        if (shouldReconcile) {
             val remoteIds = repo.queryGroupItemIds(groupId).toSet()
             repo.reconcileGroupItems(uid, groupId, remoteIds)
-            prefs.edit().putLong(reconcileKey, now).apply()
+            prefs.edit()
+                .putLong(reconcileKey, now)
+                .putLong(processedKey, lastDeleteAt.coerceAtLeast(0L))
+                .apply()
         }
     }
 
@@ -216,6 +267,21 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
         private const val KEY_LAST_POLL = "last_poll_epoch_ms"
         private const val KEY_LAST_SEEN_PREFIX = "last_seen_"
         private const val KEY_LAST_RECONCILE_PREFIX = "last_reconcile_"
+        private const val KEY_LAST_EXISTENCE_CHECK_PREFIX = "last_existence_check_"
+        private const val KEY_LAST_DELETE_AT_PREFIX = "last_delete_at_"
+        private const val KEY_LAST_PROCESSED_DELETE_AT_PREFIX = "last_processed_delete_at_"
+        private const val KEY_LAST_APP_OPEN = "last_app_open_epoch_ms"
+
+        /** Unknown delete signal: field absent (pre-gating group doc) or read failed. */
+        private const val UNKNOWN_DELETE_AT = -1L
+
+        /** Existence check cadence (minimization): at most daily per group. */
+        private const val EXISTENCE_CHECK_INTERVAL_MS = 24L * 60L * 60L * 1000L
+
+        /** Days without an app open after which polling pauses (minimization). */
+        const val INACTIVE_PAUSE_DAYS = 30
+        private const val INACTIVE_PAUSE_MS =
+            INACTIVE_PAUSE_DAYS * 24L * 60L * 60L * 1000L
 
         /** Proposed night window, device-local (plan §3.5 proposal). */
         private const val NIGHT_START_HOUR = 23
@@ -239,6 +305,14 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
             )
         }
 
+        /** Records an app open (call from MainActivity.onResume). Drives
+         * the 30-day inactive poll pause; a fresh timestamp resumes
+         * polling on the next tick. */
+        fun recordAppOpen(context: Context) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putLong(KEY_LAST_APP_OPEN, System.currentTimeMillis()).apply()
+        }
+
         /** Clears one group's poll watermarks (leave/delete/purge path),
          * so a later rejoin gets a fresh baseline tick, not a flood. */
         fun clearGroupState(context: Context, groupId: String) {
@@ -246,6 +320,9 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
             prefs.edit()
                 .remove(KEY_LAST_SEEN_PREFIX + groupId)
                 .remove(KEY_LAST_RECONCILE_PREFIX + groupId)
+                .remove(KEY_LAST_EXISTENCE_CHECK_PREFIX + groupId)
+                .remove(KEY_LAST_DELETE_AT_PREFIX + groupId)
+                .remove(KEY_LAST_PROCESSED_DELETE_AT_PREFIX + groupId)
                 .apply()
         }
 

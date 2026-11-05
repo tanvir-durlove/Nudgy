@@ -204,6 +204,14 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         voiceAssistantManager.destroy()
     }
+
+    override fun onResume() {
+        super.onResume()
+        // Minimization: drives the poll worker's 30-day inactive pause.
+        // Every foregrounding counts as an app open; a fresh timestamp
+        // resumes polling on the next tick.
+        GroupPollWorker.recordAppOpen(this)
+    }
 }
 
 @Composable
@@ -735,8 +743,11 @@ fun NudgyAppScaffold(
                                     }
                                 }
                             },
-                            onLoadMembers = { groupId ->
-                                groupRepository.getGroupMembers(groupId)
+                            onObserveMembers = { groupId ->
+                                groupRepository.observeGroupMembers(groupId)
+                            },
+                            onRefreshMembers = { groupId ->
+                                groupRepository.refreshGroupMembers(groupId)
                             },
                             onToggleTask = { task ->
                                 scope.launch {

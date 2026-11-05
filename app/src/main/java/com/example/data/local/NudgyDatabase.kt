@@ -11,12 +11,14 @@ import com.example.data.local.dao.CalendarDao
 import com.example.data.local.dao.ChatDao
 import com.example.data.local.dao.DailyBriefDao
 import com.example.data.local.dao.GroupDao
+import com.example.data.local.dao.GroupMemberDao
 import com.example.data.local.dao.MemoryDao
 import com.example.data.local.dao.TaskDao
 import com.example.data.local.entity.CalendarEventEntity
 import com.example.data.local.entity.ChatMessageEntity
 import com.example.data.local.entity.DailyBriefEntity
 import com.example.data.local.entity.GroupEntity
+import com.example.data.local.entity.GroupMemberEntity
 import com.example.data.local.entity.NudgyMemoryEntity
 import com.example.data.local.entity.TaskEntity
 
@@ -66,6 +68,23 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
     }
 }
 
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Member-list cache (minimization): group_members holds the last
+        // fetched member list per group; detail opens read it instantly
+        // and refresh in the background.
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `group_members` (
+                `groupId` TEXT NOT NULL,
+                `uid` TEXT NOT NULL,
+                `displayName` TEXT NOT NULL,
+                `cachedAtEpochMillis` INTEGER NOT NULL,
+                PRIMARY KEY(`groupId`, `uid`)
+            )
+        """.trimIndent())
+    }
+}
+
 @Database(
     entities = [
         TaskEntity::class,
@@ -73,9 +92,10 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
         NudgyMemoryEntity::class,
         DailyBriefEntity::class,
         ChatMessageEntity::class,
-        GroupEntity::class
+        GroupEntity::class,
+        GroupMemberEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -86,6 +106,7 @@ abstract class NudgyDatabase : RoomDatabase() {
     abstract fun dailyBriefDao(): DailyBriefDao
     abstract fun chatDao(): ChatDao
     abstract fun groupDao(): GroupDao
+    abstract fun groupMemberDao(): GroupMemberDao
 
     companion object {
         @Volatile
@@ -98,13 +119,14 @@ abstract class NudgyDatabase : RoomDatabase() {
                     NudgyDatabase::class.java,
                     "nudgy_local_db"
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     // Public-launch policy (revisited from the pre-launch
                     // note): destructive fallback is RETIRED from v5.
                     // Every distributed install is v4 (1.0.2 was the first
-                    // Play closed-test release), so MIGRATION_4_5 covers
-                    // every real install. A missing migration now fails
-                    // loudly instead of silently wiping user data.
+                    // Play closed-test release), so MIGRATION_4_5 and
+                    // MIGRATION_5_6 cover every real install (4 -> 5 -> 6).
+                    // A missing migration now fails loudly instead of
+                    // silently wiping user data.
                     .build()
                 INSTANCE = instance
                 instance
