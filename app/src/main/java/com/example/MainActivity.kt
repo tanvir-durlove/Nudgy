@@ -335,7 +335,9 @@ fun NudgyMainFlow(
             onPendingJoinCodeConsumed = {
                 stashedJoinCode = null
                 onDeepLinkCodeConsumed()
-            }
+            },
+            themeMode = themeMode,
+            onThemeModeChange = onThemeModeChange
         )
     }
 }
@@ -357,7 +359,9 @@ fun NudgyAppScaffold(
     remoteConfig: NudgyRemoteConfig,
     initialDestination: NudgyNavDestination = NudgyNavDestination.HOME,
     pendingJoinCode: String? = null,
-    onPendingJoinCodeConsumed: () -> Unit = {}
+    onPendingJoinCodeConsumed: () -> Unit = {},
+    themeMode: String = "system",
+    onThemeModeChange: (String) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
