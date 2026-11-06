@@ -62,6 +62,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.example.ads.ChatCapState
 import com.example.auth.NudgyUser
 import com.example.data.local.entity.CalendarEventEntity
 import com.example.data.local.entity.TaskEntity
@@ -116,6 +117,11 @@ fun ChatScreen(
     onStopVoice: () -> Unit,
     onTaskClick: (TaskEntity) -> Unit = {},
     onBlockFocusTime: (Long, Long, String, String) -> Unit = { _, _, _, _ -> },
+    // Ads: rewarded entry — non-null only when the free daily chat cap is
+    // hit. The button grants +1 AI turn only after a completed ad view.
+    chatCapState: ChatCapState? = null,
+    rewardedAdReady: Boolean = false,
+    onWatchRewardedAd: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -595,6 +601,69 @@ fun ChatScreen(
 
                 item {
                     Spacer(modifier = Modifier.height(12.dp))
+                }
+            }
+
+            // Ads: rewarded entry — shown ONLY when the free daily chat cap
+            // is hit. The reward (+1 AI turn) is granted only after a
+            // completed ad view; a closed or skipped ad grants nothing.
+            // Local (preFilter) commands still work while capped.
+            if (chatCapState?.isCapped == true) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = NudgyCard,
+                    border = androidx.compose.foundation.BorderStroke(1.2.dp, NudgyCardBorder),
+                    shadowElevation = 2.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "You've used today's free AI turns",
+                            color = NudgyCharcoal,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = if (chatCapState.canEarnMoreRewarded) {
+                                "Watch a short ad to get +1 AI turn " +
+                                    "(${chatCapState.rewardedTurnsGrantedToday} of " +
+                                    "${chatCapState.maxRewardedTurnsPerDay} rewarded turns used today)"
+                            } else {
+                                "You've used all ${chatCapState.maxRewardedTurnsPerDay} " +
+                                    "rewarded turns for today — come back tomorrow."
+                            },
+                            color = NudgyMuted,
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = onWatchRewardedAd,
+                            enabled = chatCapState.canEarnMoreRewarded && rewardedAdReady,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = NudgyAccent,
+                                contentColor = Color.White,
+                                disabledContainerColor = NudgyMuted,
+                                disabledContentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(100.dp)
+                        ) {
+                            Text(
+                                text = if (rewardedAdReady) "Watch ad for +1 turn" else "Loading ad…",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
             }
 
