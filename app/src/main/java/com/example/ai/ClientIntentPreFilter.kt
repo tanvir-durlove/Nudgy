@@ -97,7 +97,7 @@ class ClientIntentPreFilter(
                 dueEpochMillis = cal.timeInMillis,
                 priority = Priority.HIGH,
                 category = TaskCategory.WORK,
-                reminderSet = true
+                reminderSet = true,
                 reminderEpochMillis = cal.timeInMillis
             )
             // Label from the ACTUAL date: parseTimeIntoCalendar may have
@@ -282,7 +282,7 @@ class ClientIntentPreFilter(
                 dueEpochMillis = cal.timeInMillis,
                 priority = Priority.MEDIUM,
                 category = TaskCategory.PERSONAL,
-                reminderSet = true
+                reminderSet = true,
                 reminderEpochMillis = cal.timeInMillis
             )
             return PreFilterResult.Handled(
@@ -545,7 +545,7 @@ class ClientIntentPreFilter(
                 category = if (lower.contains("work") || lower.contains("launch") || lower.contains("project") || lower.contains("client")) TaskCategory.WORK
                 else if (lower.contains("study") || lower.contains("class") || lower.contains("book")) TaskCategory.STUDY
                 else TaskCategory.PERSONAL,
-                reminderSet = true
+                reminderSet = true,
                 reminderEpochMillis = if (isExplicitReminder) cal.timeInMillis else null
             )
 
