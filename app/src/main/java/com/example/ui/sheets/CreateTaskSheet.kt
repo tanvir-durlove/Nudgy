@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -139,6 +140,7 @@ fun CreateTaskSheet(
             modifier = modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
+                .imePadding()
                 .padding(24.dp)
         ) {
             // Header
@@ -320,7 +322,7 @@ fun CreateTaskSheet(
                         },
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontWeight = FontWeight.Bold,
-                            color = NudgyPrimary
+                            color = NudgyAccent
                         )
                     )
                 }
@@ -442,7 +444,7 @@ fun CreateTaskSheet(
                         text = "Custom Time: ${formatCustomTime(customHour, customMinute)}",
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontWeight = FontWeight.Bold,
-                            color = NudgyPrimary
+                            color = NudgyAccent
                         )
                     )
                 }
@@ -537,8 +539,8 @@ fun CreateTaskSheet(
                 Priority.values().forEach { p ->
                     val isSelected = p == priority
                     val pColor = when (p) {
-                        Priority.HIGH -> Color(0xFFE85542)
-                        Priority.MEDIUM -> Color(0xFFE67E22)
+                        Priority.HIGH -> Color(0xFFCC3F27)
+                        Priority.MEDIUM -> Color(0xFFB45309)
                         Priority.LOW -> Color(0xFF2E7D32)
                     }
                     Box(

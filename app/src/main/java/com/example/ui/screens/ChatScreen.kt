@@ -67,6 +67,7 @@ import com.example.data.local.entity.CalendarEventEntity
 import com.example.data.local.entity.TaskEntity
 import com.example.ui.components.MascotMood
 import com.example.ui.components.NudgyMascot
+import com.example.ui.theme.NudgyAccent
 import com.example.ui.theme.NudgyCard
 import com.example.ui.theme.NudgyButter
 import com.example.ui.theme.NudgyCardBorder
@@ -198,7 +199,7 @@ fun ChatScreen(
                         Text(
                             text = "YOUR PRODUCTIVITY PARTNER",
                             style = MaterialTheme.typography.labelSmall,
-                            color = NudgyPrimary
+                            color = NudgyAccent
                         )
 
                         Spacer(modifier = Modifier.height(6.dp))

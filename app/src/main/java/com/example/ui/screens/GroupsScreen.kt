@@ -76,6 +76,7 @@ import com.example.ui.sheets.EditTaskSheet
 import com.example.ui.sheets.GroupScheduleSheet
 import com.example.ui.sheets.GroupTaskDetailSheet
 import com.example.ui.sheets.JoinGroupSheet
+import com.example.ui.theme.NudgyAccent
 import com.example.ui.theme.NudgyAvatarPalettes
 import com.example.ui.theme.NudgyBorder
 import com.example.ui.theme.NudgyCanvas
@@ -268,7 +269,7 @@ fun GroupsScreen(
                             fontSize = 11.sp, fontWeight = FontWeight.Bold,
                             letterSpacing = 1.sp
                         ),
-                        color = NudgyPrimary
+                        color = NudgyAccent
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
@@ -323,7 +324,7 @@ fun GroupsScreen(
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold, fontSize = 14.sp
                                 ),
-                                color = NudgyPrimary
+                                color = NudgyAccent
                             )
                         }
                     }
@@ -348,7 +349,7 @@ fun GroupsScreen(
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontSize = 12.sp, fontWeight = FontWeight.SemiBold
                         ),
-                        color = NudgyPrimary
+                        color = NudgyAccent
                     )
                 }
             }
@@ -448,7 +449,7 @@ fun GroupsScreen(
                                         style = MaterialTheme.typography.bodyMedium.copy(
                                             fontSize = 12.sp, fontWeight = FontWeight.SemiBold
                                         ),
-                                        color = NudgyPrimary
+                                        color = NudgyAccent
                                     )
                                     IconButton(
                                         onClick = { copyCode(item.code) },
@@ -562,7 +563,7 @@ fun GroupsScreen(
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold, letterSpacing = 1.sp
                             ),
-                            color = NudgyPrimary
+                            color = NudgyAccent
                         )
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -582,7 +583,7 @@ fun GroupsScreen(
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontSize = 13.sp, fontWeight = FontWeight.SemiBold
                             ),
-                            color = NudgyPrimary,
+                            color = NudgyAccent,
                             modifier = Modifier.clickable { copyCode(group.code) }
                         )
                         IconButton(
@@ -685,7 +686,7 @@ fun GroupsScreen(
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold, fontSize = 14.sp
                             ),
-                            color = NudgyPrimary
+                            color = NudgyAccent
                         )
                     }
                 }
@@ -769,7 +770,7 @@ fun GroupsScreen(
                                     fontSize = 11.sp, fontWeight = FontWeight.Bold,
                                     letterSpacing = 1.sp
                                 ),
-                                color = NudgyPrimary
+                                color = NudgyAccent
                             )
                             Text(
                                 text = "Tasks",

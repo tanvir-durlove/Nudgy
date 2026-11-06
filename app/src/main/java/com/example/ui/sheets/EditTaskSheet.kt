@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -62,10 +63,12 @@ import androidx.compose.ui.unit.sp
 import com.example.data.local.entity.TaskEntity
 import com.example.data.model.Priority
 import com.example.data.model.TaskCategory
+import com.example.ui.theme.NudgyAccent
 import com.example.ui.theme.NudgyCard
 import com.example.ui.theme.NudgyCardBorder
 import com.example.ui.theme.NudgyCharcoal
 import com.example.ui.theme.NudgyChipBackground
+import com.example.ui.theme.NudgyFieldBorder
 import com.example.ui.theme.NudgyMuted
 import com.example.ui.theme.NudgyPrimary
 import com.example.ui.theme.NudgyPrimaryDark
@@ -103,12 +106,12 @@ fun EditTaskSheet(
         sheetState = sheetState,
         containerColor = NudgyCard,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        dragHandle = null
     ) {
         Column(
             modifier = modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
+                .imePadding()
                 .padding(24.dp)
         ) {
             // Header with status indicator and Close/Delete
@@ -169,7 +172,7 @@ fun EditTaskSheet(
                 shape = RoundedCornerShape(16.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = NudgyPrimary,
-                    unfocusedBorderColor = NudgyCardBorder
+                    unfocusedBorderColor = NudgyFieldBorder
                 )
             )
 
@@ -185,7 +188,7 @@ fun EditTaskSheet(
                 shape = RoundedCornerShape(16.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = NudgyPrimary,
-                    unfocusedBorderColor = NudgyCardBorder
+                    unfocusedBorderColor = NudgyFieldBorder
                 ),
                 maxLines = 4
             )
@@ -198,7 +201,7 @@ fun EditTaskSheet(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
                     .background(NudgyChipBackground)
-                    .border(1.dp, NudgyCardBorder, RoundedCornerShape(14.dp))
+                    .border(1.dp, NudgyFieldBorder, RoundedCornerShape(14.dp))
                     .clickable { showM3DatePicker = true }
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -228,7 +231,7 @@ fun EditTaskSheet(
                 Text(
                     text = "Change",
                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = NudgyPrimary
+                    color = NudgyAccent
                 )
             }
 
@@ -334,8 +337,8 @@ fun EditTaskSheet(
                 Priority.values().forEach { p ->
                     val isSelected = p == priority
                     val pColor = when (p) {
-                        Priority.HIGH -> Color(0xFFE85542)
-                        Priority.MEDIUM -> Color(0xFFE67E22)
+                        Priority.HIGH -> Color(0xFFCC3F27)
+                        Priority.MEDIUM -> Color(0xFFB45309)
                         Priority.LOW -> Color(0xFF2E7D32)
                     }
                     Box(
@@ -401,7 +404,7 @@ fun EditTaskSheet(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
                     .background(NudgyCard)
-                    .border(1.dp, NudgyCardBorder, RoundedCornerShape(16.dp))
+                    .border(1.dp, NudgyFieldBorder, RoundedCornerShape(16.dp))
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween

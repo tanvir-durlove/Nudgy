@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,6 +38,7 @@ import com.example.data.local.entity.GroupEntity
 import com.example.data.repository.GroupResult
 import com.example.ui.theme.NudgyCard
 import com.example.ui.theme.NudgyCharcoal
+import com.example.ui.theme.NudgyFieldBorder
 import com.example.ui.theme.NudgyMuted
 import com.example.ui.theme.NudgyPeach
 import com.example.ui.theme.NudgyPrimary
@@ -66,12 +68,12 @@ fun CreateGroupSheet(
         shape = androidx.compose.foundation.shape.RoundedCornerShape(
             topStart = 28.dp, topEnd = 28.dp
         ),
-        dragHandle = null
     ) {
         Column(
             modifier = modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp, vertical = 24.dp)
+                .imePadding()
         ) {
             Box(
                 contentAlignment = Alignment.Center,
@@ -109,7 +111,7 @@ fun CreateGroupSheet(
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = NudgyPrimary,
-                    unfocusedBorderColor = NudgyMuted.copy(alpha = 0.4f)
+                    unfocusedBorderColor = NudgyFieldBorder
                 ),
                 modifier = Modifier.fillMaxWidth()
             )

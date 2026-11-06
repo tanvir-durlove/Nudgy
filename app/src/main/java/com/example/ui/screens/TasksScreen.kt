@@ -46,6 +46,7 @@ import com.example.ui.components.NudgyCheckbox
 import com.example.ui.components.NudgyInsightCard
 import com.example.ui.components.NudgyPillTabs
 import com.example.ui.components.NudgyProgressBar
+import com.example.ui.theme.NudgyAccent
 import com.example.ui.theme.NudgyCard
 import com.example.ui.theme.NudgyCardBorder
 import com.example.ui.theme.NudgyCharcoal
@@ -99,7 +100,7 @@ fun TasksScreen(
                     Text(
                         text = "STAY ON TRACK",
                         style = MaterialTheme.typography.labelSmall,
-                        color = NudgyPrimary
+                        color = NudgyAccent
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
@@ -255,7 +256,7 @@ fun TasksScreen(
                                 Text(
                                     text = "View Upcoming (${upcomingTasks.size})",
                                     fontSize = 12.sp,
-                                    color = NudgyPrimary,
+                                    color = NudgyAccent,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
@@ -338,7 +339,7 @@ fun TasksScreen(
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold
                                         ),
-                                        color = NudgyPrimary
+                                        color = NudgyAccent
                                     )
                                 }
                             }

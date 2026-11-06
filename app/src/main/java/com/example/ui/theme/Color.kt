@@ -115,9 +115,11 @@ val NudgyChipBackground: Color @Composable get() = LocalNudgyPalette.current.chi
 
 // Small-text accent (links like Change/Pick/Tap to pick). Light = primary;
 // dark = light coral so small accent text still passes contrast on dark surfaces.
-// NOTE: primary-colored small text on screens not yet touched by this pass still
-// uses NudgyPrimary (~3:1 in dark) — switch those sites to NudgyAccent when
-// those screens are themed.
+// NOTE: primary-colored small text now uses NudgyAccent everywhere it was found
+// (UX/UI pass: Calendar/Chat/Groups/Home/Tasks screens, create/edit sheets,
+// group detail, profile sheet, reminder bubble). NudgyPrimary (~3:1 in dark)
+// remains only for icon tints, borders, and selected-chip/button backgrounds
+// (white text on those passes at 4.87:1).
 val NudgyAccent: Color @Composable get() = LocalNudgyPalette.current.accent
 
 // Groups UI tokens (Figma redesign; Groups screens only for now).
