@@ -30,6 +30,28 @@ service cloud.firestore {
              data.content.size() > 0;
     }
 
+    function isValidLlmUsage(newData) {
+      // Central Gemini key: per-user daily LLM usage counter.
+      // Exactly one bucket increments by exactly 1 per Gemini turn;
+      // the other bucket is unchanged. Hard caps (freeUsed <= 5,
+      // bonusUsed <= 3) must match the Remote Config keys
+      // chat_free_turns_per_day and ad_rewarded_max_turns_per_day.
+      // `resource` is null on create (both buckets start at 0).
+      return newData.keys().hasOnly(['freeUsed', 'bonusUsed', 'updatedAt'])
+          && newData.freeUsed is int && newData.freeUsed >= 0 && newData.freeUsed <= 5
+          && newData.bonusUsed is int && newData.bonusUsed >= 0 && newData.bonusUsed <= 3
+          && newData.updatedAt is timestamp
+          && (
+            (resource == null && newData.freeUsed + newData.bonusUsed == 1)
+            || (resource != null
+              && resource.data.freeUsed is int && resource.data.bonusUsed is int
+              && newData.freeUsed >= resource.data.freeUsed
+              && newData.bonusUsed >= resource.data.bonusUsed
+              && (newData.freeUsed - resource.data.freeUsed)
+                  + (newData.bonusUsed - resource.data.bonusUsed) == 1)
+          );
+    }
+
     function isValidEvent(data) {
       return data.userId == request.auth.uid &&
              data.title is string &&
@@ -54,6 +76,15 @@ service cloud.firestore {
       match /events/{eventId} {
         allow read, delete: if isOwner(userId);
         allow create, update: if isOwner(userId) && isValidEvent(request.resource.data);
+      }
+
+      // Central Gemini key: per-user daily LLM usage counter
+      // (users/{uid}/llmUsage/{yyyy-MM-dd}). Only the owning uid may
+      // read or write it; deletes are never allowed.
+      match /llmUsage/{date} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidLlmUsage(request.resource.data);
+        allow delete: if false;
       }
     }
   }
