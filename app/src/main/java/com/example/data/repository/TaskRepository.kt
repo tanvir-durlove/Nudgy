@@ -7,6 +7,7 @@ import com.example.data.local.NudgyDatabase
 import com.example.data.local.entity.TaskEntity
 import com.example.data.model.Priority
 import com.example.data.model.TaskCategory
+import com.example.reminders.ReminderManager
 import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -80,7 +81,10 @@ class TaskRepository(
         priority: Priority = Priority.MEDIUM,
         category: TaskCategory = TaskCategory.WORK,
         reminderSet: Boolean = false,
-        recurrenceRule: String? = null
+        recurrenceRule: String? = null,
+        // An explicit reminder time ("remind me at 3 PM"). Null = the
+        // 2h-before-due lead (ReminderManager.dueReminderTriggerMillis).
+        reminderEpochMillis: Long? = null
     ): TaskEntity = withContext(Dispatchers.IO) {
         val task = TaskEntity(
             id = UUID.randomUUID().toString(),
@@ -92,6 +96,11 @@ class TaskRepository(
             category = category,
             isCompleted = false,
             reminderSet = reminderSet,
+            reminderEpochMillis = if (reminderSet) {
+                reminderEpochMillis ?: ReminderManager.dueReminderTriggerMillis(null, dueEpochMillis)
+            } else {
+                null
+            },
             recurrenceRule = recurrenceRule,
             isSyncedToCloud = false,
             createdAtEpochMillis = System.currentTimeMillis(),
@@ -134,7 +143,7 @@ class TaskRepository(
         if (newStatus) {
             reminderManager.cancelReminder(task.id)
         } else if (task.reminderSet) {
-            val trigger = task.reminderEpochMillis ?: task.dueDateEpochMillis
+            val trigger = ReminderManager.dueReminderTriggerMillis(task.reminderEpochMillis, task.dueDateEpochMillis)
             if (trigger > System.currentTimeMillis()) {
                 reminderManager.scheduleReminder(task.id, task.title, trigger)
             }
@@ -153,22 +162,39 @@ class TaskRepository(
         // to the shared group item). This path is a defensive local-only update
         // that must NOT dirty-mark the row — a dirty group row would be
         // uploaded as a personal cloud copy by syncDirtyTasksToCloud.
+        //
+        // Keep the stored reminder time in sync with the (possibly new) due
+        // time. An explicitly passed reminder time is respected; otherwise
+        // the 2h-before-due lead is recomputed from the due time. A stored
+        // reminder equal to the OLD due time means "remind me at due" (an
+        // explicit reminder request), so it moves with the due time.
+        val existing = taskDao.getTaskById(task.id)
+        val passedReminderChanged = task.reminderEpochMillis != existing?.reminderEpochMillis
+        val explicitAtDue = existing != null &&
+            existing.reminderEpochMillis != null &&
+            existing.reminderEpochMillis == existing.dueDateEpochMillis
+        val resolvedReminder: Long? = when {
+            !task.reminderSet || task.isCompleted -> null
+            passedReminderChanged -> task.reminderEpochMillis
+            explicitAtDue -> task.dueDateEpochMillis
+            else -> ReminderManager.dueReminderTriggerMillis(null, task.dueDateEpochMillis)
+        }
+        val resolved = task.copy(reminderEpochMillis = resolvedReminder)
         if (task.groupId != null) {
             taskDao.updateTask(
-                task.copy(updatedAtEpochMillis = System.currentTimeMillis())
+                resolved.copy(updatedAtEpochMillis = System.currentTimeMillis())
             )
         } else {
             taskDao.updateTask(
-                task.copy(
+                resolved.copy(
                     updatedAtEpochMillis = System.currentTimeMillis(),
                     isSyncedToCloud = false
                 )
             )
         }
-        if (task.reminderSet && !task.isCompleted) {
-            val trigger = task.reminderEpochMillis ?: task.dueDateEpochMillis
-            if (trigger > System.currentTimeMillis()) {
-                reminderManager.scheduleReminder(task.id, task.title, trigger)
+        if (resolvedReminder != null) {
+            if (resolvedReminder > System.currentTimeMillis()) {
+                reminderManager.scheduleReminder(task.id, task.title, resolvedReminder)
             } else {
                 reminderManager.cancelReminder(task.id)
             }
