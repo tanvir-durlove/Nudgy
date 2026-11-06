@@ -7,6 +7,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -34,6 +35,7 @@ import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -88,6 +90,16 @@ import java.util.UUID
 // (App Links); consumed right after sign-in, then cleared.
 private const val KEY_PENDING_GROUP_CODE = "pending_group_code"
 
+// Splash screen: longest it may stay up while the Remote Config fetch
+// (started in Application.onCreate) is still in flight, and the shortest
+// it is shown at all — without a minimum the splash is invisible when the
+// fetch completes from cache before the first frame. The splash hides as
+// soon as the fetch completes AND the minimum has passed, OR the timeout
+// elapses, whichever comes first — the launch is never held hostage to
+// the network.
+private const val SPLASH_MIN_SHOW_MS = 1200L
+private const val SPLASH_MAX_WAIT_MS = 1500L
+
 class MainActivity : ComponentActivity() {
     private lateinit var authManager: AuthManager
     private lateinit var taskRepository: TaskRepository
@@ -104,6 +116,15 @@ class MainActivity : ComponentActivity() {
     private val deepLinkJoinCodeFlow = MutableStateFlow<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Splash screen: install BEFORE super.onCreate (required). It stays
+        // up for at least SPLASH_MIN_SHOW_MS (measured from install, so it
+        // is actually visible even when the fetch completes from cache
+        // before the first frame) and at most SPLASH_MAX_WAIT_MS while the
+        // Remote Config fetch is in flight; ads preload with test-ID
+        // defaults in the meantime and swap to the fetched ID when it
+        // arrives (see NudgyAds / the guarded LaunchedEffect below).
+        val splashScreen = installSplashScreen()
+        val splashStartMs = SystemClock.elapsedRealtime()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
@@ -115,7 +136,14 @@ class MainActivity : ComponentActivity() {
         chatRepository = ChatRepository(this)
         reminderManager = ReminderManager(this)
         analytics = NudgyAnalytics(this)
-        remoteConfig = NudgyRemoteConfig()
+        // Remote Config lives in the Application (fetch started in
+        // Application.onCreate); use that single shared instance.
+        remoteConfig = (application as NudgyApplication).remoteConfig
+        splashScreen.setKeepOnScreenCondition {
+            val elapsed = SystemClock.elapsedRealtime() - splashStartMs
+            elapsed < SPLASH_MIN_SHOW_MS ||
+                (!remoteConfig.fetchCompleted.value && elapsed < SPLASH_MAX_WAIT_MS)
+        }
 
         // Ads: consent (UMP) + Mobile Ads SDK. Ads themselves stay OFF
         // until Remote Config ads_enabled is flipped on.
@@ -461,6 +489,19 @@ fun NudgyAppScaffold(
     // switch come from Remote Config; ads_enabled defaults to OFF, so
     // nothing shows until it is deliberately enabled in the console).
     val remoteValues by remoteConfig.configState.collectAsStateWithLifecycle()
+    // Ads: the interstitial unit ID comes from Remote Config. When the
+    // fetched ID changes, reload the preloaded ad with the new ID — once
+    // per ID, never on every recomposition. Starts at the test fallback,
+    // so the initial (default) value is a no-op; the preload stays owned
+    // by NudgyAds.initialize until a real ID arrives.
+    var appliedInterstitialUnitId by remember { mutableStateOf(NudgyAds.TEST_INTERSTITIAL_UNIT_ID) }
+    LaunchedEffect(remoteValues.adInterstitialUnitId) {
+        val fetchedId = remoteValues.adInterstitialUnitId
+        if (appliedInterstitialUnitId != fetchedId) {
+            appliedInterstitialUnitId = fetchedId
+            NudgyAds.loadInterstitial(context, fetchedId)
+        }
+    }
     val adsPrefs = remember { context.getSharedPreferences("nudgy_ads", android.content.Context.MODE_PRIVATE) }
     var lastCompletedCount by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(dailyStats.completed) {

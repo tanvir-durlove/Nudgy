@@ -1,5 +1,6 @@
 package com.example.analytics
 
+import android.os.SystemClock
 import android.util.Log
 import com.google.firebase.Firebase
 import com.google.firebase.remoteconfig.FirebaseRemoteConfig
@@ -12,6 +13,9 @@ import kotlinx.coroutines.flow.asStateFlow
 data class RemoteConfigValues(
     val adsEnabled: Boolean = false,
     val adFrequencyTasks: Long = 5L,
+    val adInterstitialUnitId: String = "ca-app-pub-3940256099942544/1033173712",
+    val adBannerUnitId: String = "ca-app-pub-3940256099942544/6300978111",
+    val adRewardedUnitId: String = "ca-app-pub-3940256099942544/5224354917",
     val promoCardEnabled: Boolean = true,
     val promoHeadline: String = "Invite friends to Nudgy",
     val promoSubtitle: String = "Share daily rhythms & achieve streaks together.",
@@ -30,6 +34,18 @@ class NudgyRemoteConfig {
     private val _configState = MutableStateFlow(RemoteConfigValues())
     val configState: StateFlow<RemoteConfigValues> = _configState.asStateFlow()
 
+    // Splash: true once the first fetchAndActivate completes — success or
+    // failure. MainActivity keeps the splash screen up only until this is
+    // true or the splash timeout elapses, whichever comes first. A failed
+    // fetch must never hold the launch hostage: defaults/cached values
+    // apply instead.
+    private val _fetchCompleted = MutableStateFlow(false)
+    val fetchCompleted: StateFlow<Boolean> = _fetchCompleted.asStateFlow()
+
+    // Elapsed-realtime clock at fetch start (Application.onCreate), so the
+    // splash timeout is measured from app start, not from Activity creation.
+    val fetchStartElapsedRealtime: Long = SystemClock.elapsedRealtime()
+
     init {
         // If Firebase is unavailable (no google-services.json), keep the default values.
         remoteConfig?.let { rc ->
@@ -42,6 +58,9 @@ class NudgyRemoteConfig {
                 val defaults = mapOf<String, Any>(
                     KEY_ADS_ENABLED to false,
                     KEY_AD_FREQUENCY to 5L,
+                    KEY_AD_INTERSTITIAL_UNIT_ID to "ca-app-pub-3940256099942544/1033173712",
+                    KEY_AD_BANNER_UNIT_ID to "ca-app-pub-3940256099942544/6300978111",
+                    KEY_AD_REWARDED_UNIT_ID to "ca-app-pub-3940256099942544/5224354917",
                     KEY_PROMO_CARD_ENABLED to true,
                     KEY_PROMO_HEADLINE to "Invite friends to Nudgy",
                     KEY_PROMO_SUBTITLE to "Share daily rhythms & achieve streaks together.",
@@ -59,16 +78,26 @@ class NudgyRemoteConfig {
                         _configState.value = RemoteConfigValues(
                             adsEnabled = rc.getBoolean(KEY_ADS_ENABLED),
                             adFrequencyTasks = rc.getLong(KEY_AD_FREQUENCY),
+                            adInterstitialUnitId = rc.getString(KEY_AD_INTERSTITIAL_UNIT_ID).ifEmpty { "ca-app-pub-3940256099942544/1033173712" },
+                            adBannerUnitId = rc.getString(KEY_AD_BANNER_UNIT_ID).ifEmpty { "ca-app-pub-3940256099942544/6300978111" },
+                            adRewardedUnitId = rc.getString(KEY_AD_REWARDED_UNIT_ID).ifEmpty { "ca-app-pub-3940256099942544/5224354917" },
                             promoCardEnabled = rc.getBoolean(KEY_PROMO_CARD_ENABLED),
                             promoHeadline = rc.getString(KEY_PROMO_HEADLINE).ifEmpty { "Invite friends to Nudgy" },
                             promoSubtitle = rc.getString(KEY_PROMO_SUBTITLE).ifEmpty { "Share daily rhythms & achieve streaks together." },
                             geminiModelVersion = sanitizedModel
                         )
                     }
+                    // Success or failure: the fetch is done either way.
+                    _fetchCompleted.value = true
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Remote Config initialization warning: ${e.message}")
+                _fetchCompleted.value = true
             }
+        } ?: run {
+            // No Firebase (e.g. CI builds without google-services.json):
+            // there is no fetch to wait for.
+            _fetchCompleted.value = true
         }
     }
 
@@ -76,6 +105,9 @@ class NudgyRemoteConfig {
         private const val TAG = "NudgyRemoteConfig"
         const val KEY_ADS_ENABLED = "ads_enabled"
         const val KEY_AD_FREQUENCY = "ad_interstitial_task_frequency"
+        const val KEY_AD_INTERSTITIAL_UNIT_ID = "ad_interstitial_unit_id"
+        const val KEY_AD_BANNER_UNIT_ID = "ad_banner_unit_id"
+        const val KEY_AD_REWARDED_UNIT_ID = "ad_rewarded_unit_id"
         const val KEY_PROMO_CARD_ENABLED = "promo_card_enabled"
         const val KEY_PROMO_HEADLINE = "promo_card_headline"
         const val KEY_PROMO_SUBTITLE = "promo_card_subtitle"
