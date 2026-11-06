@@ -553,6 +553,7 @@ fun NudgyAppScaffold(
         refreshChatCapState()
     }
     val rewardedReady by NudgyAds.rewardedReady.collectAsStateWithLifecycle()
+    val rewardedLoadError by NudgyAds.rewardedLoadError.collectAsStateWithLifecycle()
     // Ads: rewarded entry in Chat. The +1 turn is banked ONLY when the ad
     // reports the reward (completed viewing); a closed or skipped ad
     // grants nothing. The granted turn does not resend the pending
@@ -581,6 +582,12 @@ fun NudgyAppScaffold(
                 Toast.LENGTH_SHORT
             ).show()
         }
+    }
+
+    // Ads: retry a failed rewarded load. The Chat button stays tappable
+    // while a load error is present, so a failed load never strands it.
+    fun retryRewardedAdLoad() {
+        NudgyAds.loadRewarded(context, remoteValues.adRewardedUnitId)
     }
     val adsPrefs = remember { context.getSharedPreferences("nudgy_ads", android.content.Context.MODE_PRIVATE) }
     var lastCompletedCount by remember { mutableStateOf<Int?>(null) }
@@ -678,7 +685,7 @@ fun NudgyAppScaffold(
                                     ChatMessage(
                                         id = UUID.randomUUID().toString(),
                                         senderIsUser = false,
-                                        text = "You've used your free AI turns for today. Watch a short ad to get +1 more turn."
+                                        text = "That's all 5 free answers for today. Watch one short ad and I'll answer 1 more question."
                                     )
                                 )
                             }
@@ -816,7 +823,9 @@ fun NudgyAppScaffold(
                             },
                             chatCapState = chatCapState,
                             rewardedAdReady = rewardedReady,
-                            onWatchRewardedAd = { watchRewardedAdForChatTurn() }
+                            onWatchRewardedAd = { watchRewardedAdForChatTurn() },
+                            rewardedLoadError = rewardedLoadError,
+                            onRetryRewardedAd = { retryRewardedAdLoad() }
                         )
                     }
 
@@ -908,7 +917,8 @@ fun NudgyAppScaffold(
                                 }
                             },
                             prefillJoinCode = groupJoinPrefill,
-                            onPrefillJoinCodeConsumed = { groupJoinPrefill = null }
+                            onPrefillJoinCodeConsumed = { groupJoinPrefill = null },
+                            onSignInClick = { showProfileSheet = true }
                         )
                     }
 
