@@ -461,6 +461,19 @@ fun NudgyAppScaffold(
     // switch come from Remote Config; ads_enabled defaults to OFF, so
     // nothing shows until it is deliberately enabled in the console).
     val remoteValues by remoteConfig.configState.collectAsStateWithLifecycle()
+    // Ads: the interstitial unit ID comes from Remote Config. When the
+    // fetched ID changes, reload the preloaded ad with the new ID — once
+    // per ID, never on every recomposition. Starts at the test fallback,
+    // so the initial (default) value is a no-op; the preload stays owned
+    // by NudgyAds.initialize until a real ID arrives.
+    var appliedInterstitialUnitId by remember { mutableStateOf(NudgyAds.TEST_INTERSTITIAL_UNIT_ID) }
+    LaunchedEffect(remoteValues.adInterstitialUnitId) {
+        val fetchedId = remoteValues.adInterstitialUnitId
+        if (appliedInterstitialUnitId != fetchedId) {
+            appliedInterstitialUnitId = fetchedId
+            NudgyAds.loadInterstitial(context, fetchedId)
+        }
+    }
     val adsPrefs = remember { context.getSharedPreferences("nudgy_ads", android.content.Context.MODE_PRIVATE) }
     var lastCompletedCount by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(dailyStats.completed) {

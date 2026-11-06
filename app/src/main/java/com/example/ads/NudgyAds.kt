@@ -24,13 +24,20 @@ import com.google.android.ump.UserMessagingPlatform
  * Config (ads_enabled, default OFF, and the task-completion frequency), so
  * this object never shows anything on its own.
  *
- * The ad unit below is Google's public TEST interstitial. Replace it with
- * the real AdMob unit id before ads are switched on in production — test
- * units are safe to load and click during development.
+ * The interstitial unit ID comes from Remote Config
+ * (ad_interstitial_unit_id). The value below is Google's public TEST
+ * interstitial: it is both the in-code default and the fallback whenever
+ * the configured ID is empty or malformed, so test units are safe to load
+ * and click during development and a bad console value can never break
+ * ad loading. Swap the ID in the Remote Config console — no app update
+ * needed. The App ID in the manifest is separate and stays hardcoded.
  */
 object NudgyAds {
     private const val TAG = "NudgyAds"
     const val TEST_INTERSTITIAL_UNIT_ID = "ca-app-pub-3940256099942544/1033173712"
+
+    // AdMob unit IDs look like ca-app-pub-<16 digits>/<10 digits>.
+    private val UNIT_ID_REGEX = Regex("^ca-app-pub-\\d{16}/\\d{10}$")
 
     @Volatile
     private var interstitial: InterstitialAd? = null
@@ -40,6 +47,24 @@ object NudgyAds {
 
     @Volatile
     private var initialized = false
+
+    // Last requested (validated) unit ID. All internal reloads reuse it,
+    // so a shown real-ID ad is never reloaded with the test ID.
+    @Volatile
+    private var currentUnitId: String = TEST_INTERSTITIAL_UNIT_ID
+
+    // Unit ID of the currently preloaded ad, if any.
+    @Volatile
+    private var loadedUnitId: String? = null
+
+    // Unit ID of the load currently in flight, if any.
+    @Volatile
+    private var loadingUnitId: String? = null
+
+    // A different ID requested while a load was in flight; applied when
+    // that load finishes instead of being silently dropped.
+    @Volatile
+    private var pendingUnitId: String? = null
 
     fun initialize(activity: Activity) {
         if (initialized) return
@@ -73,54 +98,108 @@ object NudgyAds {
     private fun startSdk(context: Context) {
         try {
             MobileAds.initialize(context.applicationContext) {
-                loadInterstitial(context)
+                loadInterstitial(context, currentUnitId)
             }
         } catch (e: Exception) {
             Log.w(TAG, "MobileAds init failed: ${e.message}")
         }
     }
 
-    fun loadInterstitial(context: Context) {
-        if (interstitial != null || loading) return
+    /**
+     * Preloads an interstitial for [unitId]. An empty or malformed ID
+     * falls back to the test ID (logged, never a crash). If an ad is
+     * already preloaded for this ID, this is a no-op; if one is preloaded
+     * for a different ID, it is dropped and reloaded with the new ID.
+     * A different ID requested mid-load is queued and applied when the
+     * in-flight load finishes.
+     */
+    fun loadInterstitial(context: Context, unitId: String = TEST_INTERSTITIAL_UNIT_ID) {
+        val effectiveId = if (UNIT_ID_REGEX.matches(unitId)) {
+            unitId
+        } else {
+            Log.w(TAG, "Invalid interstitial unit id \"$unitId\" — falling back to test id")
+            TEST_INTERSTITIAL_UNIT_ID
+        }
+        currentUnitId = effectiveId
+        if (interstitial != null) {
+            if (loadedUnitId == effectiveId) return
+            // Preloaded ad is for a stale ID — drop it and reload.
+            interstitial = null
+            loadedUnitId = null
+        }
+        if (loading) {
+            if (loadingUnitId != effectiveId) {
+                pendingUnitId = effectiveId
+            }
+            return
+        }
         loading = true
+        loadingUnitId = effectiveId
         try {
             InterstitialAd.load(
                 context.applicationContext,
-                TEST_INTERSTITIAL_UNIT_ID,
+                effectiveId,
                 AdRequest.Builder().build(),
                 object : InterstitialAdLoadCallback() {
                     override fun onAdLoaded(ad: InterstitialAd) {
+                        val pending = pendingUnitId
+                        if (pending != null && pending != effectiveId) {
+                            // A newer ID arrived mid-load; skip this ad
+                            // and load with the newer ID instead.
+                            pendingUnitId = null
+                            loading = false
+                            loadingUnitId = null
+                            loadInterstitial(context, pending)
+                            return
+                        }
+                        pendingUnitId = null
                         interstitial = ad
+                        loadedUnitId = effectiveId
                         loading = false
+                        loadingUnitId = null
                     }
 
                     override fun onAdFailedToLoad(error: LoadAdError) {
                         interstitial = null
+                        loadedUnitId = null
                         loading = false
+                        loadingUnitId = null
                         Log.w(TAG, "Interstitial load failed: ${error.message}")
+                        val pending = pendingUnitId
+                        if (pending != null) {
+                            pendingUnitId = null
+                            loadInterstitial(context, pending)
+                        }
                     }
                 }
             )
         } catch (e: Exception) {
             loading = false
+            loadingUnitId = null
             Log.w(TAG, "Interstitial load error: ${e.message}")
+            val pending = pendingUnitId
+            if (pending != null) {
+                pendingUnitId = null
+                loadInterstitial(context, pending)
+            }
         }
     }
 
     /** Shows the preloaded interstitial if one is ready. True when shown. */
     fun showInterstitial(activity: Activity): Boolean {
         val ad = interstitial ?: run {
-            loadInterstitial(activity)
+            loadInterstitial(activity, currentUnitId)
             return false
         }
         interstitial = null
+        loadedUnitId = null
         ad.fullScreenContentCallback = object : FullScreenContentCallback() {
             override fun onAdDismissedFullScreenContent() {
-                loadInterstitial(activity)
+                loadInterstitial(activity, currentUnitId)
             }
 
             override fun onAdFailedToShowFullScreenContent(adError: AdError) {
-                loadInterstitial(activity)
+                loadInterstitial(activity, currentUnitId)
             }
         }
         return try {
@@ -128,7 +207,7 @@ object NudgyAds {
             true
         } catch (e: Exception) {
             Log.w(TAG, "Interstitial show failed: ${e.message}")
-            loadInterstitial(activity)
+            loadInterstitial(activity, currentUnitId)
             false
         }
     }
