@@ -97,7 +97,7 @@ private const val KEY_PENDING_GROUP_CODE = "pending_group_code"
 // soon as the fetch completes AND the minimum has passed, OR the timeout
 // elapses, whichever comes first — the launch is never held hostage to
 // the network.
-private const val SPLASH_MIN_SHOW_MS = 800L
+private const val SPLASH_MIN_SHOW_MS = 1200L
 private const val SPLASH_MAX_WAIT_MS = 1500L
 
 class MainActivity : ComponentActivity() {
