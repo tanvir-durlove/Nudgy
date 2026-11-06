@@ -2,4 +2,17 @@
 <resources>
 
     <style name="Theme.MyApplication" parent="android:Theme.DeviceDefault.NoActionBar" />
+
+    <!-- Launch splash (androidx core-splashscreen). The launcher icon is
+         the splash icon; the background is the app's light canvas
+         (#FBF9F4 — the single splash background; the app has no
+         values-night theme). The splash swaps back to
+         Theme.MyApplication (postSplashScreenTheme) when MainActivity
+         hides it. -->
+    <style name="Theme.Nudgy.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#FBF9F4</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="windowSplashScreenAnimationDuration">1000</item>
+        <item name="postSplashScreenTheme">@style/Theme.MyApplication</item>
+    </style>
 </resources>

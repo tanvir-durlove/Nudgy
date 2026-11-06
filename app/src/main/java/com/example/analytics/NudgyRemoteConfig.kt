@@ -1,5 +1,6 @@
 package com.example.analytics
 
+import android.os.SystemClock
 import android.util.Log
 import com.google.firebase.Firebase
 import com.google.firebase.remoteconfig.FirebaseRemoteConfig
@@ -32,6 +33,18 @@ class NudgyRemoteConfig {
 
     private val _configState = MutableStateFlow(RemoteConfigValues())
     val configState: StateFlow<RemoteConfigValues> = _configState.asStateFlow()
+
+    // Splash: true once the first fetchAndActivate completes — success or
+    // failure. MainActivity keeps the splash screen up only until this is
+    // true or the splash timeout elapses, whichever comes first. A failed
+    // fetch must never hold the launch hostage: defaults/cached values
+    // apply instead.
+    private val _fetchCompleted = MutableStateFlow(false)
+    val fetchCompleted: StateFlow<Boolean> = _fetchCompleted.asStateFlow()
+
+    // Elapsed-realtime clock at fetch start (Application.onCreate), so the
+    // splash timeout is measured from app start, not from Activity creation.
+    val fetchStartElapsedRealtime: Long = SystemClock.elapsedRealtime()
 
     init {
         // If Firebase is unavailable (no google-services.json), keep the default values.
@@ -74,10 +87,17 @@ class NudgyRemoteConfig {
                             geminiModelVersion = sanitizedModel
                         )
                     }
+                    // Success or failure: the fetch is done either way.
+                    _fetchCompleted.value = true
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Remote Config initialization warning: ${e.message}")
+                _fetchCompleted.value = true
             }
+        } ?: run {
+            // No Firebase (e.g. CI builds without google-services.json):
+            // there is no fetch to wait for.
+            _fetchCompleted.value = true
         }
     }
 

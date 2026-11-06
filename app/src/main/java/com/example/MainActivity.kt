@@ -7,6 +7,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -34,6 +35,7 @@ import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -88,6 +90,12 @@ import java.util.UUID
 // (App Links); consumed right after sign-in, then cleared.
 private const val KEY_PENDING_GROUP_CODE = "pending_group_code"
 
+// Splash screen: longest it may stay up while the Remote Config fetch
+// (started in Application.onCreate) is still in flight. The splash hides
+// as soon as the fetch completes OR this timeout elapses, whichever comes
+// first — the launch is never held hostage to the network.
+private const val SPLASH_MAX_WAIT_MS = 1500L
+
 class MainActivity : ComponentActivity() {
     private lateinit var authManager: AuthManager
     private lateinit var taskRepository: TaskRepository
@@ -104,6 +112,12 @@ class MainActivity : ComponentActivity() {
     private val deepLinkJoinCodeFlow = MutableStateFlow<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Splash screen: install BEFORE super.onCreate (required). It stays
+        // up only while the Remote Config fetch is in flight and less than
+        // SPLASH_MAX_WAIT_MS has passed since fetch start; ads preload with
+        // test-ID defaults in the meantime and swap to the fetched ID when
+        // it arrives (see NudgyAds / the guarded LaunchedEffect below).
+        val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
@@ -115,7 +129,13 @@ class MainActivity : ComponentActivity() {
         chatRepository = ChatRepository(this)
         reminderManager = ReminderManager(this)
         analytics = NudgyAnalytics(this)
-        remoteConfig = NudgyRemoteConfig()
+        // Remote Config lives in the Application (fetch started in
+        // Application.onCreate); use that single shared instance.
+        remoteConfig = (application as NudgyApplication).remoteConfig
+        splashScreen.setKeepOnScreenCondition {
+            !remoteConfig.fetchCompleted.value &&
+                SystemClock.elapsedRealtime() - remoteConfig.fetchStartElapsedRealtime < SPLASH_MAX_WAIT_MS
+        }
 
         // Ads: consent (UMP) + Mobile Ads SDK. Ads themselves stay OFF
         // until Remote Config ads_enabled is flipped on.
