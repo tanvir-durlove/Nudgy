@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -72,6 +73,7 @@ import com.example.auth.AuthManager
 import com.example.auth.NudgyUser
 import com.example.data.local.entity.NudgyMemoryEntity
 import com.example.ui.components.NudgyInsightCard
+import com.example.ui.theme.NudgyAccent
 import com.example.ui.theme.NudgyAvatarGold
 import com.example.ui.theme.NudgyBorder
 import com.example.ui.theme.NudgyCard
@@ -115,7 +117,6 @@ fun YourNudgySheet(
         sheetState = sheetState,
         containerColor = NudgyCard,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        dragHandle = null
     ) {
         Column(
             modifier = modifier
@@ -352,7 +353,7 @@ fun YourNudgySheet(
                         Text(
                             text = "${memories.size} facts",
                             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
-                            color = NudgyPrimary
+                            color = NudgyAccent
                         )
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -623,7 +624,13 @@ fun YourNudgySheet(
             onDismissRequest = { showApiKeyDialog = false },
             title = { Text("Gemini API Key (BYOK)", fontWeight = FontWeight.Bold, color = NudgyCharcoal) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     Text(
                         text = "Bring Your Own Key: Enter your personal Gemini API key from Google AI Studio. Stored privately on this device to protect developer quota.",
                         style = MaterialTheme.typography.bodySmall,

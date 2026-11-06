@@ -278,7 +278,7 @@ fun CalendarScreen(
                 Text(
                     text = headerMonth,
                     style = MaterialTheme.typography.labelSmall,
-                    color = NudgyPrimary
+                    color = NudgyAccent
                 )
                 val isSelectedDayToday = daysList.getOrNull(selectedDayIndex)?.isToday == true
                 val scheduleTitle = if (isSelectedDayToday) {
@@ -483,7 +483,7 @@ fun CalendarScreen(
                         Text(
                             text = "UP NEXT",
                             style = MaterialTheme.typography.labelSmall,
-                            color = NudgyPrimary
+                            color = NudgyAccent
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
@@ -615,7 +615,7 @@ fun CalendarScreen(
                                                         fontSize = 11.sp,
                                                         fontWeight = FontWeight.SemiBold
                                                     ),
-                                                    color = NudgyPrimary
+                                                    color = NudgyAccent
                                                 )
                                             }
                                         }
@@ -1010,7 +1010,7 @@ fun CalendarScreen(
                         selectedHour = timePickerState.hour
                         selectedMinute = timePickerState.minute
                         showTimePicker = false
-                    }) { Text("OK", color = NudgyPrimary) }
+                    }) { Text("OK", color = NudgyAccent) }
                 },
                 dismissButton = {
                     TextButton(onClick = { showTimePicker = false }) { Text("Cancel", color = NudgyCharcoal) }

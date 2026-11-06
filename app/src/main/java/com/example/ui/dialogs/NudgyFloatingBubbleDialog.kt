@@ -36,6 +36,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.ui.components.MascotMood
 import com.example.ui.components.NudgyMascot
+import com.example.ui.theme.NudgyAccent
 import com.example.ui.theme.NudgyCard
 import com.example.ui.theme.NudgyCardBorder
 import com.example.ui.theme.NudgyCharcoal
@@ -103,7 +104,7 @@ fun NudgyFloatingBubbleDialog(
                         Text(
                             text = "Time to get this done! 💪",
                             style = MaterialTheme.typography.labelSmall,
-                            color = NudgyPrimary
+                            color = NudgyAccent
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(

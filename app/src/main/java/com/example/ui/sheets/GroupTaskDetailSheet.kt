@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.entity.TaskEntity
+import com.example.ui.theme.NudgyAccent
 import com.example.ui.theme.NudgyCard
 import com.example.ui.theme.NudgyCharcoal
 import com.example.ui.theme.NudgyMuted
@@ -61,7 +62,6 @@ fun GroupTaskDetailSheet(
         sheetState = sheetState,
         containerColor = NudgyCard,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        dragHandle = null
     ) {
         Column(
             modifier = modifier
@@ -80,7 +80,7 @@ fun GroupTaskDetailSheet(
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontSize = 11.sp, fontWeight = FontWeight.SemiBold
                     ),
-                    color = NudgyPrimary
+                    color = NudgyAccent
                 )
             }
             Spacer(modifier = Modifier.height(12.dp))

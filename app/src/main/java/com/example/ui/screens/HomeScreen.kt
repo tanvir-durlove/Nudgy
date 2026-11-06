@@ -57,6 +57,7 @@ import com.example.ui.components.NudgyCheckbox
 import com.example.ui.components.NudgyInsightCard
 import com.example.ui.components.NudgyMascot
 import com.example.ui.components.NudgyProgressRing
+import com.example.ui.theme.NudgyAccent
 import com.example.ui.theme.NudgyCard
 import com.example.ui.theme.NudgyCardBorder
 import com.example.ui.theme.NudgyCharcoal
@@ -124,7 +125,7 @@ fun HomeScreen(
                 Text(
                     text = "$greetingPrefix, $firstName",
                     style = MaterialTheme.typography.labelSmall,
-                    color = NudgyPrimary
+                    color = NudgyAccent
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
@@ -410,7 +411,7 @@ fun HomeScreen(
                                                     fontSize = 11.sp,
                                                     fontWeight = FontWeight.SemiBold
                                                 ),
-                                                color = NudgyPrimary
+                                                color = NudgyAccent
                                             )
                                         }
                                     }
@@ -540,7 +541,7 @@ fun HomeScreen(
                     Text(
                         text = "UP NEXT",
                         style = MaterialTheme.typography.labelSmall,
-                        color = NudgyPrimary
+                        color = NudgyAccent
                     )
                     Text(
                         text = "Schedule",
