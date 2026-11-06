@@ -72,8 +72,8 @@ class ClientIntentPreFilter(
             val timeMatcher = Pattern.compile("(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?\\s*(?:টায়|টায়)?)", Pattern.CASE_INSENSITIVE).matcher(cleanedNorm)
             if (timeMatcher.find()) {
                 val rawTime = timeMatcher.group(1)?.replace("টায়", "")?.replace("টায়", "")?.trim() ?: "3 PM"
-                parseTimeIntoCalendar(rawTime, cal)
-            } else {
+                parseTimeIntoCalendar(rawTime, cal, cleaned)
+            } else if (!applyBengaliTime(cleaned, cleanedNorm, cal)) {
                 cal.set(Calendar.HOUR_OF_DAY, 15) // default 3 PM
                 cal.set(Calendar.MINUTE, 0)
                 cal.set(Calendar.SECOND, 0)
@@ -86,6 +86,8 @@ class ClientIntentPreFilter(
                 .replace("কথা", "")
                 .replace("আগামীকাল", "")
                 .replace(Regex("(^|\\s)কাল(কে)?(?=\\s|$)"), " ")
+                .replace(BENGALI_DAYPART_REGEX, " ")
+                .replace(BENGALI_TIME_TOKEN_REGEX, " ")
                 .trim()
             if (title.isBlank()) title = "জরুরি কল ও ফলোআপ"
 
@@ -96,6 +98,7 @@ class ClientIntentPreFilter(
                 priority = Priority.HIGH,
                 category = TaskCategory.WORK,
                 reminderSet = true
+                reminderEpochMillis = cal.timeInMillis
             )
             // Label from the ACTUAL date: parseTimeIntoCalendar may have
             // rolled a past time to tomorrow — never claim "today" then.
@@ -194,8 +197,8 @@ class ClientIntentPreFilter(
             // Extract time if present
             val timeMatcher = Pattern.compile("(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm))", Pattern.CASE_INSENSITIVE).matcher(cleanedNorm)
             if (timeMatcher.find()) {
-                parseTimeIntoCalendar(timeMatcher.group(1) ?: "2:00 PM", cal)
-            } else {
+                parseTimeIntoCalendar(timeMatcher.group(1) ?: "2:00 PM", cal, cleaned)
+            } else if (!applyBengaliTime(cleaned, cleanedNorm, cal)) {
                 // If past 2pm today, default to next open hour
                 val currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
                 if (!isTomorrow && currentHour >= 14) {
@@ -229,6 +232,8 @@ class ClientIntentPreFilter(
                 .replace(Regex("(?i)\\b(tomorrow|today)\\b"), "")
                 .replace(Regex("(?i)at\\s+\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?"), "")
                 .replace(Regex("(?i)\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)"), "")
+                .replace(BENGALI_DAYPART_REGEX, " ")
+                .replace(BENGALI_TIME_TOKEN_REGEX, " ")
                 .replace(Regex("^[,:\\s-]+"), "")
                 .replace(Regex("[,:\\s-]+$"), "")
                 .trim()
@@ -278,6 +283,7 @@ class ClientIntentPreFilter(
                 priority = Priority.MEDIUM,
                 category = TaskCategory.PERSONAL,
                 reminderSet = true
+                reminderEpochMillis = cal.timeInMillis
             )
             return PreFilterResult.Handled(
                 responseText = "Done! I've set a reminder for 30 minutes from now (at ${formatTime(cal.timeInMillis)}). 🔔",
@@ -498,8 +504,8 @@ class ClientIntentPreFilter(
             val hasExplicitTime = timeMatcher.find()
             if (hasExplicitTime) {
                 val foundTime = timeMatcher.group(1) ?: "12:00 PM"
-                parseTimeIntoCalendar(foundTime, cal)
-            } else {
+                parseTimeIntoCalendar(foundTime, cal, cleaned)
+            } else if (!applyBengaliTime(cleaned, cleanedNorm, cal)) {
                 // If past 2pm today, set in 2 hours
                 cal.add(Calendar.HOUR_OF_DAY, 2)
                 cal.set(Calendar.MINUTE, 0)
@@ -511,6 +517,8 @@ class ClientIntentPreFilter(
                 .replace(Regex("(?i)\\b(tomorrow|today)\\b"), "")
                 .replace(Regex("(?i)at\\s+\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?"), "")
                 .replace(Regex("(?i)\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)"), "")
+                .replace(BENGALI_DAYPART_REGEX, " ")
+                .replace(BENGALI_TIME_TOKEN_REGEX, " ")
                 .replace(Regex("^[,:\\s-]+"), "")
                 .replace(Regex("[,:\\s-]+$"), "")
                 .trim()
@@ -521,6 +529,14 @@ class ClientIntentPreFilter(
                 cleanTitle = cleanTitle.replaceFirstChar { it.uppercase() }
             }
 
+            // "Remind me ..." asks for a reminder AT the stated time — the
+            // 2h lead does not apply. Every other task phrase states when
+            // the task is due, so the reminder fires 2h before (createTask
+            // default).
+            val isExplicitReminder = matchedPrefix != null &&
+                listOf("remind me", "মনে করিয়ে দাও", "don't forget to", "dont forget to", "remember to")
+                    .any { matchedPrefix.startsWith(it) }
+
             val task = taskRepository.createTask(
                 userId = userId,
                 title = cleanTitle,
@@ -530,15 +546,22 @@ class ClientIntentPreFilter(
                 else if (lower.contains("study") || lower.contains("class") || lower.contains("book")) TaskCategory.STUDY
                 else TaskCategory.PERSONAL,
                 reminderSet = true
+                reminderEpochMillis = if (isExplicitReminder) cal.timeInMillis else null
             )
 
             // Tasks stay in the Tasks list only — no calendar event is written
             // for a task, even when it has an explicit time.
             val formatted = formatTime(cal.timeInMillis)
+            val reminderMillis = task.reminderEpochMillis ?: cal.timeInMillis
+            val reminderFormatted = formatTime(reminderMillis)
             val isNowTomorrow = cal.get(Calendar.DAY_OF_YEAR) != Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
             val dayLabel = if (isNowTomorrow) "tomorrow at" else "today at"
             return PreFilterResult.Handled(
-                responseText = "Done! Added '$cleanTitle' for $dayLabel $formatted with a reminder set. 🔔",
+                responseText = if (reminderMillis == cal.timeInMillis) {
+                    "Done! Added '$cleanTitle' for $dayLabel $formatted with a reminder set. 🔔"
+                } else {
+                    "Done! Added '$cleanTitle' for $dayLabel $formatted. I'll remind you at $reminderFormatted. 🔔"
+                },
                 createdTask = task,
                 actionType = ChatActionType.TASK_PREVIEW,
                 quickSuggestions = listOf("Show today's tasks", "Plan my day", "Find free time")
@@ -626,8 +649,8 @@ class ClientIntentPreFilter(
             if (isTomorrow) cal.add(Calendar.DAY_OF_YEAR, 1)
             val timeMatcher = Pattern.compile("(?:at\\s+)?(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm))", Pattern.CASE_INSENSITIVE).matcher(cleanedNorm)
             if (timeMatcher.find()) {
-                parseTimeIntoCalendar(timeMatcher.group(1) ?: "9:00 AM", cal)
-            } else {
+                parseTimeIntoCalendar(timeMatcher.group(1) ?: "9:00 AM", cal, cleaned)
+            } else if (!applyBengaliTime(cleaned, cleanedNorm, cal)) {
                 cal.add(Calendar.HOUR_OF_DAY, 2)
                 cal.set(Calendar.MINUTE, 0)
                 cal.set(Calendar.SECOND, 0)
@@ -637,6 +660,8 @@ class ClientIntentPreFilter(
                 .replace(Regex("(?i)\\b(tomorrow|today)\\b"), "")
                 .replace(Regex("(?i)at\\s+\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?"), "")
                 .replace(Regex("(?i)\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)"), "")
+                .replace(BENGALI_DAYPART_REGEX, " ")
+                .replace(BENGALI_TIME_TOKEN_REGEX, " ")
                 .replace(Regex("^[,:\\s-]+"), "")
                 .replace(Regex("[,:\\s-]+$"), "")
                 .trim()
@@ -650,8 +675,12 @@ class ClientIntentPreFilter(
                 category = TaskCategory.PERSONAL,
                 reminderSet = true
             )
-            val formatted = formatTime(cal.timeInMillis)
-            val isNowTomorrow = cal.get(Calendar.DAY_OF_YEAR) != Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
+            // The reply states the REMINDER time (due - 2h), not the due
+            // time — the task card shows the due time.
+            val reminderMillis = task.reminderEpochMillis ?: cal.timeInMillis
+            val reminderCal = Calendar.getInstance().apply { timeInMillis = reminderMillis }
+            val formatted = formatTime(reminderMillis)
+            val isNowTomorrow = reminderCal.get(Calendar.DAY_OF_YEAR) != Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
             val responseText = if (isBengali) {
                 val dayLabel = if (isNowTomorrow) "আগামীকাল" else "আজ"
                 "টাস্ক তৈরি হয়েছে: \"$catchTitle\" — $dayLabel $formatted সময়ে মনে করিয়ে দেব। 🔔"
@@ -704,7 +733,68 @@ class ClientIntentPreFilter(
         return text.trimStart(',', ':', '.', '-', ' ', '!')
     }
 
-    private fun parseTimeIntoCalendar(timeStr: String, cal: Calendar) {
+    // Bengali time-of-day words, stripped from generated titles (the time
+    // itself lives in the due/reminder fields, not the title).
+    private val BENGALI_DAYPART_REGEX = Regex("(সকালে|দুপুরে|বিকেলে|বিকালে|সন্ধ্যা(?:\u09df|\u09af\u09bc)|সন্ধ্যাবেলা|রাতে)")
+    // An explicit Bengali hour token ("৫টায়", "5:30টায়") — stripped from
+    // generated titles the same way.
+    private val BENGALI_TIME_TOKEN_REGEX = Regex("[০-৯0-9]{1,2}(?::[০-৯0-9]{2})?\\s*(?:\u099f\u09be(?:\u09df|\u09af\u09bc))")
+
+    // Bengali time-of-day words and the hour (24h) they mean when no
+    // explicit hour is given: সকালে 9 AM, দুপুরে 12 PM, বিকেলে/বিকালে 5 PM,
+    // সন্ধ্যায় 7 PM, রাতে 9 PM.
+    private fun bengaliDaypartHour(text: String): Int? = when {
+        text.contains("সকাল") -> 9
+        text.contains("দুপুর") -> 12
+        text.contains("বিকেল") || text.contains("বিকাল") -> 17
+        text.contains("সন্ধ্যা") -> 19
+        text.contains("রাত") -> 21
+        else -> null
+    }
+
+    /**
+     * Moves an hour (0-23) to the half of the day a Bengali daypart word
+     * names: "৫টায় বিকেলে" -> 17, "৫টায় সকালে" -> 5, "১২টায় রাতে" -> 0.
+     * No daypart word -> the hour is unchanged.
+     */
+    private fun applyBengaliDaypart(hour24: Int, text: String): Int {
+        val daypart = bengaliDaypartHour(text) ?: return hour24
+        val h12 = hour24 % 12
+        return if (daypart >= 12) {
+            if (h12 == 0) 12 else h12 + 12
+        } else {
+            h12
+        }
+    }
+
+    /**
+     * Resolves a due time from Bengali daypart words alone ("বিকেলে" -> 5 PM)
+     * or with an explicit Bengali hour token ("৩টায় বিকেলে" -> 3 PM).
+     * Returns false when no daypart word is present. A resolved time already
+     * in the past rolls to tomorrow, same rule as parseTimeIntoCalendar.
+     * A bare "টা" count ("৩টা কাজ") is deliberately NOT treated as a time.
+     */
+    private fun applyBengaliTime(cleaned: String, cleanedNorm: String, cal: Calendar): Boolean {
+        val daypart = bengaliDaypartHour(cleaned) ?: return false
+        val hourMatcher = Pattern.compile("(\\d{1,2})(?::(\\d{2}))?\\s*(?:\u099f\u09be(?:\u09df|\u09af\u09bc))").matcher(cleanedNorm)
+        if (hourMatcher.find()) {
+            val hour = applyBengaliDaypart(hourMatcher.group(1)?.toIntOrNull() ?: daypart, cleaned)
+            val minute = hourMatcher.group(2)?.toIntOrNull() ?: 0
+            cal.set(Calendar.HOUR_OF_DAY, hour)
+            cal.set(Calendar.MINUTE, minute)
+        } else {
+            cal.set(Calendar.HOUR_OF_DAY, daypart)
+            cal.set(Calendar.MINUTE, 0)
+        }
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        if (cal.timeInMillis <= System.currentTimeMillis()) {
+            cal.add(Calendar.DAY_OF_YEAR, 1)
+        }
+        return true
+    }
+
+    private fun parseTimeIntoCalendar(timeStr: String, cal: Calendar, daypartText: String? = null) {
         val lower = normalizeBengaliDigits(timeStr).lowercase().trim()
         val isPm = lower.contains("pm")
         val clean = lower.replace("am", "").replace("pm", "").trim()
@@ -712,8 +802,15 @@ class ClientIntentPreFilter(
         var hour = parts.getOrNull(0)?.toIntOrNull() ?: 12
         val minute = parts.getOrNull(1)?.toIntOrNull() ?: 0
 
-        if (isPm && hour < 12) hour += 12
-        if (!isPm && hour == 12) hour = 0
+        if (daypartText != null && !isPm && !lower.contains("am")) {
+            // A Bengali daypart word ("বিকেলে") moves the hour to the right
+            // half of the day — applied BEFORE the past-roll below, so
+            // "৫টায় বিকেলে" at 4 PM lands today at 5 PM, not tomorrow.
+            hour = applyBengaliDaypart(hour, daypartText)
+        } else {
+            if (isPm && hour < 12) hour += 12
+            if (!isPm && hour == 12) hour = 0
+        }
 
         cal.set(Calendar.HOUR_OF_DAY, hour)
         cal.set(Calendar.MINUTE, minute)
