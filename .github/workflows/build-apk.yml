@@ -101,6 +101,12 @@ jobs:
             cp app/build/outputs/bundle/debug/app-debug.aab build-artifacts/nudgy-debug.aab
           fi
 
+          # Copy the R8 mapping file (release only) for deobfuscating
+          # Play Console crash reports. Debug builds have no mapping file.
+          if [ -f app/build/outputs/mapping/release/mapping.txt ]; then
+            cp app/build/outputs/mapping/release/mapping.txt build-artifacts/mapping.txt
+          fi
+
           echo "Verifying build outputs..."
           ls -lh build-artifacts/
 
