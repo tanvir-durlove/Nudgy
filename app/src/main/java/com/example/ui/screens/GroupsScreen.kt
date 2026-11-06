@@ -65,6 +65,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.example.R
 import com.example.auth.NudgyUser
 import com.example.data.local.entity.CalendarEventEntity
 import com.example.data.local.entity.GroupEntity
