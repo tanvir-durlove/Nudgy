@@ -31,7 +31,7 @@ class BootReceiver : BroadcastReceiver() {
                     val tasks = db.taskDao().getPendingTasksWithRemindersForUser(activeUserId, now)
                     Log.d(TAG, "Found ${tasks.size} pending tasks to restore for active user")
                     for (task in tasks) {
-                        val triggerTime = task.reminderEpochMillis ?: task.dueDateEpochMillis
+                        val triggerTime = ReminderManager.dueReminderTriggerMillis(task.reminderEpochMillis, task.dueDateEpochMillis)
                         if (triggerTime > now) {
                             reminderManager.scheduleReminder(
                                 taskId = task.id,
