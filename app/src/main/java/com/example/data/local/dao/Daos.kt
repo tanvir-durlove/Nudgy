@@ -1,6 +1,7 @@
 package com.example.data.local.dao
 
 import androidx.room.Dao
+import androidx.room.Transaction
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -9,6 +10,7 @@ import com.example.data.local.entity.CalendarEventEntity
 import com.example.data.local.entity.ChatMessageEntity
 import com.example.data.local.entity.DailyBriefEntity
 import com.example.data.local.entity.GroupEntity
+import com.example.data.local.entity.GroupMemberEntity
 import com.example.data.local.entity.NudgyMemoryEntity
 import com.example.data.local.entity.TaskEntity
 import kotlinx.coroutines.flow.Flow
@@ -183,6 +185,29 @@ interface GroupDao {
 
     @Query("DELETE FROM groups WHERE groupId = :groupId")
     suspend fun deleteGroupById(groupId: String)
+}
+
+@Dao
+interface GroupMemberDao {
+    // Member-list cache (minimization): detail opens read Room instantly;
+    // refreshGroupMembers replaces the cache in the background.
+    @Query("SELECT * FROM group_members WHERE groupId = :groupId ORDER BY displayName COLLATE NOCASE ASC")
+    fun getMembersFlow(groupId: String): Flow<List<GroupMemberEntity>>
+
+    @Query("SELECT * FROM group_members WHERE groupId = :groupId ORDER BY displayName COLLATE NOCASE ASC")
+    suspend fun getMembersOnce(groupId: String): List<GroupMemberEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertMembers(members: List<GroupMemberEntity>)
+
+    @Query("DELETE FROM group_members WHERE groupId = :groupId")
+    suspend fun deleteMembersByGroupId(groupId: String)
+
+    @Transaction
+    suspend fun replaceMembers(groupId: String, members: List<GroupMemberEntity>) {
+        deleteMembersByGroupId(groupId)
+        insertMembers(members)
+    }
 }
 
 @Dao

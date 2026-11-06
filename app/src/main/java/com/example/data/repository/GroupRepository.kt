@@ -7,6 +7,7 @@ import com.example.auth.AuthManager
 import com.example.data.local.NudgyDatabase
 import com.example.data.local.entity.CalendarEventEntity
 import com.example.data.local.entity.GroupEntity
+import com.example.data.local.entity.GroupMemberEntity
 import com.example.data.local.entity.TaskEntity
 import com.example.data.model.Priority
 import com.example.data.model.TaskCategory
@@ -24,6 +25,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -61,6 +63,7 @@ class GroupRepository(
     database: NudgyDatabase = NudgyDatabase.getInstance(context)
 ) {
     private val groupDao = database.groupDao()
+    private val groupMemberDao = database.groupMemberDao()
     private val taskDao = database.taskDao()
     private val calendarDao = database.calendarDao()
     private val reminderManager = ReminderManager(context)
@@ -131,7 +134,12 @@ class GroupRepository(
                             "creatorUid" to userId,
                             "creatorName" to displayName,
                             "createdAt" to FieldValue.serverTimestamp(),
-                            "lastUpdatedAt" to FieldValue.serverTimestamp()
+                            "lastUpdatedAt" to FieldValue.serverTimestamp(),
+                            // Minimization: reconcile gate signal. Set at
+                            // creation so the field exists from birth; the
+                            // poll worker treats a missing field as "unknown"
+                            // and falls back to the old daily reconcile.
+                            "lastDeleteAt" to FieldValue.serverTimestamp()
                         )
                     ).await()
                     fs.collection("groupCodes").document(code).set(
@@ -390,8 +398,16 @@ class GroupRepository(
 
     suspend fun deleteGroupItem(groupId: String, userId: String, itemId: String, isTask: Boolean) {
         withContext(Dispatchers.IO) {
-            firestore().collection("groups").document(groupId)
-                .collection("items").document(itemId).delete().await()
+            val fs = firestore()
+            val groupRef = fs.collection("groups").document(groupId)
+            // Minimization: the item delete and the lastDeleteAt bump MUST
+            // share one batch (atomic). The poll worker gates its full
+            // reconcile on this bump; a separate write could lose the
+            // signal and leave orphaned local rows behind.
+            val batch = fs.batch()
+            batch.delete(groupRef.collection("items").document(itemId))
+            batch.update(groupRef, "lastDeleteAt", FieldValue.serverTimestamp())
+            batch.commit().await()
             if (isTask) {
                 taskDao.deleteTaskByIdForUser(userId, itemId)
                 reminderManager.cancelReminder(itemId)
@@ -403,11 +419,32 @@ class GroupRepository(
 
     // ---------------------------------------------------------------- Phase 3: members / leave / delete
 
-    /** One-shot member list for the group detail view. Names are stored at join time. */
-    suspend fun getGroupMembers(groupId: String): List<GroupMember> =
+    /**
+     * Member list with a Room cache (minimization): the detail view reads
+     * the cache instantly and refreshes in the background, instead of a
+     * full one-shot members query on every open.
+     */
+    fun observeGroupMembers(groupId: String): Flow<List<GroupMember>> =
+        groupMemberDao.getMembersFlow(groupId).map { rows ->
+            rows.map { GroupMember(uid = it.uid, displayName = it.displayName) }
+        }
+
+    suspend fun getCachedGroupMembers(groupId: String): List<GroupMember> =
+        withContext(Dispatchers.IO) {
+            groupMemberDao.getMembersOnce(groupId)
+                .map { GroupMember(uid = it.uid, displayName = it.displayName) }
+        }
+
+    /**
+     * Remote refresh: fetch the member list, replace the cache, return
+     * the fresh list. On failure the cache is left untouched and the
+     * cached list is returned, so a failed refresh never wipes the
+     * detail view.
+     */
+    suspend fun refreshGroupMembers(groupId: String): List<GroupMember> =
         withContext(Dispatchers.IO) {
             try {
-                firestore().collection("groups").document(groupId)
+                val fresh = firestore().collection("groups").document(groupId)
                     .collection("members")
                     .get().await().documents.map { doc ->
                         GroupMember(
@@ -415,20 +452,41 @@ class GroupRepository(
                             displayName = doc.getString("displayName") ?: "Member"
                         )
                     }.sortedBy { it.displayName.lowercase() }
+                groupMemberDao.replaceMembers(
+                    groupId,
+                    fresh.map {
+                        GroupMemberEntity(
+                            groupId = groupId,
+                            uid = it.uid,
+                            displayName = it.displayName,
+                            cachedAtEpochMillis = System.currentTimeMillis()
+                        )
+                    }
+                )
+                fresh
             } catch (e: Exception) {
-                Log.w(TAG, "getGroupMembers failed: ${e.message}")
-                emptyList()
+                Log.w(TAG, "refreshGroupMembers failed: ${e.message}")
+                getCachedGroupMembers(groupId)
             }
         }
 
-    /** True when the group doc still exists remotely. */
-    suspend fun groupDocExists(groupId: String): Boolean =
+    /**
+     * One doc get serving both the worker's existence check and the
+     * reconcile gate: whether the group still exists, and its
+     * lastDeleteAt signal (epoch ms, or -1 when the field is absent —
+     * pre-gating group docs — or the read failed). Callers must never
+     * purge on a failed read.
+     */
+    suspend fun getGroupDeleteSignal(groupId: String): Pair<Boolean, Long> =
         withContext(Dispatchers.IO) {
             try {
-                firestore().collection("groups").document(groupId).get().await().exists()
+                val doc = firestore().collection("groups").document(groupId).get().await()
+                if (!doc.exists()) return@withContext false to -1L
+                val signal = doc.getTimestamp("lastDeleteAt")?.toDate()?.time ?: -1L
+                true to signal
             } catch (e: Exception) {
-                Log.w(TAG, "groupDocExists failed: ${e.message}")
-                true // never purge on a transient read failure
+                Log.w(TAG, "getGroupDeleteSignal failed: ${e.message}")
+                true to -1L // never purge on a transient read failure
             }
         }
 
@@ -447,6 +505,7 @@ class GroupRepository(
                 Log.w(TAG, "purgeLocalGroup reconcile failed: ${e.message}")
             }
             groupDao.deleteGroupById(groupId)
+            groupMemberDao.deleteMembersByGroupId(groupId)
             stopGroupListener(groupId)
             GroupPollWorker.clearGroupState(context, groupId)
         }

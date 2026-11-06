@@ -90,6 +90,8 @@ import com.example.ui.theme.NudgyMuted
 import com.example.ui.theme.NudgyPrimary
 import java.text.SimpleDateFormat
 import java.util.Locale
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
 
 /**
  * Groups tab (Group v1).
@@ -132,7 +134,10 @@ fun GroupsScreen(
     onDeleteGroupItem: (groupId: String, itemId: String, isTask: Boolean) -> Unit,
     onDeleteGroup: (groupId: String) -> Unit,
     onLeaveGroup: (groupId: String) -> Unit,
-    onLoadMembers: suspend (groupId: String) -> List<GroupMember>,
+    // Member list (minimization): cached rows flow from Room instantly,
+    // refresh fetches remotely in the background on every detail open.
+    onObserveMembers: (groupId: String) -> Flow<List<GroupMember>>,
+    onRefreshMembers: suspend (groupId: String) -> List<GroupMember>,
     onToggleTask: (TaskEntity) -> Unit,
     prefillJoinCode: String? = null,
     onPrefillJoinCodeConsumed: () -> Unit = {},
@@ -181,10 +186,24 @@ fun GroupsScreen(
         val groupId = selectedGroup?.groupId
         members = null
         if (groupId != null) {
-            members = try {
-                onLoadMembers(groupId)
-            } catch (e: Exception) {
-                emptyList()
+            // Background refresh (cache + refresh together): the flow
+            // below shows cached rows instantly; the refresh replaces
+            // them when the network returns. On a cold cache + failed
+            // refresh, fall back to the old empty state instead of
+            // spinning forever.
+            launch {
+                val refreshed = try {
+                    onRefreshMembers(groupId)
+                } catch (e: Exception) {
+                    emptyList()
+                }
+                if (members == null && refreshed.isEmpty()) members = emptyList()
+            }
+            onObserveMembers(groupId).collect { list ->
+                // An empty cache means "not loaded yet" (a group always
+                // has its creator as a member), so keep the loading state
+                // until real rows arrive.
+                if (list.isNotEmpty()) members = list
             }
         }
     }
