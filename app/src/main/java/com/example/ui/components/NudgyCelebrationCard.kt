@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,13 @@ import com.example.ui.theme.NudgyCharcoal
 fun NudgyCelebrationCard(
     modifier: Modifier = Modifier
 ) {
+    val darkTheme = isSystemInDarkTheme()
+    val cardGradient = if (darkTheme) {
+        listOf(Color(0xFF24402B), Color(0xFF1A2E20))
+    } else {
+        listOf(Color(0xFFE8F5E9), Color(0xFFC8E6C9))
+    }
+    val labelGreen = if (darkTheme) Color(0xFF81C784) else Color(0xFF2E7D32)
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
@@ -40,9 +48,7 @@ fun NudgyCelebrationCard(
         Box(
             modifier = Modifier
                 .background(
-                    Brush.linearGradient(
-                        listOf(Color(0xFFE8F5E9), Color(0xFFC8E6C9))
-                    )
+                    Brush.linearGradient(cardGradient)
                 )
                 .padding(18.dp)
         ) {
@@ -62,14 +68,14 @@ fun NudgyCelebrationCard(
                         Icon(
                             imageVector = Icons.Default.AutoAwesome,
                             contentDescription = null,
-                            tint = Color(0xFF2E7D32),
+                            tint = labelGreen,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "ALL TASKS COMPLETE! 🎉",
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = Color(0xFF2E7D32),
+                                color = labelGreen,
                                 fontWeight = FontWeight.Bold
                             )
                         )
