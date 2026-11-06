@@ -91,9 +91,13 @@ import java.util.UUID
 private const val KEY_PENDING_GROUP_CODE = "pending_group_code"
 
 // Splash screen: longest it may stay up while the Remote Config fetch
-// (started in Application.onCreate) is still in flight. The splash hides
-// as soon as the fetch completes OR this timeout elapses, whichever comes
-// first — the launch is never held hostage to the network.
+// (started in Application.onCreate) is still in flight, and the shortest
+// it is shown at all — without a minimum the splash is invisible when the
+// fetch completes from cache before the first frame. The splash hides as
+// soon as the fetch completes AND the minimum has passed, OR the timeout
+// elapses, whichever comes first — the launch is never held hostage to
+// the network.
+private const val SPLASH_MIN_SHOW_MS = 800L
 private const val SPLASH_MAX_WAIT_MS = 1500L
 
 class MainActivity : ComponentActivity() {
@@ -113,11 +117,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Splash screen: install BEFORE super.onCreate (required). It stays
-        // up only while the Remote Config fetch is in flight and less than
-        // SPLASH_MAX_WAIT_MS has passed since fetch start; ads preload with
-        // test-ID defaults in the meantime and swap to the fetched ID when
-        // it arrives (see NudgyAds / the guarded LaunchedEffect below).
+        // up for at least SPLASH_MIN_SHOW_MS (measured from install, so it
+        // is actually visible even when the fetch completes from cache
+        // before the first frame) and at most SPLASH_MAX_WAIT_MS while the
+        // Remote Config fetch is in flight; ads preload with test-ID
+        // defaults in the meantime and swap to the fetched ID when it
+        // arrives (see NudgyAds / the guarded LaunchedEffect below).
         val splashScreen = installSplashScreen()
+        val splashStartMs = SystemClock.elapsedRealtime()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
@@ -133,8 +140,9 @@ class MainActivity : ComponentActivity() {
         // Application.onCreate); use that single shared instance.
         remoteConfig = (application as NudgyApplication).remoteConfig
         splashScreen.setKeepOnScreenCondition {
-            !remoteConfig.fetchCompleted.value &&
-                SystemClock.elapsedRealtime() - remoteConfig.fetchStartElapsedRealtime < SPLASH_MAX_WAIT_MS
+            val elapsed = SystemClock.elapsedRealtime() - splashStartMs
+            elapsed < SPLASH_MIN_SHOW_MS ||
+                (!remoteConfig.fetchCompleted.value && elapsed < SPLASH_MAX_WAIT_MS)
         }
 
         // Ads: consent (UMP) + Mobile Ads SDK. Ads themselves stay OFF

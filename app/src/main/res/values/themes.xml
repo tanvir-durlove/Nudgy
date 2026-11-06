@@ -5,8 +5,8 @@
 
     <!-- Launch splash (androidx core-splashscreen). The launcher icon is
          the splash icon; the background is the app's light canvas
-         (#FBF9F4 — the single splash background; the app has no
-         values-night theme). The splash swaps back to
+         (#FBF9F4 — the dark variant lives in values-night/themes.xml).
+         The splash swaps back to
          Theme.MyApplication (postSplashScreenTheme) when MainActivity
          hides it. -->
     <style name="Theme.Nudgy.Splash" parent="Theme.SplashScreen">
