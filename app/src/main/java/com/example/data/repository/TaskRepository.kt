@@ -419,8 +419,18 @@ class TaskRepository(
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
                     if (task.description != null) payload["description"] = task.description
+                    // A null completedAt/reminder MUST delete the field: set()
+                    // with merge() keeps a field an omitted key never touches,
+                    // so an un-complete (completedAt = null) left the OLD
+                    // timestamp in the cloud doc and the listener restored it
+                    // locally — the task behaved "as if completed once
+                    // before". The listener already reads a missing field as
+                    // null, so deleting ends the resurrection. Deleting a
+                    // field that was never there is a no-op.
                     if (task.completedAtEpochMillis != null) payload["completedAtEpochMillis"] = task.completedAtEpochMillis
+                    else payload["completedAtEpochMillis"] = FieldValue.delete()
                     if (task.reminderEpochMillis != null) payload["reminderEpochMillis"] = task.reminderEpochMillis
+                    else payload["reminderEpochMillis"] = FieldValue.delete()
                     if (task.recurrenceRule != null) payload["recurrenceRule"] = task.recurrenceRule
 
                     tasksCollection.document(task.id).set(payload, SetOptions.merge()).await()
