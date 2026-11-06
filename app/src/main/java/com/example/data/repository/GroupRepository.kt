@@ -304,7 +304,7 @@ class GroupRepository(
             "updatedAt" to FieldValue.serverTimestamp()
         )
         if (!description.isNullOrBlank()) payload["description"] = description
-        if (reminderSet) payload["reminderEpochMillis"] = dueDateEpochMillis
+        if (reminderSet) payload["reminderEpochMillis"] = ReminderManager.dueReminderTriggerMillis(null, dueDateEpochMillis)
         writeGroupItem(groupId, itemId, payload)
         val now = System.currentTimeMillis()
         val task = TaskEntity(
@@ -317,7 +317,7 @@ class GroupRepository(
             category = category,
             isCompleted = false,
             reminderSet = reminderSet,
-            reminderEpochMillis = if (reminderSet) dueDateEpochMillis else null,
+            reminderEpochMillis = if (reminderSet) ReminderManager.dueReminderTriggerMillis(null, dueDateEpochMillis) else null,
             isSyncedToCloud = true, // group rows must never enter the personal sync
             createdAtEpochMillis = now,
             updatedAtEpochMillis = now,
@@ -381,8 +381,7 @@ class GroupRepository(
                 "updatedAt" to FieldValue.serverTimestamp()
             )
             if (!task.description.isNullOrBlank()) payload["description"] = task.description!!
-            if (task.reminderSet) payload["reminderEpochMillis"] = task.reminderEpochMillis
-                ?: task.dueDateEpochMillis
+            if (task.reminderSet) payload["reminderEpochMillis"] = ReminderManager.dueReminderTriggerMillis(task.reminderEpochMillis, task.dueDateEpochMillis)
             updateGroupItem(groupId, task.id, payload)
             val existing = taskDao.getTaskById(task.id)
             val merged = task.copy(
@@ -803,7 +802,7 @@ class GroupRepository(
             reminderManager.cancelReminder(task.id)
             return
         }
-        val trigger = task.reminderEpochMillis ?: task.dueDateEpochMillis
+        val trigger = ReminderManager.dueReminderTriggerMillis(task.reminderEpochMillis, task.dueDateEpochMillis)
         if (trigger > System.currentTimeMillis()) {
             reminderManager.scheduleReminder(task.id, task.title, trigger)
         } else {

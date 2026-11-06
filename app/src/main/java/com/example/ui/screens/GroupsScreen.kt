@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import android.content.Intent
+import android.graphics.drawable.AnimatedVectorDrawable
+import android.widget.ImageView
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -57,10 +59,13 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import com.example.R
 import com.example.auth.NudgyUser
 import com.example.data.local.entity.CalendarEventEntity
 import com.example.data.local.entity.GroupEntity
@@ -132,6 +137,7 @@ fun GroupsScreen(
         locationOrLink: String?, eventType: String
     ) -> Unit,
     onUpdateGroupTask: (groupId: String, task: TaskEntity) -> Unit,
+    onSignInClick: () -> Unit = {},
     onDeleteGroupItem: (groupId: String, itemId: String, isTask: Boolean) -> Unit,
     onDeleteGroup: (groupId: String) -> Unit,
     onLeaveGroup: (groupId: String) -> Unit,
@@ -233,21 +239,54 @@ fun GroupsScreen(
                 color = NudgyCard,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Animated placeholder: three people bobbing in turn
+                    // (AnimatedVectorDrawable — Compose has no raw SVG).
+                    AndroidView(
+                        factory = { ctx ->
+                            ImageView(ctx).apply {
+                                setImageResource(R.drawable.avd_groups_placeholder)
+                                (drawable as? AnimatedVectorDrawable)?.start()
+                            }
+                        },
+                        modifier = Modifier.size(120.dp)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = "Sign in to use groups",
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.SemiBold
                         ),
-                        color = NudgyCharcoal
+                        color = NudgyCharcoal,
+                        textAlign = TextAlign.Center
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = "Groups need a signed-in account. Sign in from your " +
                             "profile to create a group or join one with a code.",
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-                        color = NudgyMuted
+                        color = NudgyMuted,
+                        textAlign = TextAlign.Center
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = onSignInClick,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NudgyPrimary,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(100.dp)
+                    ) {
+                        Text(
+                            text = "Sign in",
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
             return@Column

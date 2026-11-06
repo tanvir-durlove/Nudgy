@@ -636,7 +636,7 @@ fun CreateTaskSheet(
                             color = NudgyCharcoal
                         )
                         Text(
-                            text = if (reminderSet) "Alert at selected due time" else "No notification",
+                            text = if (reminderSet) "Alert 2 hours before due time" else "No notification",
                             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
                             color = NudgyMuted
                         )

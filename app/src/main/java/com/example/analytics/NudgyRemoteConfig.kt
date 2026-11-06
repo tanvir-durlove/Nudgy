@@ -16,6 +16,11 @@ data class RemoteConfigValues(
     val adInterstitialUnitId: String = "ca-app-pub-3940256099942544/1033173712",
     val adBannerUnitId: String = "ca-app-pub-3940256099942544/6300978111",
     val adRewardedUnitId: String = "ca-app-pub-3940256099942544/5224354917",
+    // Free Gemini turns per local day (0 = unlimited is NOT allowed: a
+    // non-positive fetched value falls back to the default, see below).
+    val chatFreeTurnsPerDay: Long = 5L,
+    // Max rewarded (+1 turn) grants per local day.
+    val adRewardedMaxTurnsPerDay: Long = 3L,
     val promoCardEnabled: Boolean = true,
     val promoHeadline: String = "Invite friends to Nudgy",
     val promoSubtitle: String = "Share daily rhythms & achieve streaks together.",
@@ -61,6 +66,8 @@ class NudgyRemoteConfig {
                     KEY_AD_INTERSTITIAL_UNIT_ID to "ca-app-pub-3940256099942544/1033173712",
                     KEY_AD_BANNER_UNIT_ID to "ca-app-pub-3940256099942544/6300978111",
                     KEY_AD_REWARDED_UNIT_ID to "ca-app-pub-3940256099942544/5224354917",
+                    KEY_CHAT_FREE_TURNS_PER_DAY to 5L,
+                    KEY_AD_REWARDED_MAX_TURNS_PER_DAY to 3L,
                     KEY_PROMO_CARD_ENABLED to true,
                     KEY_PROMO_HEADLINE to "Invite friends to Nudgy",
                     KEY_PROMO_SUBTITLE to "Share daily rhythms & achieve streaks together.",
@@ -81,6 +88,8 @@ class NudgyRemoteConfig {
                             adInterstitialUnitId = rc.getString(KEY_AD_INTERSTITIAL_UNIT_ID).ifEmpty { "ca-app-pub-3940256099942544/1033173712" },
                             adBannerUnitId = rc.getString(KEY_AD_BANNER_UNIT_ID).ifEmpty { "ca-app-pub-3940256099942544/6300978111" },
                             adRewardedUnitId = rc.getString(KEY_AD_REWARDED_UNIT_ID).ifEmpty { "ca-app-pub-3940256099942544/5224354917" },
+                            chatFreeTurnsPerDay = rc.getLong(KEY_CHAT_FREE_TURNS_PER_DAY).takeIf { it > 0 } ?: 5L,
+                            adRewardedMaxTurnsPerDay = rc.getLong(KEY_AD_REWARDED_MAX_TURNS_PER_DAY).takeIf { it > 0 } ?: 3L,
                             promoCardEnabled = rc.getBoolean(KEY_PROMO_CARD_ENABLED),
                             promoHeadline = rc.getString(KEY_PROMO_HEADLINE).ifEmpty { "Invite friends to Nudgy" },
                             promoSubtitle = rc.getString(KEY_PROMO_SUBTITLE).ifEmpty { "Share daily rhythms & achieve streaks together." },
@@ -108,6 +117,8 @@ class NudgyRemoteConfig {
         const val KEY_AD_INTERSTITIAL_UNIT_ID = "ad_interstitial_unit_id"
         const val KEY_AD_BANNER_UNIT_ID = "ad_banner_unit_id"
         const val KEY_AD_REWARDED_UNIT_ID = "ad_rewarded_unit_id"
+        const val KEY_CHAT_FREE_TURNS_PER_DAY = "chat_free_turns_per_day"
+        const val KEY_AD_REWARDED_MAX_TURNS_PER_DAY = "ad_rewarded_max_turns_per_day"
         const val KEY_PROMO_CARD_ENABLED = "promo_card_enabled"
         const val KEY_PROMO_HEADLINE = "promo_card_headline"
         const val KEY_PROMO_SUBTITLE = "promo_card_subtitle"

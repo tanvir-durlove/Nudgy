@@ -142,5 +142,27 @@ class ReminderManager(private val context: Context) {
         fun getRequestCode(taskId: String): Int {
             return taskId.hashCode() and 0x7FFFFFFF
         }
+
+        /**
+         * Task due-reminders fire this long before the due time, so the user
+         * gets advance notice (e.g. a 5 PM doctor visit reminds at 3 PM).
+         * The 30-minute snooze and group-item arrival notifications are
+         * unaffected — they carry their own explicit trigger time.
+         */
+        const val REMINDER_LEAD_MILLIS: Long = 2 * 60 * 60 * 1000L
+
+        /**
+         * The moment a task's due-reminder fires. An explicitly requested
+         * reminder time (e.g. "remind me at 3 PM") always wins. Otherwise
+         * the reminder fires [REMINDER_LEAD_MILLIS] before the due time;
+         * when that would already be in the past (e.g. "remind me in
+         * 30 minutes") the due time itself is used, so the reminder still
+         * fires.
+         */
+        fun dueReminderTriggerMillis(reminderEpochMillis: Long?, dueEpochMillis: Long): Long {
+            reminderEpochMillis?.let { return it }
+            val lead = dueEpochMillis - REMINDER_LEAD_MILLIS
+            return if (lead > System.currentTimeMillis()) lead else dueEpochMillis
+        }
     }
 }

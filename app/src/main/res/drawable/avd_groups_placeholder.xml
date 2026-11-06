@@ -1,0 +1,12 @@
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_groups_placeholder">
+    <target
+        android:name="person_left"
+        android:animation="@animator/groups_bob_left" />
+    <target
+        android:name="person_center"
+        android:animation="@animator/groups_bob_center" />
+    <target
+        android:name="person_right"
+        android:animation="@animator/groups_bob_right" />
+</animated-vector>

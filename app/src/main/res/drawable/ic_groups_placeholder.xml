@@ -1,0 +1,38 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+    <!-- Peach backdrop circle -->
+    <path
+        android:name="backdrop"
+        android:fillColor="#FDF1F0"
+        android:pathData="M8,60 a52,52 0 1,0 104,0 a52,52 0 1,0 -104,0 Z" />
+    <!-- Left person (gold) -->
+    <group android:name="person_left">
+        <path
+            android:fillColor="#F6DE95"
+            android:pathData="M28,50 a10,10 0 1,0 20,0 a10,10 0 1,0 -20,0 Z" />
+        <path
+            android:fillColor="#F6DE95"
+            android:pathData="M22,96 L22,82 A16,16 0 0,1 54,82 L54,96 Z" />
+    </group>
+    <!-- Center person (coral, forward) -->
+    <group android:name="person_center">
+        <path
+            android:fillColor="#CC3F27"
+            android:pathData="M48,44 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0 Z" />
+        <path
+            android:fillColor="#CC3F27"
+            android:pathData="M42,100 L42,78 A18,18 0 0,1 78,78 L78,100 Z" />
+    </group>
+    <!-- Right person (light coral) -->
+    <group android:name="person_right">
+        <path
+            android:fillColor="#FF8E78"
+            android:pathData="M72,50 a10,10 0 1,0 20,0 a10,10 0 1,0 -20,0 Z" />
+        <path
+            android:fillColor="#FF8E78"
+            android:pathData="M66,96 L66,82 A16,16 0 0,1 98,82 L98,96 Z" />
+    </group>
+</vector>

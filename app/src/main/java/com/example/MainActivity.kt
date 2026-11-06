@@ -15,7 +15,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.Scaffold
@@ -45,7 +47,10 @@ import com.example.ai.ClientIntentPreFilter
 import com.example.ai.GeminiClient
 import com.example.ai.PreFilterResult
 import com.example.ai.VoiceAssistantManager
+import com.example.ads.ChatTurnCap
+import com.example.ads.ChatTurnConsumeResult
 import com.example.ads.NudgyAds
+import com.example.ads.NudgyBannerAd
 import com.example.analytics.NudgyAnalytics
 import com.example.analytics.NudgyRemoteConfig
 import com.example.analytics.RemoteConfigValues
@@ -99,6 +104,16 @@ private const val KEY_PENDING_GROUP_CODE = "pending_group_code"
 // the network.
 private const val SPLASH_MIN_SHOW_MS = 1200L
 private const val SPLASH_MAX_WAIT_MS = 1500L
+
+// Ads: tabs that show the bottom banner. Chat never shows one (the banner
+// must not sit over the chat input), and neither do sheets/dialogs, which
+// render above the scaffold content.
+private val BANNER_DESTINATIONS = setOf(
+    NudgyNavDestination.HOME,
+    NudgyNavDestination.TASKS,
+    NudgyNavDestination.CALENDAR,
+    NudgyNavDestination.GROUPS
+)
 
 class MainActivity : ComponentActivity() {
     private lateinit var authManager: AuthManager
@@ -502,6 +517,78 @@ fun NudgyAppScaffold(
             NudgyAds.loadInterstitial(context, fetchedId)
         }
     }
+    // Ads: rewarded ad for Chat — preloaded with the Remote Config unit
+    // ID, same once-per-ID pattern as the interstitial. The reward (+1
+    // chat turn) is granted only by the onUserEarnedReward callback in
+    // showRewarded, never on load or on show.
+    var appliedRewardedUnitId by remember { mutableStateOf(NudgyAds.TEST_REWARDED_UNIT_ID) }
+    LaunchedEffect(remoteValues.adRewardedUnitId) {
+        val fetchedId = remoteValues.adRewardedUnitId
+        if (appliedRewardedUnitId != fetchedId) {
+            appliedRewardedUnitId = fetchedId
+            NudgyAds.loadRewarded(context, fetchedId)
+        }
+    }
+    // Ads: free daily chat-turn cap (RC: chat_free_turns_per_day, default
+    // 5) + rewarded bonus turns (RC: ad_rewarded_max_turns_per_day,
+    // default 3). The cap gates ONLY Gemini calls (see handleUserChat) —
+    // local intent handling stays free and unblocked.
+    var chatCapState by remember {
+        mutableStateOf(
+            ChatTurnCap.snapshot(
+                context,
+                remoteValues.chatFreeTurnsPerDay,
+                remoteValues.adRewardedMaxTurnsPerDay
+            )
+        )
+    }
+    fun refreshChatCapState() {
+        chatCapState = ChatTurnCap.snapshot(
+            context,
+            remoteValues.chatFreeTurnsPerDay,
+            remoteValues.adRewardedMaxTurnsPerDay
+        )
+    }
+    LaunchedEffect(remoteValues.chatFreeTurnsPerDay, remoteValues.adRewardedMaxTurnsPerDay) {
+        refreshChatCapState()
+    }
+    val rewardedReady by NudgyAds.rewardedReady.collectAsStateWithLifecycle()
+    val rewardedLoadError by NudgyAds.rewardedLoadError.collectAsStateWithLifecycle()
+    // Ads: rewarded entry in Chat. The +1 turn is banked ONLY when the ad
+    // reports the reward (completed viewing); a closed or skipped ad
+    // grants nothing. The granted turn does not resend the pending
+    // prompt — the user sends their message again.
+    fun watchRewardedAdForChatTurn() {
+        val activity = context as? Activity ?: return
+        val shown = NudgyAds.showRewarded(activity) {
+            val granted = ChatTurnCap.grantRewardedTurn(
+                context,
+                remoteValues.chatFreeTurnsPerDay,
+                remoteValues.adRewardedMaxTurnsPerDay
+            )
+            refreshChatCapState()
+            if (!granted) {
+                Toast.makeText(
+                    context,
+                    "Today's rewarded turns are used up.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+        if (!shown) {
+            Toast.makeText(
+                context,
+                "The ad isn't ready yet — please try again in a moment.",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    // Ads: retry a failed rewarded load. The Chat button stays tappable
+    // while a load error is present, so a failed load never strands it.
+    fun retryRewardedAdLoad() {
+        NudgyAds.loadRewarded(context, remoteValues.adRewardedUnitId)
+    }
     val adsPrefs = remember { context.getSharedPreferences("nudgy_ads", android.content.Context.MODE_PRIVATE) }
     var lastCompletedCount by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(dailyStats.completed) {
@@ -583,21 +670,44 @@ fun NudgyAppScaffold(
                         voiceAssistantManager.speak(preFilterResult.responseText)
                     }
                     is PreFilterResult.Unhandled -> {
-                        val history = chatMessages.map { Pair(it.text, it.senderIsUser) }
-                        val responseText = geminiClient.generateNudgyResponse(
-                            userMessage = prompt,
-                            recentHistory = history,
-                            userMemories = memories.map { it.content },
-                            modelVersion = remoteConfigValues.geminiModelVersion
-                        )
-                        val geminiMsg = ChatMessage(
-                            id = UUID.randomUUID().toString(),
-                            senderIsUser = false,
-                            text = responseText,
-                            quickSuggestions = listOf("Plan my day", "Show today's tasks", "Find free time")
-                        )
-                        chatRepository.addMessage(user.uid, geminiMsg)
-                        voiceAssistantManager.speak(responseText)
+                        // Ads: the free daily cap gates Gemini turns only.
+                        // A local (preFilter-handled) reply above never
+                        // consumes a turn and is never blocked by the cap.
+                        when (ChatTurnCap.tryConsumeTurn(
+                            context,
+                            remoteValues.chatFreeTurnsPerDay,
+                            remoteValues.adRewardedMaxTurnsPerDay
+                        )) {
+                            ChatTurnConsumeResult.CAPPED -> {
+                                refreshChatCapState()
+                                chatRepository.addMessage(
+                                    user.uid,
+                                    ChatMessage(
+                                        id = UUID.randomUUID().toString(),
+                                        senderIsUser = false,
+                                        text = "That's all 5 free answers for today. Watch one short ad and I'll answer 1 more question."
+                                    )
+                                )
+                            }
+                            else -> {
+                                refreshChatCapState()
+                                val history = chatMessages.map { Pair(it.text, it.senderIsUser) }
+                                val responseText = geminiClient.generateNudgyResponse(
+                                    userMessage = prompt,
+                                    recentHistory = history,
+                                    userMemories = memories.map { it.content },
+                                    modelVersion = remoteConfigValues.geminiModelVersion
+                                )
+                                val geminiMsg = ChatMessage(
+                                    id = UUID.randomUUID().toString(),
+                                    senderIsUser = false,
+                                    text = responseText,
+                                    quickSuggestions = listOf("Plan my day", "Show today's tasks", "Find free time")
+                                )
+                                chatRepository.addMessage(user.uid, geminiMsg)
+                                voiceAssistantManager.speak(responseText)
+                            }
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -638,12 +748,17 @@ fun NudgyAppScaffold(
                 )
             }
         ) { innerPadding ->
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                when (currentDestination) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    when (currentDestination) {
                     NudgyNavDestination.HOME -> {
                         HomeScreen(
                             user = user,
@@ -705,7 +820,12 @@ fun NudgyAppScaffold(
                                     chatRepository.markFocusActionCompleted(messageId)
                                     analytics.logFocusTimeBlocked(45)
                                 }
-                            }
+                            },
+                            chatCapState = chatCapState,
+                            rewardedAdReady = rewardedReady,
+                            onWatchRewardedAd = { watchRewardedAdForChatTurn() },
+                            rewardedLoadError = rewardedLoadError,
+                            onRetryRewardedAd = { retryRewardedAdLoad() }
                         )
                     }
 
@@ -797,7 +917,8 @@ fun NudgyAppScaffold(
                                 }
                             },
                             prefillJoinCode = groupJoinPrefill,
-                            onPrefillJoinCodeConsumed = { groupJoinPrefill = null }
+                            onPrefillJoinCodeConsumed = { groupJoinPrefill = null },
+                            onSignInClick = { showProfileSheet = true }
                         )
                     }
 
@@ -847,7 +968,20 @@ fun NudgyAppScaffold(
                         )
                     }
                 }
+                }
 
+                // Ads: anchored adaptive banner, bottom of the tab content.
+                // One RC unit ID reused on all four tabs; never on Chat (no
+                // banner over the chat input), and never when ads are off
+                // or consent does not allow ads — no empty gap then. The
+                // slot reserves real layout space, so the banner never
+                // floats over content or the bottom navigation bar.
+                if (remoteValues.adsEnabled &&
+                    currentDestination in BANNER_DESTINATIONS &&
+                    NudgyAds.canRequestAds(context)
+                ) {
+                    NudgyBannerAd(unitId = remoteValues.adBannerUnitId)
+                }
             }
         }
 
