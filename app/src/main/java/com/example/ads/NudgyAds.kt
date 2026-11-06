@@ -131,6 +131,11 @@ object NudgyAds {
         try {
             MobileAds.initialize(context.applicationContext) {
                 loadInterstitial(context, currentUnitId)
+                // Rewarded is preloaded here too — nothing else triggers a
+                // first load (the MainActivity effect only reloads when the
+                // Remote Config ID changes, and the Chat button is disabled
+                // while no ad is ready).
+                loadRewarded(context, currentRewardedUnitId)
             }
         } catch (e: Exception) {
             Log.w(TAG, "MobileAds init failed: ${e.message}")
@@ -265,6 +270,12 @@ object NudgyAds {
     private val _rewardedReady = MutableStateFlow(false)
     val rewardedReady: StateFlow<Boolean> = _rewardedReady.asStateFlow()
 
+    // Last rewarded load failure, if any. Cleared when a load starts or
+    // succeeds — the Chat screen shows a retry affordance while it is set,
+    // so a failed load can never strand the button on "Loading ad…" forever.
+    private val _rewardedLoadError = MutableStateFlow<String?>(null)
+    val rewardedLoadError: StateFlow<String?> = _rewardedLoadError.asStateFlow()
+
     /**
      * Preloads a rewarded ad for [unitId]. An empty or malformed ID falls
      * back to the test ID (logged, never a crash). If an ad is already
@@ -283,6 +294,7 @@ object NudgyAds {
         }
         if (rewardedLoading) return
         rewardedLoading = true
+        _rewardedLoadError.value = null
         try {
             RewardedAd.load(
                 context.applicationContext,
@@ -294,6 +306,7 @@ object NudgyAds {
                         loadedRewardedUnitId = effectiveId
                         rewardedLoading = false
                         _rewardedReady.value = true
+                        _rewardedLoadError.value = null
                     }
 
                     override fun onAdFailedToLoad(error: LoadAdError) {
@@ -301,6 +314,7 @@ object NudgyAds {
                         loadedRewardedUnitId = null
                         rewardedLoading = false
                         _rewardedReady.value = false
+                        _rewardedLoadError.value = error.message
                         Log.w(TAG, "Rewarded load failed: ${error.message}")
                     }
                 }
@@ -308,6 +322,7 @@ object NudgyAds {
         } catch (e: Exception) {
             rewardedLoading = false
             _rewardedReady.value = false
+            _rewardedLoadError.value = e.message
             Log.w(TAG, "Rewarded load error: ${e.message}")
         }
     }
