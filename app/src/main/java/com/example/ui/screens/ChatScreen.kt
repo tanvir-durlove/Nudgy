@@ -121,7 +121,9 @@ fun ChatScreen(
     // hit. The button grants +1 AI turn only after a completed ad view.
     chatCapState: ChatCapState? = null,
     rewardedAdReady: Boolean = false,
+    rewardedLoadError: String? = null,
     onWatchRewardedAd: () -> Unit = {},
+    onRetryRewardedAd: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -609,6 +611,9 @@ fun ChatScreen(
             // completed ad view; a closed or skipped ad grants nothing.
             // Local (preFilter) commands still work while capped.
             if (chatCapState?.isCapped == true) {
+                // A failed rewarded load leaves the button tappable as a
+                // retry — the user must never be stranded on "Loading ad…".
+                val showRewardedRetry = !rewardedAdReady && rewardedLoadError != null
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -625,7 +630,7 @@ fun ChatScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = "You've used today's free AI turns",
+                            text = "Want 1 more answer?",
                             color = NudgyCharcoal,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
@@ -634,12 +639,12 @@ fun ChatScreen(
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = if (chatCapState.canEarnMoreRewarded) {
-                                "Watch a short ad to get +1 AI turn " +
+                                "Watch a short ad to unlock 1 more AI answer. " +
                                     "(${chatCapState.rewardedTurnsGrantedToday} of " +
-                                    "${chatCapState.maxRewardedTurnsPerDay} rewarded turns used today)"
+                                    "${chatCapState.maxRewardedTurnsPerDay} bonus answers used today)"
                             } else {
-                                "You've used all ${chatCapState.maxRewardedTurnsPerDay} " +
-                                    "rewarded turns for today — come back tomorrow."
+                                "That's all ${chatCapState.maxRewardedTurnsPerDay} bonus answers for today — " +
+                                    "fresh free answers tomorrow."
                             },
                             color = NudgyMuted,
                             fontSize = 13.sp,
@@ -647,8 +652,9 @@ fun ChatScreen(
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Button(
-                            onClick = onWatchRewardedAd,
-                            enabled = chatCapState.canEarnMoreRewarded && rewardedAdReady,
+                            onClick = if (showRewardedRetry) onRetryRewardedAd else onWatchRewardedAd,
+                            enabled = chatCapState.canEarnMoreRewarded &&
+                                (rewardedAdReady || rewardedLoadError != null),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = NudgyAccent,
                                 contentColor = Color.White,
@@ -658,7 +664,11 @@ fun ChatScreen(
                             shape = RoundedCornerShape(100.dp)
                         ) {
                             Text(
-                                text = if (rewardedAdReady) "Watch ad for +1 turn" else "Loading ad…",
+                                text = when {
+                                    rewardedAdReady || !chatCapState.canEarnMoreRewarded -> "Watch ad for +1 answer"
+                                    showRewardedRetry -> "Ad didn't load — tap to retry"
+                                    else -> "Loading ad…"
+                                },
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold
                             )
