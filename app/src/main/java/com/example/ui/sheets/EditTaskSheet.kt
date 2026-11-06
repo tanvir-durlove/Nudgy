@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.local.entity.TaskEntity
 import com.example.data.model.Priority
 import com.example.data.model.TaskCategory
+import com.example.reminders.ReminderManager
 import com.example.ui.theme.NudgyAccent
 import com.example.ui.theme.NudgyCard
 import com.example.ui.theme.NudgyCardBorder
@@ -469,7 +470,7 @@ fun EditTaskSheet(
                             title = title.trim(),
                             description = if (description.isNotBlank()) description.trim() else null,
                             dueDateEpochMillis = finalDueMillis,
-                            reminderEpochMillis = if (reminderSet) finalDueMillis else null,
+                            reminderEpochMillis = if (reminderSet) ReminderManager.dueReminderTriggerMillis(null, finalDueMillis) else null,
                             priority = priority,
                             category = category,
                             reminderSet = reminderSet
