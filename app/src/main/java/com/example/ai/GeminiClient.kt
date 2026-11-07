@@ -149,7 +149,7 @@ class GeminiClient(private val context: Context? = null) {
                 }
                 add(content("user") { text(userMessage) })
             }
-            val response = model.generateContent(*contents.toTypedArray())
+            val response = model.generateContent(contents)
             response.text?.trim()?.ifEmpty { getLocalFallback(userMessage) }
                 ?: getLocalFallback(userMessage)
         } catch (e: Exception) {
