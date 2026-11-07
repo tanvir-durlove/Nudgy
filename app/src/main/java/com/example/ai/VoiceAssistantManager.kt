@@ -2,6 +2,7 @@ package com.example.ai
 
 import android.content.Context
 import android.content.Intent
+import android.media.RingtoneManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -168,6 +169,21 @@ class VoiceAssistantManager(private val context: Context) : TextToSpeech.OnInitL
         }
 
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "nudgy_speech_${System.currentTimeMillis()}")
+    }
+
+    /**
+     * Short reply sound for chat text replies (PR #35): the system default
+     * notification sound, played once. It runs on the notification stream,
+     * so silent / Do Not Disturb are respected, and a ~1-second ting can
+     * never linger in the background the way TTS did. Never throws.
+     */
+    fun playReplySound() {
+        try {
+            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            RingtoneManager.getRingtone(context.applicationContext, uri)?.play()
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not play chat reply sound", e)
+        }
     }
 
     fun stopSpeaking() {
