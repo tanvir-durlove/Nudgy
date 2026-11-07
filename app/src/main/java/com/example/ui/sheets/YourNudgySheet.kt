@@ -3,6 +3,7 @@ package com.example.ui.sheets
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -63,6 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.PrivacyTip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -82,6 +84,8 @@ import com.example.ui.theme.NudgyMuted
 import com.example.ui.theme.NudgyPeach
 import com.example.ui.theme.NudgyPrimary
 import kotlinx.coroutines.CoroutineScope
+
+private const val PRIVACY_POLICY_URL = "https://tanvir-durlove.github.io/nudgy/privacy-policy.html"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -340,6 +344,18 @@ fun YourNudgySheet(
                 icon = Icons.Outlined.Key,
                 title = "Gemini API Key (BYOK)",
                 onClick = { showApiKeyDialog = true }
+            )
+            HorizontalDivider(color = NudgyBorder.copy(alpha = 0.5f))
+
+            NudgyMenuItem(
+                icon = Icons.Outlined.PrivacyTip,
+                title = "Privacy Policy",
+                onClick = {
+                    onDismiss()
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_POLICY_URL))
+                    )
+                }
             )
 
             Spacer(modifier = Modifier.height(22.dp))
@@ -655,7 +671,7 @@ fun YourNudgySheet(
                             Toast.makeText(context, "Custom Gemini API Key saved!", Toast.LENGTH_SHORT).show()
                         } else {
                             settingsPrefs.edit().remove("custom_gemini_api_key").apply()
-                            Toast.makeText(context, "Using default API key", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Using Nudgy's built-in AI", Toast.LENGTH_SHORT).show()
                         }
                         showApiKeyDialog = false
                     },
@@ -669,7 +685,7 @@ fun YourNudgySheet(
                     onClick = {
                         customApiKeyInput = ""
                         settingsPrefs.edit().remove("custom_gemini_api_key").apply()
-                        Toast.makeText(context, "Reset to default key", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Using Nudgy's built-in AI", Toast.LENGTH_SHORT).show()
                         showApiKeyDialog = false
                     }
                 ) {
