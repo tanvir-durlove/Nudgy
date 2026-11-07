@@ -1,5 +1,10 @@
 package com.example.ui.sheets
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -55,9 +60,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.example.data.model.Priority
 import com.example.data.model.TaskCategory
 import com.example.ui.theme.NudgyAccent
@@ -102,6 +109,26 @@ fun CreateTaskSheet(
     var hasCustomTime by remember { mutableStateOf(false) }
     var reminderSet by remember { mutableStateOf(true) }
     var hasCustomDate by remember { mutableStateOf(false) }
+
+    // C10: surface the notification-permission state in the reminder
+    // toggle area — a denied permission must not masquerade as a working
+    // reminder. Re-read on every composition of the sheet.
+    val context = LocalContext.current
+    val notificationsBlocked = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.POST_NOTIFICATIONS
+        ) != PackageManager.PERMISSION_GRANTED
+    fun openNotificationSettings() {
+        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        }
+        try {
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            // No settings activity — the warning text still stands.
+        }
+    }
     var customDueDateMillis by remember { mutableStateOf<Long?>(null) }
     var showMoreOptions by remember { mutableStateOf(false) }
 
@@ -636,7 +663,11 @@ fun CreateTaskSheet(
                             color = NudgyCharcoal
                         )
                         Text(
-                            text = if (reminderSet) "Alert 2 hours before due time" else "No notification",
+                            // C10: when notifications are denied, say so
+                            // here instead of promising an alert.
+                            text = if (!reminderSet) "No notification"
+                                else if (notificationsBlocked) "Notifications are off — no alert will appear"
+                                else "Alert 2 hours before due time",
                             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
                             color = NudgyMuted
                         )
@@ -651,6 +682,33 @@ fun CreateTaskSheet(
                         checkedTrackColor = NudgyPrimary
                     )
                 )
+            }
+
+            // C10: the toggle must not masquerade as a working reminder
+            // when the OS will drop every notification — offer the fix
+            // right under the toggle.
+            if (reminderSet && notificationsBlocked) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 4.dp, top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Reminders won't appear until notifications are on.",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                        color = NudgyPrimary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = { openNotificationSettings() }) {
+                        Text(
+                            text = "Open settings",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                            color = NudgyPrimary
+                        )
+                    }
+                }
             }
 
             }
