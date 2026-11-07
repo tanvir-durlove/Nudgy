@@ -632,22 +632,38 @@ class CalendarRepository(
         // cloud sync was unreachable (e.g. the retired applet database id
         // era) exist only locally. Re-push them all — the write is an
         // idempotent upsert by document id. The completion flag is set only
-        // on success; without it this would re-push everything on every
-        // sync start and could resurrect events deleted on another device.
+        // after EVERY upload has returned success; if any upload fails
+        // (offline, Firestore error, app killed mid-upload) the flag stays
+        // unset and the backfill retries on the next sync start. Without
+        // the flag this would re-push everything on every sync start and
+        // could resurrect events deleted on another device.
         val backfillKey = "events_backfill_v1_$userId"
         if (!syncPrefs().getBoolean(backfillKey, false)) {
             repoScope.launch {
+                // Awaited per event: the flag below is set only if every
+                // upload succeeded. A failure anywhere leaves the flag
+                // unset, so the next startCloudSync retries the whole
+                // backfill (re-pushing an already-uploaded event is a
+                // harmless idempotent upsert by document id).
+                var allSucceeded = true
                 try {
                     // Group v1: group rows must never be pushed to the personal
                     // events collection (same rule as the export retry).
                     calendarDao.getAllEventsOnce(userId)
                         .filter { it.groupId == null }
                         .forEach { event ->
-                            syncEventToFirestore(userId, event)
+                            if (!uploadEventToFirestore(userId, event)) {
+                                allSucceeded = false
+                            }
                         }
-                    syncPrefs().edit().putBoolean(backfillKey, true).apply()
                 } catch (e: Exception) {
+                    allSucceeded = false
                     Log.w(TAG, "Events backfill failed: ${e.message}")
+                }
+                if (allSucceeded) {
+                    syncPrefs().edit().putBoolean(backfillKey, true).apply()
+                } else {
+                    Log.w(TAG, "Events backfill incomplete: flag left unset, will retry on next sync start")
                 }
             }
         }
@@ -658,34 +674,48 @@ class CalendarRepository(
         snapshotListener = null
     }
 
+    // Fire-and-forget wrapper kept for the ordinary call sites
+    // (Google Calendar import, addEvent, blockFocusTime, export retry):
+    // their behaviour is unchanged — the upload runs in the background
+    // and a failure is only logged. Only the backfill awaits outcomes
+    // (see uploadEventToFirestore below and startCloudSync).
     private fun syncEventToFirestore(userId: String, event: CalendarEventEntity) {
-        if (userId == com.example.auth.AuthManager.GUEST_USER_ID) return
-        repoScope.launch {
-            try {
-                val dbId = context.getString(R.string.firestore_database_id)
-                val firestore = FirebaseFirestore.getInstance(dbId)
-                val payload = hashMapOf<String, Any>(
-                    "id" to event.id,
-                    "userId" to event.userId,
-                    "title" to event.title,
-                    "startEpochMillis" to event.startEpochMillis,
-                    "endEpochMillis" to event.endEpochMillis,
-                    "eventType" to event.eventType,
-                    "isAllDay" to event.isAllDay,
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-                if (event.locationOrLink != null) payload["locationOrLink"] = event.locationOrLink
-                event.googleCalendarEventId?.let { payload["googleCalendarEventId"] = it }
-                payload["isFromGoogleCalendar"] = event.isFromGoogleCalendar
-                firestore.collection("users")
-                    .document(userId)
-                    .collection("events")
-                    .document(event.id)
-                    .set(payload, SetOptions.merge())
-                    .await()
-            } catch (e: Exception) {
-                Log.w(TAG, "Sync event to Firestore failed: ${e.message}")
-            }
+        repoScope.launch { uploadEventToFirestore(userId, event) }
+    }
+
+    // Awaited single-event upload. Returns true only when the Firestore
+    // write actually completed; false on any failure (including offline)
+    // or when there is nothing to upload (guest user). Callers that need
+    // to know the outcome — the backfill — must use this directly and
+    // must never treat a launched coroutine as success.
+    private suspend fun uploadEventToFirestore(userId: String, event: CalendarEventEntity): Boolean {
+        if (userId == com.example.auth.AuthManager.GUEST_USER_ID) return true
+        return try {
+            val dbId = context.getString(R.string.firestore_database_id)
+            val firestore = FirebaseFirestore.getInstance(dbId)
+            val payload = hashMapOf<String, Any>(
+                "id" to event.id,
+                "userId" to event.userId,
+                "title" to event.title,
+                "startEpochMillis" to event.startEpochMillis,
+                "endEpochMillis" to event.endEpochMillis,
+                "eventType" to event.eventType,
+                "isAllDay" to event.isAllDay,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            if (event.locationOrLink != null) payload["locationOrLink"] = event.locationOrLink
+            event.googleCalendarEventId?.let { payload["googleCalendarEventId"] = it }
+            payload["isFromGoogleCalendar"] = event.isFromGoogleCalendar
+            firestore.collection("users")
+                .document(userId)
+                .collection("events")
+                .document(event.id)
+                .set(payload, SetOptions.merge())
+                .await()
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Sync event to Firestore failed: ${e.message}")
+            false
         }
     }
 
