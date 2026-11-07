@@ -17,6 +17,13 @@ package com.example.ai
  * ALLOW — Gemini's own safety filters catch the gray zone, and the
  * existing local fallback handles a blocked call.
  *
+ * Violence against people matches STATED INTENT, not just how-to
+ * questions: "i want to kill somebody" refuses, while "i want to
+ * kill the meeting" is allowed — an intent phrase ("want to kill")
+ * refuses unless what follows it is a known idiom object
+ * ("the meeting", "the lights", "my time", "the exam", "boredom",
+ * "time", "it"). No object at all ("i want to kill") refuses.
+ *
  * Refusals are short and neutral, in the user's language (Bengali
  * default, detected from the prompt). No lecture, no moralizing, no
  * reporting, no stored flags. Self-harm is the one exception to
@@ -34,7 +41,9 @@ object ChatGuardrails {
         if (matchesSelfHarm(text)) {
             return GuardResult.Refused(selfHarm = true, replyText = selfHarmReply(prompt))
         }
-        if (matchesIllegal(text) || matchesSexual(text) || matchesHate(text)) {
+        if (matchesIllegal(text) || matchesSexual(text) || matchesHate(text) ||
+            matchesViolence(text)
+        ) {
             return GuardResult.Refused(selfHarm = false, replyText = refusalReply(prompt))
         }
         return GuardResult.Allowed
@@ -100,6 +109,82 @@ object ChatGuardrails {
         "আত্মহত্যা", "মরতে চাই", "মরে যেতে চাই",
         "নিজেকে শেষ", "নিজের ক্ষতি করবো", "নিজেকে মারবো"
     )
+
+    // ---- Violence against people: stated intent, not just how-to ----
+    // The first version only had how-to formulations ("how to kill
+    // someone"), so a stated intent slipped through: "i want to kill
+    // somebody" and "i want to kill,give me plan" became tasks instead
+    // of refusals (device test, PR #35). These patterns cover intent.
+    // Rule for the intent phrases: "want to kill" (and friends) refuse
+    // UNLESS what follows is a known idiom object ("the meeting",
+    // "the lights", "my time", "the exam", "boredom", "time", "it") —
+    // so "i want to kill the meeting" stays allowed while "i want to
+    // kill" (no object at all — a person is implied) refuses. The same
+    // object check applies to "murder" intents ("murder" has no idiom
+    // uses in planner language). Self-harm is checked first in
+    // check(), so "i want to kill myself" still gets the caring
+    // self-harm reply, not this refusal.
+    private val violencePersonPhrases = listOf(
+        "kill somebody", "kill someone", "kill him", "kill her",
+        "kill them", "kill people", "kill a person", "kill a man",
+        "kill a woman", "kill a child", "kill my boss", "kill the guy",
+        "kill that guy",
+        "murder somebody", "murder someone", "murder him", "murder her",
+        "murder them", "murder people"
+    )
+
+    private val violenceIntentPhrases = listOf(
+        "want to kill", "going to kill", "plan to kill", "help me kill",
+        "want to murder", "going to murder", "plan to murder", "help me murder"
+    )
+
+    private val violenceIdiomObjects = listOf(
+        "the meeting", "the lights", "my time", "the exam",
+        "boredom", "time", "it"
+    )
+
+    private val violenceBengaliPhrases = listOf(
+        "খুন করতে চাই", "কাউকে খুন", "কাউকে মারতে চাই",
+        "মানুষ খুন", "খুনের পরিকল্পনা"
+    )
+
+    private fun matchesViolence(text: String): Boolean =
+        violenceBengaliPhrases.any { text.contains(it) } ||
+            violencePersonPhrases.any { containsPhrase(text, it) } ||
+            violenceIntentPhrases.any { matchesIntent(text, it) }
+
+    /** Word-boundary phrase match for English: "kill a person" must not
+     *  match inside "kill a personal best". */
+    private fun containsPhrase(text: String, phrase: String): Boolean =
+        Regex("\\b" + Regex.escape(phrase) + "\\b").containsMatchIn(text)
+
+    /**
+     * An intent phrase ("want to kill") refuses unless what follows it
+     * is a known idiom object. An absent object ("i want to kill")
+     * refuses — a person is implied. Scans every occurrence, so
+     * "i want to kill the meeting and i want to kill him" still
+     * refuses on the second occurrence.
+     */
+    private fun matchesIntent(text: String, intent: String): Boolean {
+        var start = 0
+        while (true) {
+            val idx = text.indexOf(intent, start)
+            if (idx < 0) return false
+            val rest = text.substring(idx + intent.length)
+                .trimStart { !it.isLetter() }
+            if (!violenceIdiomObjects.any { startsWithObject(rest, it) }) {
+                return true
+            }
+            start = idx + intent.length
+        }
+    }
+
+    /** True if [rest] is exactly [obj], or starts with it followed by a
+     *  non-letter (end of text, space, comma, ...). */
+    private fun startsWithObject(rest: String, obj: String): Boolean {
+        if (!rest.startsWith(obj)) return false
+        return rest.length == obj.length || !rest[obj.length].isLetter()
+    }
 
     private fun matchesIllegal(text: String): Boolean =
         illegalPhrases.any { text.contains(it) }
