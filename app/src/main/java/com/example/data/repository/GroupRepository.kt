@@ -155,6 +155,10 @@ class GroupRepository(
                         mapOf(
                             "uid" to userId,
                             "displayName" to displayName,
+                            // B3: code proof for the member-create rule —
+                            // the creator's first member write must carry
+                            // the join code, like every join.
+                            "code" to code,
                             "joinedAt" to FieldValue.serverTimestamp()
                         )
                     )
@@ -221,6 +225,10 @@ class GroupRepository(
                     mapOf(
                         "uid" to userId,
                         "displayName" to displayName,
+                        // B3: code proof for the member-create rule — the
+                        // write must carry the join code the user entered,
+                        // verified against the groupCodes doc.
+                        "code" to code,
                         "joinedAt" to FieldValue.serverTimestamp()
                     )
                 )
