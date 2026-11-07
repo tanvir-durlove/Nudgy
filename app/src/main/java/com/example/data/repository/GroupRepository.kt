@@ -389,7 +389,9 @@ class GroupRepository(
                 "updatedAt" to FieldValue.serverTimestamp()
             )
             if (!task.description.isNullOrBlank()) payload["description"] = task.description!!
+            else payload["description"] = FieldValue.delete()
             if (task.reminderSet) payload["reminderEpochMillis"] = ReminderManager.dueReminderTriggerMillis(task.reminderEpochMillis, task.dueDateEpochMillis)
+            else payload["reminderEpochMillis"] = FieldValue.delete()
             updateGroupItem(groupId, task.id, payload)
             val existing = taskDao.getTaskById(task.id)
             val merged = task.copy(
@@ -629,6 +631,22 @@ class GroupRepository(
                 val fs = firestore()
                 val mirrors = fs.collection("users").document(userId)
                     .collection("groupMemberships").get().await().documents
+                // C12: the mirror is deleted atomically with membership —
+                // leaveGroup and deleteGroup remove the member doc and the
+                // mirror in one batch — so a local group with no mirror
+                // entry means "left on another device". Purge it here
+                // instead of letting it linger with frozen items. This runs
+                // on every sign-in (MainActivity) and costs zero extra
+                // reads (the mirror list is already fetched). A failed
+                // mirror read throws before this point, so a transient
+                // failure can never purge a healthy group.
+                val mirrorIds = mirrors.map { it.getString("groupId") ?: it.id }.toSet()
+                for (localId in groupDao.getGroupIdsOnce()) {
+                    if (localId !in mirrorIds) {
+                        Log.w(TAG, "restoreGroupsFromMirror: purging stale local group $localId (no mirror entry — left on another device)")
+                        purgeLocalGroup(userId, localId)
+                    }
+                }
                 for (mirror in mirrors) {
                     val groupId = mirror.getString("groupId") ?: continue
                     if (groupDao.getGroupById(groupId) != null) continue
