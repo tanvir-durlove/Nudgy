@@ -45,9 +45,17 @@ service cloud.firestore {
       allow read: if request.auth != null && (
         uid == request.auth.uid ||
         exists(/databases/$(database)/documents/groups/$(gid)/members/$(request.auth.uid)));
-      // Join: any signed-in user may write their OWN membership doc.
-      // The join code is the gate (shared secret, by design — see limitation).
-      allow create: if request.auth != null && uid == request.auth.uid;
+      // Join (B3): membership requires proof of the join code. The
+      // member-doc write must carry the code, verified against the
+      // groupCodes doc (groupCodes/{code}.groupId == gid). Both
+      // joinGroup() and createGroup() (creator's first member write)
+      // include "code" in the payload; a write without a matching
+      // code is denied, so the code can no longer be bypassed by
+      // writing the member doc directly.
+      allow create: if request.auth != null && uid == request.auth.uid
+        && 'code' in request.resource.data
+        && request.resource.data.code is string
+        && get(/databases/$(database)/documents/groupCodes/$(request.resource.data.code)).data.groupId == gid;
       // Leave: a member may delete their OWN membership doc. Creator
       // leave is not a thing in v1 — the creator deletes the group.
       allow delete: if request.auth != null && uid == request.auth.uid;
@@ -62,8 +70,10 @@ service cloud.firestore {
 
     // ---- Join codes: the code IS the document id (atomic uniqueness) ----
     match /groupCodes/{code} {
-      // Required for join lookup: any signed-in user may read a code mapping.
-      allow read: if request.auth != null;
+      // B3: get only — `allow read` also granted `list`, letting any
+      // signed-in user enumerate every join code. Nothing in the app
+      // lists this collection (join does a single doc get).
+      allow get: if request.auth != null;
       allow create: if request.auth != null &&
         get(/databases/$(database)/documents/groups/$(request.resource.data.groupId)).data.creatorUid == request.auth.uid;
       // Creator-only delete (group delete cascade; the group doc must

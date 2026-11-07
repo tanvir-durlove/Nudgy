@@ -41,10 +41,16 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE userId = :userId")
     suspend fun getAllTasksOnce(userId: String): List<TaskEntity>
 
-    @Query("SELECT * FROM tasks WHERE isCompleted = 0 AND reminderSet = 1 AND (reminderEpochMillis > :now OR (reminderEpochMillis IS NULL AND dueDateEpochMillis > :now))")
+    // B2: boot restore must select on the DUE time, not only on the stored
+    // trigger. The stored trigger is usually the computed 2h lead (due - 2h);
+    // after a reboot / app update inside the lead window it is already past
+    // while the due time is still ahead, and the old predicate excluded the
+    // task entirely. Keeping `reminderEpochMillis > :now` as well preserves
+    // the old coverage (explicit reminder after the due time, if any).
+    @Query("SELECT * FROM tasks WHERE isCompleted = 0 AND reminderSet = 1 AND (reminderEpochMillis > :now OR dueDateEpochMillis > :now)")
     suspend fun getPendingTasksWithReminders(now: Long): List<TaskEntity>
 
-    @Query("SELECT * FROM tasks WHERE userId = :userId AND isCompleted = 0 AND reminderSet = 1 AND (reminderEpochMillis > :now OR (reminderEpochMillis IS NULL AND dueDateEpochMillis > :now))")
+    @Query("SELECT * FROM tasks WHERE userId = :userId AND isCompleted = 0 AND reminderSet = 1 AND (reminderEpochMillis > :now OR dueDateEpochMillis > :now)")
     suspend fun getPendingTasksWithRemindersForUser(userId: String, now: Long): List<TaskEntity>
 
     @Query("SELECT * FROM tasks WHERE id = :id LIMIT 1")

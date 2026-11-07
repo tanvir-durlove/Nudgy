@@ -153,16 +153,28 @@ class ReminderManager(private val context: Context) {
 
         /**
          * The moment a task's due-reminder fires. An explicitly requested
-         * reminder time (e.g. "remind me at 3 PM") always wins. Otherwise
-         * the reminder fires [REMINDER_LEAD_MILLIS] before the due time;
-         * when that would already be in the past (e.g. "remind me in
-         * 30 minutes") the due time itself is used, so the reminder still
-         * fires.
+         * reminder time (e.g. "remind me at 3 PM") always wins while it
+         * is still in the future. Otherwise the reminder fires
+         * [REMINDER_LEAD_MILLIS] before the due time; when that would
+         * already be in the past (e.g. "remind me in 30 minutes") the
+         * due time itself is used, so the reminder still fires.
+         *
+         * B2: a stored trigger is usually the COMPUTED 2h lead
+         * (due - 2h), not an explicit request. If it is already past
+         * but the due time is still ahead (reboot / app update /
+         * un-complete / group arrival inside the lead window), fall
+         * back to the due time instead of returning the stale past
+         * trigger — otherwise every re-derivation (BootReceiver,
+         * toggleTaskCompletion, scheduleGroupTaskAlarm) drops the
+         * reminder entirely.
          */
         fun dueReminderTriggerMillis(reminderEpochMillis: Long?, dueEpochMillis: Long): Long {
-            reminderEpochMillis?.let { return it }
+            val now = System.currentTimeMillis()
+            reminderEpochMillis?.let {
+                return if (it > now) it else dueEpochMillis
+            }
             val lead = dueEpochMillis - REMINDER_LEAD_MILLIS
-            return if (lead > System.currentTimeMillis()) lead else dueEpochMillis
+            return if (lead > now) lead else dueEpochMillis
         }
     }
 }

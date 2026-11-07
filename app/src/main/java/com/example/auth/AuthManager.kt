@@ -419,11 +419,11 @@ class AuthManager(private val context: Context) {
                     purgeFirestoreSubcollection(userDocRef.collection("memories"))
                     purgeFirestoreSubcollection(userDocRef.collection("events"))
                     purgeFirestoreSubcollection(userDocRef.collection("chats"))
-                    try {
-                        userDocRef.delete().await()
-                    } catch (e: Exception) {
-                        Log.w(TAG, "User doc delete error: ${e.message}")
-                    }
+                    // B1: the user-doc delete must fail loudly too. If it
+                    // throws, deleteAccount aborts before user.delete()
+                    // (and before the local purge below), leaving the
+                    // account intact so the user can retry when back online.
+                    userDocRef.delete().await()
                     purgeLocalData(uid)
                 }
 
@@ -507,6 +507,12 @@ class AuthManager(private val context: Context) {
     }
 
     private suspend fun purgeFirestoreSubcollection(collection: CollectionReference) {
+        // B1: failures must NOT be swallowed. A failed purge aborts the
+        // whole deletion (see deleteAccount) so the account stays intact
+        // and the user can retry. Swallowing here used to orphan the
+        // user's Firestore data forever once user.delete() ran, because
+        // a re-signed-in user gets a new uid and can never satisfy
+        // isOwner(oldUid) again.
         try {
             val snapshot = collection.get().await()
             for (doc in snapshot.documents) {
@@ -514,6 +520,7 @@ class AuthManager(private val context: Context) {
             }
         } catch (e: Exception) {
             Log.w(TAG, "Subcollection purge error (${collection.path}): ${e.message}")
+            throw e
         }
     }
 
