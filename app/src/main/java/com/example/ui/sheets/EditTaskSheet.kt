@@ -466,11 +466,35 @@ fun EditTaskSheet(
                         } else {
                             currentDueDateMillis
                         }
+                        // C9: never recompute the reminder when the due time
+                        // is unchanged — pass the stored value through
+                        // untouched, so an explicit "remind me at due" (or
+                        // snoozed) reminder is not silently moved to due − 2h
+                        // or cancelled. Only when the due time actually
+                        // changed, recompute from the new due time, preserving
+                        // the explicit-vs-lead distinction: explicit-at-due
+                        // moves with due; a 2h lead recomputes from the new
+                        // due (past-lead → due clamp lives inside
+                        // dueReminderTriggerMillis, B2); any other stored
+                        // time is an explicit custom time and is kept as-is.
+                        // updateTask's explicitAtDue/custom branches then
+                        // resolve the passed value (reminder-on with a null
+                        // stored value recomputes the lead there).
+                        val dueChanged = finalDueMillis != task.dueDateEpochMillis
+                        val resolvedReminderMillis: Long? = when {
+                            !reminderSet -> null
+                            !dueChanged -> task.reminderEpochMillis
+                            task.reminderEpochMillis != null &&
+                                task.reminderEpochMillis == task.dueDateEpochMillis -> finalDueMillis
+                            task.reminderEpochMillis != null &&
+                                task.reminderEpochMillis != task.dueDateEpochMillis - ReminderManager.REMINDER_LEAD_MILLIS -> task.reminderEpochMillis
+                            else -> ReminderManager.dueReminderTriggerMillis(null, finalDueMillis)
+                        }
                         val updated = task.copy(
                             title = title.trim(),
                             description = if (description.isNotBlank()) description.trim() else null,
                             dueDateEpochMillis = finalDueMillis,
-                            reminderEpochMillis = if (reminderSet) ReminderManager.dueReminderTriggerMillis(null, finalDueMillis) else null,
+                            reminderEpochMillis = resolvedReminderMillis,
                             priority = priority,
                             category = category,
                             reminderSet = reminderSet
