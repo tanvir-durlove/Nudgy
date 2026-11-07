@@ -43,6 +43,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import com.example.ai.ChatGuardrails
 import com.example.ai.ClientIntentPreFilter
 import com.example.ai.GeminiClient
 import com.example.ai.LlmUsageCounter
@@ -635,12 +636,40 @@ fun NudgyAppScaffold(
 
     val chatMessages by chatRepository.observeMessages(user.uid).collectAsStateWithLifecycle(emptyList())
 
-    fun handleUserChat(prompt: String) {
+    /**
+     * Chat entry point for typed text, suggestion taps, and mic input.
+     * [fromVoice] is true only when the prompt came from the mic: the
+     * reply is then spoken back, as before. Typed replies (PR #35) are
+     * never read aloud — they play a short notification sound instead.
+     */
+    fun handleUserChat(prompt: String, fromVoice: Boolean = false) {
         val userMsg = ChatMessage(UUID.randomUUID().toString(), true, prompt)
         isThinking = true
 
         scope.launch {
             try {
+                // Chat guardrails (PR #35): FIRST, before the preFilter,
+                // before any cap is consumed, before any task or schedule
+                // is created — a refused message creates nothing anywhere
+                // and costs no Gemini turn. The user's own message is not
+                // stored either, so refused content never reaches the cloud.
+                when (val guard = ChatGuardrails.check(prompt)) {
+                    is ChatGuardrails.GuardResult.Refused -> {
+                        chatRepository.addMessage(
+                            user.uid,
+                            ChatMessage(
+                                id = UUID.randomUUID().toString(),
+                                senderIsUser = false,
+                                text = guard.replyText
+                            )
+                        )
+                        if (fromVoice) voiceAssistantManager.speak(guard.replyText)
+                        else voiceAssistantManager.playReplySound()
+                        return@launch
+                    }
+                    is ChatGuardrails.GuardResult.Allowed -> Unit
+                }
+
                 chatRepository.addMessage(user.uid, userMsg)
 
                 val preFilterResult = preFilter.tryHandle(
@@ -668,7 +697,10 @@ fun NudgyAppScaffold(
                             quickSuggestions = preFilterResult.quickSuggestions
                         )
                         chatRepository.addMessage(user.uid, handledMsg)
-                        voiceAssistantManager.speak(preFilterResult.responseText)
+                        // Chat sound (PR #35): typed replies play a short
+                        // notification ting; only mic input is spoken back.
+                        if (fromVoice) voiceAssistantManager.speak(preFilterResult.responseText)
+                        else voiceAssistantManager.playReplySound()
                     }
                     is PreFilterResult.Unhandled -> {
                         // Ads: the free daily cap gates Gemini turns only.
@@ -725,7 +757,10 @@ fun NudgyAppScaffold(
                                         quickSuggestions = listOf("Plan my day", "Show today's tasks", "Find free time")
                                     )
                                     chatRepository.addMessage(user.uid, geminiMsg)
-                                    voiceAssistantManager.speak(responseText)
+                                    // Chat sound (PR #35): typed replies play a short
+                                    // notification ting; only mic input is spoken back.
+                                    if (fromVoice) voiceAssistantManager.speak(responseText)
+                                    else voiceAssistantManager.playReplySound()
                                 }
                                 LlmUsageCounter.CounterResult.CAPPED -> {
                                     // Server counter is full while the local
@@ -854,7 +889,7 @@ fun NudgyAppScaffold(
                                 analytics.logVoiceUsed("voice_input")
                                 voiceAssistantManager.startListening(
                                     languageCode = "en-US",
-                                    onResult = { voiceText -> handleUserChat(voiceText) }
+                                    onResult = { voiceText -> handleUserChat(voiceText, fromVoice = true) }
                                 )
                             },
                             onStopVoice = { voiceAssistantManager.stopListening() },
