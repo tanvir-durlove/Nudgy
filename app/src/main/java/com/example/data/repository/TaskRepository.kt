@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Calendar
 import java.util.UUID
 
@@ -40,6 +41,79 @@ class TaskRepository(
     private val reminderManager = com.example.reminders.ReminderManager(context)
     private val repoScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var snapshotListener: ListenerRegistration? = null
+
+    companion object {
+        private const val KEY_PENDING_TASK_DELETES = "pending_task_deletes"
+        /** Per-item bound for a pending-delete retry (see drainPendingTaskDeletes). */
+        private const val PENDING_DELETE_TIMEOUT_MS = 10_000L
+    }
+
+    // ---------------------------------------------------------------- C13 pending deletes
+    //
+    // A local delete records the id here in the SAME step; the entry is
+    // removed only when the Firestore delete actually succeeds.
+    // startCloudSync drains this store BEFORE attaching the listener, and
+    // the listener skips ids still pending, so an offline/failed cloud
+    // delete can never resurrect the task on the next sync. SharedPreferences
+    // (no Room schema change): ids are UUIDs, stored as "userId/taskId".
+    private fun pendingDeletesPrefs() =
+        context.getSharedPreferences("nudgy_pending_deletes", Context.MODE_PRIVATE)
+
+    private fun recordPendingTaskDelete(userId: String, taskId: String) {
+        val prefs = pendingDeletesPrefs()
+        val updated = prefs.getStringSet(KEY_PENDING_TASK_DELETES, emptySet())
+            ?.toMutableSet() ?: mutableSetOf()
+        // commit() (synchronous): the record must be durable before the
+        // fire-and-forget cloud attempt that follows it.
+        if (updated.add("$userId/$taskId")) {
+            prefs.edit().putStringSet(KEY_PENDING_TASK_DELETES, updated).commit()
+        }
+    }
+
+    private fun removePendingTaskDelete(userId: String, taskId: String) {
+        val prefs = pendingDeletesPrefs()
+        val updated = prefs.getStringSet(KEY_PENDING_TASK_DELETES, emptySet())
+            ?.toMutableSet() ?: return
+        if (updated.remove("$userId/$taskId")) {
+            prefs.edit().putStringSet(KEY_PENDING_TASK_DELETES, updated).apply()
+        }
+    }
+
+    private fun pendingTaskDeleteIds(userId: String): Set<String> {
+        val prefix = "$userId/"
+        return pendingDeletesPrefs().getStringSet(KEY_PENDING_TASK_DELETES, emptySet())
+            .orEmpty().filter { it.startsWith(prefix) }
+            .map { it.removePrefix(prefix) }.toSet()
+    }
+
+    /** Retry every pending delete for this user. Bounded per item: an offline
+     *  delete().await() would otherwise suspend until connectivity returns
+     *  and stall the sync that follows. A timed-out/failed entry stays
+     *  pending for the next drain; the listener guard keeps the task from
+     *  resurrecting in the meantime. Deleting a doc that is already gone
+     *  succeeds, so a retry after a half-finished drain is harmless. */
+    private suspend fun drainPendingTaskDeletes(userId: String) {
+        if (userId == com.example.auth.AuthManager.GUEST_USER_ID) return
+        val dbId = context.getString(R.string.firestore_database_id)
+        val firestore = FirebaseFirestore.getInstance(dbId)
+        for (taskId in pendingTaskDeleteIds(userId)) {
+            val deleted = withTimeoutOrNull(PENDING_DELETE_TIMEOUT_MS) {
+                try {
+                    firestore.collection("users").document(userId).collection("tasks")
+                        .document(taskId).delete().await()
+                    true
+                } catch (e: Exception) {
+                    Log.w("TaskRepository", "Pending task delete failed for $taskId: ${e.message}")
+                    false
+                }
+            } ?: false
+            if (deleted) {
+                removePendingTaskDelete(userId, taskId)
+            } else {
+                Log.w("TaskRepository", "Pending task delete still outstanding for $taskId; will retry on next sync")
+            }
+        }
+    }
 
     fun observeAllTasks(userId: String): Flow<List<TaskEntity>> =
         taskDao.getAllTasksFlow(userId)
@@ -177,6 +251,13 @@ class TaskRepository(
             !task.reminderSet || task.isCompleted -> null
             passedReminderChanged -> task.reminderEpochMillis
             explicitAtDue -> task.dueDateEpochMillis
+            // C9: a stored reminder that is neither "at due" nor the 2h
+            // lead is an explicit custom time — keep it verbatim instead
+            // of silently replacing it with the lead. (EditTaskSheet only
+            // passes such a value through when the due time is unchanged,
+            // or when the due time changed and the stored time is custom.)
+            existing?.reminderEpochMillis != null &&
+                existing.reminderEpochMillis != existing.dueDateEpochMillis - ReminderManager.REMINDER_LEAD_MILLIS -> existing.reminderEpochMillis
             else -> ReminderManager.dueReminderTriggerMillis(null, task.dueDateEpochMillis)
         }
         val resolved = task.copy(reminderEpochMillis = resolvedReminder)
@@ -263,11 +344,17 @@ class TaskRepository(
         // Guests have no Firebase Auth identity — cloud calls would only
         // fail with permission-denied; local persistence is unaffected.
         if (userId == com.example.auth.AuthManager.GUEST_USER_ID) return
+        // C13: record the pending delete in the same step as the local
+        // delete (this runs synchronously on the caller's IO thread,
+        // before the fire-and-forget attempt below). Removed only when
+        // the cloud delete actually succeeds.
+        recordPendingTaskDelete(userId, taskId)
         repoScope.launch {
             try {
                 val dbId = context.getString(R.string.firestore_database_id)
                 val firestore = FirebaseFirestore.getInstance(dbId)
                 firestore.collection("users").document(userId).collection("tasks").document(taskId).delete().await()
+                removePendingTaskDelete(userId, taskId)
             } catch (e: Exception) {
                 Log.w("TaskRepository", "Failed to delete task from cloud: ${e.message}")
             }
@@ -281,6 +368,11 @@ class TaskRepository(
         val completed = taskDao.getCompletedTasksOnce(userId)
             .filter { it.groupId == null }
         if (completed.isNotEmpty() && userId != com.example.auth.AuthManager.GUEST_USER_ID) {
+            // C13: record every id BEFORE the local purge, so a failed
+            // cloud purge cannot resurrect them on the next sync. Entries
+            // are removed per item as their cloud delete succeeds; any
+            // id left behind is retried by the drain in startCloudSync.
+            completed.forEach { recordPendingTaskDelete(userId, it.id) }
             repoScope.launch {
                 try {
                     val dbId = context.getString(R.string.firestore_database_id)
@@ -288,6 +380,7 @@ class TaskRepository(
                     val tasksColl = firestore.collection("users").document(userId).collection("tasks")
                     for (task in completed) {
                         tasksColl.document(task.id).delete().await()
+                        removePendingTaskDelete(userId, task.id)
                     }
                 } catch (e: Exception) {
                     Log.w("TaskRepository", "Cloud completed tasks purge warning: ${e.message}")
@@ -300,6 +393,18 @@ class TaskRepository(
     fun startCloudSync(userId: String) {
         if (userId == com.example.auth.AuthManager.GUEST_USER_ID) return
         snapshotListener?.remove()
+        // C13: drain pending deletes BEFORE the listener attaches, so its
+        // initial snapshot cannot resurrect a task whose cloud delete
+        // failed. The drain is time-bounded; the listener additionally
+        // skips any id still pending (see below), so a timed-out drain
+        // still cannot resurrect.
+        repoScope.launch {
+            drainPendingTaskDeletes(userId)
+            attachTasksListener(userId)
+        }
+    }
+
+    private fun attachTasksListener(userId: String) {
         try {
             val dbId = context.getString(R.string.firestore_database_id)
             val firestore = FirebaseFirestore.getInstance(dbId)
@@ -317,6 +422,10 @@ class TaskRepository(
                                 when (dc.type) {
                                     DocumentChange.Type.ADDED, DocumentChange.Type.MODIFIED -> {
                                         val doc = dc.document
+                                        // C13: a task whose cloud delete is still
+                                        // pending must never be re-inserted by
+                                        // the initial snapshot (or any later one).
+                                        if (doc.id in pendingTaskDeleteIds(userId)) continue
                                         val localTask = taskDao.getTaskById(doc.id)
                                         if (localTask != null && !localTask.isSyncedToCloud) {
                                             // Local changes take precedence until uploaded
