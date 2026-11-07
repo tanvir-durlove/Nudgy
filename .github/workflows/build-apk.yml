@@ -92,6 +92,7 @@ jobs:
             # Verify the release APK signature before it can be uploaded or published.
             if [ -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" ]; then
               "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs build-artifacts/nudgy-release.apk
+            elif command -v apksigner >/dev/null 2>&1; then
               apksigner verify --print-certs build-artifacts/nudgy-release.apk
             else
               echo "WARNING: apksigner not found; skipping release APK signature verification" >&2
