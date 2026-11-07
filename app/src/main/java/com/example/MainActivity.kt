@@ -45,6 +45,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.example.ai.ClientIntentPreFilter
 import com.example.ai.GeminiClient
+import com.example.ai.LlmUsageCounter
 import com.example.ai.PreFilterResult
 import com.example.ai.VoiceAssistantManager
 import com.example.ads.ChatTurnCap
@@ -673,39 +674,83 @@ fun NudgyAppScaffold(
                         // Ads: the free daily cap gates Gemini turns only.
                         // A local (preFilter-handled) reply above never
                         // consumes a turn and is never blocked by the cap.
-                        when (ChatTurnCap.tryConsumeTurn(
+                        val consumeResult = ChatTurnCap.tryConsumeTurn(
                             context,
                             remoteValues.chatFreeTurnsPerDay,
                             remoteValues.adRewardedMaxTurnsPerDay
-                        )) {
-                            ChatTurnConsumeResult.CAPPED -> {
-                                refreshChatCapState()
-                                chatRepository.addMessage(
-                                    user.uid,
-                                    ChatMessage(
-                                        id = UUID.randomUUID().toString(),
-                                        senderIsUser = false,
-                                        text = "That's all 5 free answers for today. Watch one short ad and I'll answer 1 more question."
-                                    )
-                                )
-                            }
-                            else -> {
-                                refreshChatCapState()
-                                val history = chatMessages.map { Pair(it.text, it.senderIsUser) }
-                                val responseText = geminiClient.generateNudgyResponse(
-                                    userMessage = prompt,
-                                    recentHistory = history,
-                                    userMemories = memories.map { it.content },
-                                    modelVersion = remoteConfigValues.geminiModelVersion
-                                )
-                                val geminiMsg = ChatMessage(
+                        )
+                        if (consumeResult == ChatTurnConsumeResult.CAPPED) {
+                            refreshChatCapState()
+                            chatRepository.addMessage(
+                                user.uid,
+                                ChatMessage(
                                     id = UUID.randomUUID().toString(),
                                     senderIsUser = false,
-                                    text = responseText,
-                                    quickSuggestions = listOf("Plan my day", "Show today's tasks", "Find free time")
+                                    text = "That's all 5 free answers for today. Watch one short ad and I'll answer 1 more question."
                                 )
-                                chatRepository.addMessage(user.uid, geminiMsg)
-                                voiceAssistantManager.speak(responseText)
+                            )
+                        } else {
+                            refreshChatCapState()
+                            // Central key: server-side daily counter for
+                            // signed-in users only. Guests skip it (owner
+                            // decision: guest cap stays local-only, no
+                            // anonymous auth). The transaction fails closed:
+                            // offline or any error means NO Gemini call.
+                            val serverResult = if (user.isGuest) {
+                                LlmUsageCounter.CounterResult.ALLOWED
+                            } else {
+                                LlmUsageCounter.tryConsumeServerTurn(
+                                    uid = user.uid,
+                                    bucket = if (consumeResult == ChatTurnConsumeResult.BONUS)
+                                        LlmUsageCounter.Bucket.BONUS
+                                    else
+                                        LlmUsageCounter.Bucket.FREE,
+                                    freeCapPerDay = remoteValues.chatFreeTurnsPerDay,
+                                    bonusCapPerDay = remoteValues.adRewardedMaxTurnsPerDay
+                                )
+                            }
+                            when (serverResult) {
+                                LlmUsageCounter.CounterResult.ALLOWED -> {
+                                    val history = chatMessages.map { Pair(it.text, it.senderIsUser) }
+                                    val responseText = geminiClient.generateNudgyResponse(
+                                        userMessage = prompt,
+                                        recentHistory = history,
+                                        userMemories = memories.map { it.content },
+                                        modelVersion = remoteConfigValues.geminiModelVersion
+                                    )
+                                    val geminiMsg = ChatMessage(
+                                        id = UUID.randomUUID().toString(),
+                                        senderIsUser = false,
+                                        text = responseText,
+                                        quickSuggestions = listOf("Plan my day", "Show today's tasks", "Find free time")
+                                    )
+                                    chatRepository.addMessage(user.uid, geminiMsg)
+                                    voiceAssistantManager.speak(responseText)
+                                }
+                                LlmUsageCounter.CounterResult.CAPPED -> {
+                                    // Server counter is full while the local
+                                    // cap still had room (e.g. turns spent
+                                    // on another device). The local turn
+                                    // stays spent; refuse the call.
+                                    chatRepository.addMessage(
+                                        user.uid,
+                                        ChatMessage(
+                                            id = UUID.randomUUID().toString(),
+                                            senderIsUser = false,
+                                            text = "That's all 5 free answers for today. Watch one short ad and I'll answer 1 more question."
+                                        )
+                                    )
+                                }
+                                LlmUsageCounter.CounterResult.ERROR -> {
+                                    chatRepository.addMessage(
+                                        user.uid,
+                                        ChatMessage(
+                                            id = UUID.randomUUID().toString(),
+                                            senderIsUser = false,
+                                            text = "Sorry, I couldn't connect just now — please check your connection and try again."
+                                        )
+                                    )
+                                }
                             }
                         }
                     }

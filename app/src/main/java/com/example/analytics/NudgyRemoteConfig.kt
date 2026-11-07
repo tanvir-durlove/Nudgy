@@ -24,7 +24,7 @@ data class RemoteConfigValues(
     val promoCardEnabled: Boolean = true,
     val promoHeadline: String = "Invite friends to Nudgy",
     val promoSubtitle: String = "Share daily rhythms & achieve streaks together.",
-    val geminiModelVersion: String = "gemini-3.1-flash-lite-preview"
+    val geminiModelVersion: String = "gemini-3.5-flash-lite"
 )
 
 class NudgyRemoteConfig {
@@ -71,7 +71,7 @@ class NudgyRemoteConfig {
                     KEY_PROMO_CARD_ENABLED to true,
                     KEY_PROMO_HEADLINE to "Invite friends to Nudgy",
                     KEY_PROMO_SUBTITLE to "Share daily rhythms & achieve streaks together.",
-                    KEY_MODEL_VERSION to "gemini-3.1-flash-lite-preview"
+                    KEY_MODEL_VERSION to "gemini-3.5-flash-lite"
                 )
                 rc.setDefaultsAsync(defaults)
 
@@ -79,7 +79,7 @@ class NudgyRemoteConfig {
                     if (task.isSuccessful) {
                         val fetchedModel = rc.getString(KEY_MODEL_VERSION)
                         val sanitizedModel = when {
-                            fetchedModel.isEmpty() || fetchedModel.contains("1.5") || fetchedModel.contains("2.0") -> "gemini-3.1-flash-lite-preview"
+                            fetchedModel.isEmpty() || fetchedModel.contains("1.5") || fetchedModel.contains("2.0") || fetchedModel.contains("3.1") -> "gemini-3.5-flash-lite"
                             else -> fetchedModel
                         }
                         _configState.value = RemoteConfigValues(
