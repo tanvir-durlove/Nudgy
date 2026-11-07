@@ -146,9 +146,9 @@ jobs:
           gh release create "$TAG_NAME" build-artifacts/* \
             --title "Nudgy Android Release ($TAG_NAME)" \
             --notes "### Nudgy — Things Get Done ✨
-        Directly download the ready-to-use artifacts below:
-        - **nudgy.aab** — Google Play Android App Bundle (Play Store submission)
-        - **nudgy.apk** — Direct installable Android APK (Android 7.0+ / API 24-36)
-        Package: `com.nextgentool.nudgy`" \
+          Directly download the ready-to-use artifacts below:
+          - **nudgy.aab** — Google Play Android App Bundle (Play Store submission)
+          - **nudgy.apk** — Direct installable Android APK (Android 7.0+ / API 24-36)
+          Package: `com.nextgentool.nudgy`" \
             --draft=false \
             --prerelease=false || gh release upload "$TAG_NAME" build-artifacts/* --clobber || true
