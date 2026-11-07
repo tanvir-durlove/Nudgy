@@ -191,6 +191,13 @@ interface GroupDao {
 
     @Query("DELETE FROM groups WHERE groupId = :groupId")
     suspend fun deleteGroupById(groupId: String)
+
+    // C6: account deletion must clear the local groups mirror. The groups
+    // table has no userId column and getGroupsFlow() is unfiltered, so
+    // without this the next account on a shared device would see the
+    // deleted user's groups (names, join codes) in the Groups tab.
+    @Query("DELETE FROM groups")
+    suspend fun clearAllGroups()
 }
 
 @Dao
@@ -208,6 +215,11 @@ interface GroupMemberDao {
 
     @Query("DELETE FROM group_members WHERE groupId = :groupId")
     suspend fun deleteMembersByGroupId(groupId: String)
+
+    // C6: companion to GroupDao.clearAllGroups — the member cache holds
+    // other members' display names from the deleted user's groups.
+    @Query("DELETE FROM group_members")
+    suspend fun clearAllMembers()
 
     @Transaction
     suspend fun replaceMembers(groupId: String, members: List<GroupMemberEntity>) {
