@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nudgy bear foreground, converted from the SVG Tanvir sent (2026-11-07).
+     Bear only: no background rect, no NUDGY wordmark (VectorDrawable has no
+     <text>; launcher icons also stay text-free per the earlier no-text decision).
+     Gradients are per-shape (SVG objectBoundingBox -> viewport coords).
+     minSdk 24 supports vector gradients. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <!-- Ears -->
+    <path android:pathData="M122,146 a46,46 0 1,0 92,0 a46,46 0 1,0 -92,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="168"
+                android:startY="100"
+                android:endX="168"
+                android:endY="192"
+                android:type="linear">
+                <item android:offset="0" android:color="#FF6B5E" />
+                <item android:offset="1" android:color="#EE4A40" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M298,146 a46,46 0 1,0 92,0 a46,46 0 1,0 -92,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="344"
+                android:startY="100"
+                android:endX="344"
+                android:endY="192"
+                android:type="linear">
+                <item android:offset="0" android:color="#FF6B5E" />
+                <item android:offset="1" android:color="#EE4A40" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:fillColor="#FF9A8F"
+        android:pathData="M146,150 a24,24 0 1,0 48,0 a24,24 0 1,0 -48,0" />
+    <path
+        android:fillColor="#FF9A8F"
+        android:pathData="M318,150 a24,24 0 1,0 48,0 a24,24 0 1,0 -48,0" />
+    <!-- Head -->
+    <path android:pathData="M132,232 a124,104 0 1,0 248,0 a124,104 0 1,0 -248,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="256"
+                android:startY="128"
+                android:endX="256"
+                android:endY="336"
+                android:type="linear">
+                <item android:offset="0" android:color="#FF6B5E" />
+                <item android:offset="1" android:color="#EE4A40" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:fillAlpha="0.10"
+        android:fillColor="#FFFFFF"
+        android:pathData="M186,168 a70,26 0 1,0 140,0 a70,26 0 1,0 -140,0" />
+    <!-- Cheeks -->
+    <path android:pathData="M156,262 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="186"
+                android:centerY="262"
+                android:gradientRadius="30"
+                android:type="radial">
+                <item android:offset="0" android:color="#BFD93A33" />
+                <item android:offset="1" android:color="#00D93A33" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M296,262 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="326"
+                android:centerY="262"
+                android:gradientRadius="30"
+                android:type="radial">
+                <item android:offset="0" android:color="#BFD93A33" />
+                <item android:offset="1" android:color="#00D93A33" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Happy eyes -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M200,232 Q216,212 232,232"
+        android:strokeColor="#4A1814"
+        android:strokeLineCap="round"
+        android:strokeWidth="9" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M280,232 Q296,212 312,232"
+        android:strokeColor="#4A1814"
+        android:strokeLineCap="round"
+        android:strokeWidth="9" />
+    <!-- Muzzle -->
+    <path
+        android:fillAlpha="0.55"
+        android:fillColor="#FF8579"
+        android:pathData="M216,268 a40,30 0 1,0 80,0 a40,30 0 1,0 -80,0" />
+    <!-- Nose -->
+    <path
+        android:fillColor="#4A1814"
+        android:pathData="M242,254 Q256,246 270,254 Q268,268 256,270 Q244,268 242,254 Z" />
+    <!-- Smile -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M256,270 L256,278"
+        android:strokeColor="#4A1814"
+        android:strokeLineCap="round"
+        android:strokeWidth="6" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M232,276 Q256,304 280,276"
+        android:strokeColor="#4A1814"
+        android:strokeLineCap="round"
+        android:strokeWidth="7" />
+</vector>
