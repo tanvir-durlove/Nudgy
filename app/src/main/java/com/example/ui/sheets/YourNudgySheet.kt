@@ -625,8 +625,9 @@ fun YourNudgySheet(
             confirmButton = {
                 Button(
                     onClick = {
+                        // No scope passed on purpose: the deletion runs in
+                        // AuthManager's own scope, which survives sign-out.
                         authManager.deleteAccount(
-                            scope,
                             onComplete = {
                                 showDeleteConfirmDialog = false
                                 onDismiss()
