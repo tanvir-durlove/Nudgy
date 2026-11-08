@@ -1,0 +1,164 @@
+name: Build Nudgy Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Publish as a downloadable GitHub Release (direct APK download)'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Assemble & Package APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Set up Android SDK
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Accept Android SDK Licenses
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || yes | sdkmanager --licenses || true
+
+      - name: Set up Gradle Cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Configure Environment Secrets (.env)
+        run: |
+          if [ -n "${{ secrets.GEMINI_API_KEY }}" ]; then
+            echo "Injecting GEMINI_API_KEY from GitHub Secrets..."
+            echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
+          elif [ ! -f .env ]; then
+            echo "Using default .env.example..."
+            cp .env.example .env
+          fi
+
+      - name: Restore Debug Keystore
+        run: |
+          if [ ! -f debug.keystore ]; then
+            if [ -f debug.keystore.base64 ]; then
+              echo "Restoring debug.keystore from base64..."
+              base64 -d debug.keystore.base64 > debug.keystore
+            else
+              echo "Generating fallback debug keystore..."
+              keytool -genkey -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            fi
+          fi
+
+      - name: Grant Execute Permission to Gradlew
+        run: chmod +x gradlew
+
+      # Release and debug are built in separate steps: a debug failure must
+      # never block the release build (the release APK/AAB are the deliverable).
+      - name: Build Release (AAB for Google Play) & APK
+        run: |
+          if [ -n "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ]; then
+            echo "Configuring Release signing keystore..."
+            echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+            export KEYSTORE_PATH="$(pwd)/release.keystore"
+            export STORE_PASSWORD="${{ secrets.STORE_PASSWORD }}"
+            export KEY_PASSWORD="${{ secrets.KEY_PASSWORD }}"
+            ./gradlew bundleRelease assembleRelease --no-daemon --stacktrace
+          else
+            echo "No release keystore configured; skipping release build."
+          fi
+
+      - name: Build Debug (best effort)
+        continue-on-error: true
+        run: |
+          ./gradlew assembleDebug bundleDebug --no-daemon --stacktrace
+
+      - name: Prepare & Verify Artifacts
+        run: |
+          mkdir -p build-artifacts
+          # Copy APK
+          # When the release keystore is configured, the release APK must exist;
+          # never copy a debug APK into a release-named slot.
+          if [ -n "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ]; then
+            test -f app/build/outputs/apk/release/app-release.apk || { echo "ERROR: release APK missing although the release keystore is configured" >&2; exit 1; }
+            cp app/build/outputs/apk/release/app-release.apk build-artifacts/nudgy-release.apk
+            # Verify the release APK signature before it can be uploaded or published.
+            if [ -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" ]; then
+              "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs build-artifacts/nudgy-release.apk
+            elif command -v apksigner >/dev/null 2>&1; then
+              apksigner verify --print-certs build-artifacts/nudgy-release.apk
+            else
+              echo "WARNING: apksigner not found; skipping release APK signature verification" >&2
+            fi
+          elif [ "$GITHUB_REF" = "refs/heads/main" ] || [ "$GITHUB_REF" = "refs/heads/master" ] || [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then
+            echo "ERROR: release keystore secret is not configured for a main/tag build; refusing a debug-only build" >&2
+            exit 1
+          elif [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
+            cp app/build/outputs/apk/debug/app-debug.apk build-artifacts/nudgy-debug.apk
+          fi
+
+          # Copy Google Play Android App Bundle (AAB)
+          if [ -n "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ]; then
+            test -f app/build/outputs/bundle/release/app-release.aab || { echo "ERROR: release AAB missing although the release keystore is configured" >&2; exit 1; }
+            cp app/build/outputs/bundle/release/app-release.aab build-artifacts/nudgy-release.aab
+          elif [ "$GITHUB_REF" = "refs/heads/main" ] || [ "$GITHUB_REF" = "refs/heads/master" ] || [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then
+            echo "ERROR: release keystore secret is not configured for a main/tag build; refusing a debug-only build" >&2
+            exit 1
+          elif [ -f app/build/outputs/bundle/debug/app-debug.aab ]; then
+            cp app/build/outputs/bundle/debug/app-debug.aab build-artifacts/nudgy-debug.aab
+          fi
+
+          # Copy the R8 mapping file (release only) for deobfuscating
+          # Play Console crash reports. Debug builds have no mapping file.
+          if [ -f app/build/outputs/mapping/release/mapping.txt ]; then
+            cp app/build/outputs/mapping/release/mapping.txt build-artifacts/mapping.txt
+          fi
+
+          echo "Verifying build outputs..."
+          ls -lh build-artifacts/
+
+      # The artifact upload must never block the release delivery: when the
+      # Actions storage quota is full, the upload fails but the job — and the
+      # GitHub Release below — still go through. Release assets do not count
+      # toward the Actions storage quota.
+      - name: Upload Build Artifacts (APK & AAB)
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: nudgy-android-artifacts
+          path: build-artifacts/*
+          retention-days: 3
+
+      - name: Publish GitHub Release
+        if: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true') || startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="${{ github.ref_name }}"
+          if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "main" ] || [ "$TAG_NAME" = "master" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG_NAME="v1.0.${{ github.run_number }}"
+          fi
+          echo "Publishing release with tag: $TAG_NAME"
+          gh release create "$TAG_NAME" build-artifacts/* \
+            --title "Nudgy Android Release ($TAG_NAME)" \
+            --notes "### Nudgy — Things Get Done ✨
+          Directly download the ready-to-use artifacts below:
+          - **nudgy.aab** — Google Play Android App Bundle (Play Store submission)
+          - **nudgy.apk** — Direct installable Android APK (Android 7.0+ / API 24-36)
+          Package: \`com.nextgentool.nudgy\`" \
+            --draft=false \
+            --prerelease=false || gh release upload "$TAG_NAME" build-artifacts/* --clobber
