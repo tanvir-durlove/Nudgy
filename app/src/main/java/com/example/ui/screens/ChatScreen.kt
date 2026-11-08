@@ -244,7 +244,13 @@ fun ChatScreen(
                                     shape = RoundedCornerShape(100.dp),
                                     color = Color.Transparent,
                                     border = androidx.compose.foundation.BorderStroke(1.2.dp, Color(0xFFE2DCD1)),
-                                    modifier = Modifier.clickable { onSendMessage(prompt) }
+                                    // C1: disabled while a reply is pending —
+                                    // a second prompt must not start a second
+                                    // handleUserChat run (duplicate tasks /
+                                    // double-spent turns). The guard in
+                                    // MainActivity.handleUserChat is the
+                                    // backstop; this is the visible one.
+                                    modifier = Modifier.clickable(enabled = !isThinking) { onSendMessage(prompt) }
                                 ) {
                                     Text(
                                         text = prompt,
@@ -543,7 +549,9 @@ fun ChatScreen(
                                                     shape = RoundedCornerShape(100.dp),
                                                     color = NudgyCard,
                                                     border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder),
-                                                    modifier = Modifier.clickable { onSendMessage(suggestion) }
+                                                    // C1: disabled while thinking (see
+                                                    // quick-prompt pills above).
+                                                    modifier = Modifier.clickable(enabled = !isThinking) { onSendMessage(suggestion) }
                                                 ) {
                                                     Text(
                                                         text = suggestion,
@@ -728,7 +736,8 @@ fun ChatScreen(
                             .clip(CircleShape)
                             .background(NudgyPrimary)
                             .clickable {
-                                if (inputText.isNotBlank()) {
+                                // C1: dead while a reply is pending.
+                                if (!isThinking && inputText.isNotBlank()) {
                                     val textToSend = inputText.trim()
                                     inputText = ""
                                     onSendMessage(textToSend)

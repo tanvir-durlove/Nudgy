@@ -8,19 +8,26 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -33,7 +40,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import android.widget.Toast
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -70,6 +81,7 @@ import com.example.work.GroupPollWorker
 import com.example.data.repository.MemoryRepository
 import com.example.data.repository.TaskRepository
 import com.example.reminders.ReminderManager
+import com.example.ui.components.NudgySplashScreen
 import com.example.ui.components.NudgyTopBar
 import com.example.ui.dialogs.NudgyFloatingBubbleDialog
 import com.example.ui.navigation.NudgyBottomBar
@@ -87,6 +99,11 @@ import com.example.ui.sheets.GroupTaskDetailSheet
 import com.example.ui.sheets.NotificationsSheet
 import com.example.ui.sheets.YourNudgySheet
 import com.example.ui.theme.NudgyCanvas
+import com.example.ui.theme.NudgyCard
+import com.example.ui.theme.NudgyCardBorder
+import com.example.ui.theme.NudgyCharcoal
+import com.example.ui.theme.NudgyMuted
+import com.example.ui.theme.NudgyPrimary
 import com.example.ui.theme.NudgyTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -117,6 +134,15 @@ private val BANNER_DESTINATIONS = setOf(
     NudgyNavDestination.GROUPS
 )
 
+// C15: interstitial throttle (locked plan: max 1/session, 3–4 min gap,
+// never first session). Minimum gap is the low end of the locked 3–4 min
+// range; keys live in the "nudgy_ads" prefs alongside the completions
+// counter. The per-session flag itself is in-memory (remember), so a new
+// process starts clean; only the first-session marker is persisted.
+private const val INTERSTITIAL_MIN_GAP_MS = 3 * 60 * 1000L
+private const val KEY_LAST_INTERSTITIAL_SHOWN_AT = "last_interstitial_shown_at"
+private const val KEY_ADS_SESSION_SEEN = "nudgy_ads_session_seen"
+
 class MainActivity : ComponentActivity() {
     private lateinit var authManager: AuthManager
     private lateinit var taskRepository: TaskRepository
@@ -131,6 +157,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var analytics: NudgyAnalytics
     private lateinit var remoteConfig: NudgyRemoteConfig
     private val deepLinkJoinCodeFlow = MutableStateFlow<String?>(null)
+    // Set when the system splash is dismissed (see the exit listener in
+    // onCreate): the animated splash starts only after this, so its
+    // animation is never hidden behind the system splash overlay.
+    private val systemSplashGoneFlow = MutableStateFlow(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Splash screen: install BEFORE super.onCreate (required). It stays
@@ -141,6 +171,13 @@ class MainActivity : ComponentActivity() {
         // defaults in the meantime and swap to the fetched ID when it
         // arrives (see NudgyAds / the guarded LaunchedEffect below).
         val splashScreen = installSplashScreen()
+        // The custom animated splash starts only once the system splash
+        // is gone: dismiss it immediately here (same cream background,
+        // so the handoff is seamless) and signal the content below.
+        splashScreen.setOnExitAnimationListener { viewProvider ->
+            viewProvider.remove()
+            systemSplashGoneFlow.value = true
+        }
         val splashStartMs = SystemClock.elapsedRealtime()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -188,6 +225,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             val themePrefs = remember { getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE) }
             var themeMode by remember { mutableStateOf(themePrefs.getString("theme_mode", "system") ?: "system") }
+            val systemSplashGone by systemSplashGoneFlow.collectAsStateWithLifecycle()
+            var showSplash by remember { mutableStateOf(true) }
             NudgyTheme(
                 darkTheme = when (themeMode) {
                     "light" -> false
@@ -195,28 +234,40 @@ class MainActivity : ComponentActivity() {
                     else -> isSystemInDarkTheme()
                 }
             ) {
-                NudgyMainFlow(
-                    authManager = authManager,
-                    taskRepository = taskRepository,
-                    calendarRepository = calendarRepository,
-                    groupRepository = groupRepository,
-                    memoryRepository = memoryRepository,
-                    chatRepository = chatRepository,
-                    reminderManager = reminderManager,
-                    preFilter = preFilter,
-                    geminiClient = geminiClient,
-                    voiceAssistantManager = voiceAssistantManager,
-                    analytics = analytics,
-                    remoteConfig = remoteConfig,
-                    initialDestination = initialDestination,
-                    deepLinkJoinCodeFlow = deepLinkJoinCodeFlow,
-                    onDeepLinkCodeConsumed = { deepLinkJoinCodeFlow.value = null },
-                    themeMode = themeMode,
-                    onThemeModeChange = { mode ->
-                        themeMode = mode
-                        themePrefs.edit().putString("theme_mode", mode).apply()
-                    }
-                )
+                if (!systemSplashGone) {
+                    // System splash overlay still up; cream behind it so
+                    // no dark flash is possible when it dismisses.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xFFF4EFE4))
+                    )
+                } else if (showSplash) {
+                    NudgySplashScreen(onFinished = { showSplash = false })
+                } else {
+                    NudgyMainFlow(
+                        authManager = authManager,
+                        taskRepository = taskRepository,
+                        calendarRepository = calendarRepository,
+                        groupRepository = groupRepository,
+                        memoryRepository = memoryRepository,
+                        chatRepository = chatRepository,
+                        reminderManager = reminderManager,
+                        preFilter = preFilter,
+                        geminiClient = geminiClient,
+                        voiceAssistantManager = voiceAssistantManager,
+                        analytics = analytics,
+                        remoteConfig = remoteConfig,
+                        initialDestination = initialDestination,
+                        deepLinkJoinCodeFlow = deepLinkJoinCodeFlow,
+                        onDeepLinkCodeConsumed = { deepLinkJoinCodeFlow.value = null },
+                        themeMode = themeMode,
+                        onThemeModeChange = { mode ->
+                            themeMode = mode
+                            themePrefs.edit().putString("theme_mode", mode).apply()
+                        }
+                    )
+                }
             }
         }
     }
@@ -445,6 +496,33 @@ fun NudgyAppScaffold(
     var isThinking by remember { mutableStateOf(false) }
     var isCalendarConnected by remember { mutableStateOf(calendarRepository.hasCalendarPermissions()) }
 
+    // C10: notification permission — when POST_NOTIFICATIONS is denied
+    // the OS silently drops every reminder notification, so the denial
+    // must be visible wherever reminders are configured/shown (the
+    // Home/Tasks banner below, plus the CreateTaskSheet toggle row).
+    // Re-checked on resume: the user may grant it in system Settings
+    // and come back.
+    var notificationsBlocked by remember { mutableStateOf(false) }
+    var notificationBannerDismissed by remember { mutableStateOf(false) }
+    fun refreshNotificationPermissionState() {
+        notificationsBlocked = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+    }
+    LaunchedEffect(Unit) { refreshNotificationPermissionState() }
+    fun openNotificationSettings() {
+        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        }
+        try {
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Could not open notification settings: ${e.message}")
+        }
+    }
+
     // System Back: dismiss the topmost open surface first, then fall back
     // to the HOME tab. Only on HOME with nothing open does Back exit the
     // app (previously Back quit from any tab or sheet).
@@ -488,6 +566,8 @@ fun NudgyAppScaffold(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 taskRepository.syncDirtyTasksToCloud(user.uid, scope)
+                // C10: the user may have granted notifications in Settings.
+                refreshNotificationPermissionState()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -551,6 +631,18 @@ fun NudgyAppScaffold(
             remoteValues.adRewardedMaxTurnsPerDay
         )
     }
+    // C3: cap-exhausted message built from the live RC allowance, never
+    // hardcoded. When no more rewarded turn can be earned today, say the
+    // day's answers are done instead of promising an ad that cannot be
+    // watched (the rewarded button is disabled then).
+    fun capExhaustedMessage(): String {
+        val free = remoteValues.chatFreeTurnsPerDay
+        return if (chatCapState.canEarnMoreRewarded) {
+            "That's all $free free answers for today. Watch one short ad and I'll answer 1 more question."
+        } else {
+            "That's all $free free answers for today, and today's bonus answers are used up too. Fresh free answers tomorrow."
+        }
+    }
     LaunchedEffect(remoteValues.chatFreeTurnsPerDay, remoteValues.adRewardedMaxTurnsPerDay) {
         refreshChatCapState()
     }
@@ -593,15 +685,38 @@ fun NudgyAppScaffold(
     }
     val adsPrefs = remember { context.getSharedPreferences("nudgy_ads", android.content.Context.MODE_PRIVATE) }
     var lastCompletedCount by remember { mutableStateOf<Int?>(null) }
+    // C15: interstitial throttle (locked plan: max 1/session, 3–4 min gap,
+    // never first session). The per-session flag is in-memory, so a new
+    // process starts clean. isFirstSession is captured once, before the
+    // marker below is written — otherwise the first launch would mark
+    // itself as already seen.
+    var interstitialShownThisSession by remember { mutableStateOf(false) }
+    var isFirstSession by remember { mutableStateOf(!adsPrefs.getBoolean(KEY_ADS_SESSION_SEEN, false)) }
+    LaunchedEffect(Unit) {
+        adsPrefs.edit().putBoolean(KEY_ADS_SESSION_SEEN, true).apply()
+    }
     LaunchedEffect(dailyStats.completed) {
         val previous = lastCompletedCount
         lastCompletedCount = dailyStats.completed
         if (previous == null || dailyStats.completed <= previous) return@LaunchedEffect
         if (!remoteValues.adsEnabled) return@LaunchedEffect
         val sinceLastAd = adsPrefs.getInt("completions_since_ad", 0) + (dailyStats.completed - previous)
-        if (sinceLastAd >= remoteValues.adFrequencyTasks) {
-            adsPrefs.edit().putInt("completions_since_ad", 0).apply()
-            (context as? Activity)?.let { NudgyAds.showInterstitial(it) }
+        val gapElapsed = System.currentTimeMillis() -
+            adsPrefs.getLong(KEY_LAST_INTERSTITIAL_SHOWN_AT, 0L) >= INTERSTITIAL_MIN_GAP_MS
+        if (sinceLastAd >= remoteValues.adFrequencyTasks &&
+            gapElapsed && !interstitialShownThisSession && !isFirstSession
+        ) {
+            val shown = (context as? Activity)?.let { NudgyAds.showInterstitial(it) } == true
+            if (shown) {
+                // C15: the counter resets ONLY when an ad actually shows.
+                adsPrefs.edit()
+                    .putInt("completions_since_ad", 0)
+                    .putLong(KEY_LAST_INTERSTITIAL_SHOWN_AT, System.currentTimeMillis())
+                    .apply()
+                interstitialShownThisSession = true
+            } else {
+                adsPrefs.edit().putInt("completions_since_ad", sinceLastAd).apply()
+            }
         } else {
             adsPrefs.edit().putInt("completions_since_ad", sinceLastAd).apply()
         }
@@ -643,6 +758,12 @@ fun NudgyAppScaffold(
      * never read aloud — they play a short notification sound instead.
      */
     fun handleUserChat(prompt: String, fromVoice: Boolean = false) {
+        // C1: re-entrancy guard — ignore a new prompt while one is in
+        // flight. ChatScreen disables send/pills/chips while isThinking
+        // too; this is the backstop for Home quick actions and any other
+        // caller, so two runs can never create duplicate tasks or
+        // double-spend turns.
+        if (isThinking) return
         val userMsg = ChatMessage(UUID.randomUUID().toString(), true, prompt)
         isThinking = true
 
@@ -718,7 +839,8 @@ fun NudgyAppScaffold(
                                 ChatMessage(
                                     id = UUID.randomUUID().toString(),
                                     senderIsUser = false,
-                                    text = "That's all 5 free answers for today. Watch one short ad and I'll answer 1 more question."
+                                    // C3: built from the live RC allowance.
+                                    text = capExhaustedMessage()
                                 )
                             )
                         } else {
@@ -767,16 +889,31 @@ fun NudgyAppScaffold(
                                     // cap still had room (e.g. turns spent
                                     // on another device). The local turn
                                     // stays spent; refuse the call.
+                                    refreshChatCapState()
                                     chatRepository.addMessage(
                                         user.uid,
                                         ChatMessage(
                                             id = UUID.randomUUID().toString(),
                                             senderIsUser = false,
-                                            text = "That's all 5 free answers for today. Watch one short ad and I'll answer 1 more question."
+                                            // C3: no ad promise when no
+                                            // rewarded turn can be earned.
+                                            text = capExhaustedMessage()
                                         )
                                     )
                                 }
                                 LlmUsageCounter.CounterResult.ERROR -> {
+                                    // C2: the local turn was spent but no
+                                    // Gemini call happened (offline /
+                                    // transient error) — refund it, so a
+                                    // flaky connection cannot burn the
+                                    // day's allowance. No refund on CAPPED
+                                    // above: that is a deliberate trade-off.
+                                    ChatTurnCap.refundTurn(
+                                        context,
+                                        remoteValues.chatFreeTurnsPerDay,
+                                        remoteValues.adRewardedMaxTurnsPerDay
+                                    )
+                                    refreshChatCapState()
                                     chatRepository.addMessage(
                                         user.uid,
                                         ChatMessage(
@@ -833,6 +970,57 @@ fun NudgyAppScaffold(
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
+                // C10: non-intrusive warning, Home/Tasks only, and only
+                // when a reminder-bearing task exists — a denied
+                // notification permission must not masquerade as working
+                // reminders. The button opens the app's system
+                // notification settings; the state is re-checked on resume.
+                if (notificationsBlocked && !notificationBannerDismissed &&
+                    currentDestination in setOf(
+                        NudgyNavDestination.HOME,
+                        NudgyNavDestination.TASKS
+                    ) &&
+                    allTasks.any { it.reminderSet && !it.isCompleted }
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = NudgyCard,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(
+                                start = 14.dp,
+                                end = 4.dp,
+                                top = 8.dp,
+                                bottom = 8.dp
+                            ),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Notifications are off",
+                                    color = NudgyCharcoal,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Reminders won't appear until you turn notifications on.",
+                                    color = NudgyMuted,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            TextButton(onClick = { openNotificationSettings() }) {
+                                Text(text = "Settings", color = NudgyPrimary, fontSize = 13.sp)
+                            }
+                            TextButton(onClick = { notificationBannerDismissed = true }) {
+                                Text(text = "Dismiss", color = NudgyMuted, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -889,7 +1077,24 @@ fun NudgyAppScaffold(
                                 analytics.logVoiceUsed("voice_input")
                                 voiceAssistantManager.startListening(
                                     languageCode = "en-US",
-                                    onResult = { voiceText -> handleUserChat(voiceText, fromVoice = true) }
+                                    onResult = { voiceText -> handleUserChat(voiceText, fromVoice = true) },
+                                    // C4: mic errors were silent — the
+                                    // listener's message (already built in
+                                    // VoiceAssistantManager, e.g. "No speech
+                                    // detected" / network error) now reaches
+                                    // the user as a chat message.
+                                    onError = { errorMsg ->
+                                        scope.launch {
+                                            chatRepository.addMessage(
+                                                user.uid,
+                                                ChatMessage(
+                                                    id = UUID.randomUUID().toString(),
+                                                    senderIsUser = false,
+                                                    text = errorMsg
+                                                )
+                                            )
+                                        }
+                                    }
                                 )
                             },
                             onStopVoice = { voiceAssistantManager.stopListening() },
@@ -1080,11 +1285,15 @@ fun NudgyAppScaffold(
                     showFloatingBubbleDialog = false
                     analytics.logNudgeInteracted("snooze_30m")
                     pendingTask?.let {
-                        reminderManager.scheduleReminder(
-                            taskId = it.id,
-                            taskTitle = it.title,
-                            triggerEpochMillis = System.currentTimeMillis() + 30 * 60 * 1000L
-                        )
+                        // C8: persist the snooze in Room exactly like the
+                        // notification-action path — an alarm-only snooze
+                        // dies on reboot / edit / complete.
+                        scope.launch {
+                            taskRepository.snoozeTask(
+                                it.id,
+                                System.currentTimeMillis() + 30 * 60 * 1000L
+                            )
+                        }
                     }
                 },
                 onDismiss = { showFloatingBubbleDialog = false }
@@ -1102,11 +1311,14 @@ fun NudgyAppScaffold(
                     }
                 },
                 onSnoozeTask = { task ->
-                    reminderManager.scheduleReminder(
-                        taskId = task.id,
-                        taskTitle = task.title,
-                        triggerEpochMillis = System.currentTimeMillis() + 30 * 60 * 1000L
-                    )
+                    // C8: persist the snooze in Room exactly like the
+                    // notification-action path (see floating bubble above).
+                    scope.launch {
+                        taskRepository.snoozeTask(
+                            task.id,
+                            System.currentTimeMillis() + 30 * 60 * 1000L
+                        )
+                    }
                 },
                 onDismiss = { showNotificationsSheet = false }
             )

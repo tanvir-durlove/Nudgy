@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -56,6 +57,97 @@ class CalendarRepository(
 
     private fun syncPrefs() =
         context.getSharedPreferences("nudgy_sync_prefs", Context.MODE_PRIVATE)
+
+    // ---------------------------------------------------------------- C14(a) pending deletes
+    //
+    // Same store approach as tasks (C13): a local event delete records the
+    // id here in the SAME step (SharedPreferences file "nudgy_pending_deletes",
+    // no Room schema change); the entry is removed only when the Firestore
+    // delete actually succeeds. startCloudSync drains this store BEFORE
+    // attaching the listener, and the listener skips ids still pending, so
+    // an offline/failed cloud delete can never resurrect the event.
+    private fun pendingDeletesPrefs() =
+        context.getSharedPreferences("nudgy_pending_deletes", Context.MODE_PRIVATE)
+
+    private fun recordPendingEventDelete(userId: String, eventId: String) {
+        val prefs = pendingDeletesPrefs()
+        val updated = prefs.getStringSet(KEY_PENDING_EVENT_DELETES, emptySet())
+            ?.toMutableSet() ?: mutableSetOf()
+        // commit() (synchronous): the record must be durable before the
+        // fire-and-forget cloud attempt that follows it.
+        if (updated.add("$userId/$eventId")) {
+            prefs.edit().putStringSet(KEY_PENDING_EVENT_DELETES, updated).commit()
+        }
+    }
+
+    private fun removePendingEventDelete(userId: String, eventId: String) {
+        val prefs = pendingDeletesPrefs()
+        val updated = prefs.getStringSet(KEY_PENDING_EVENT_DELETES, emptySet())
+            ?.toMutableSet() ?: return
+        if (updated.remove("$userId/$eventId")) {
+            prefs.edit().putStringSet(KEY_PENDING_EVENT_DELETES, updated).apply()
+        }
+    }
+
+    private fun pendingEventDeleteIds(userId: String): Set<String> {
+        val prefix = "$userId/"
+        return pendingDeletesPrefs().getStringSet(KEY_PENDING_EVENT_DELETES, emptySet())
+            .orEmpty().filter { it.startsWith(prefix) }
+            .map { it.removePrefix(prefix) }.toSet()
+    }
+
+    /** Retry every pending event delete for this user. Bounded per item: an
+     *  offline delete().await() would otherwise suspend until connectivity
+     *  returns and stall the sync that follows. A timed-out/failed entry
+     *  stays pending for the next drain; the listener guard keeps the event
+     *  from resurrecting in the meantime. */
+    private suspend fun drainPendingEventDeletes(userId: String) {
+        if (userId == com.example.auth.AuthManager.GUEST_USER_ID) return
+        val dbId = context.getString(R.string.firestore_database_id)
+        val firestore = FirebaseFirestore.getInstance(dbId)
+        for (eventId in pendingEventDeleteIds(userId)) {
+            val deleted = withTimeoutOrNull(PENDING_DELETE_TIMEOUT_MS) {
+                try {
+                    firestore.collection("users").document(userId).collection("events")
+                        .document(eventId).delete().await()
+                    true
+                } catch (e: Exception) {
+                    Log.w(TAG, "Pending event delete failed for $eventId: ${e.message}")
+                    false
+                }
+            } ?: false
+            if (deleted) {
+                removePendingEventDelete(userId, eventId)
+            } else {
+                Log.w(TAG, "Pending event delete still outstanding for $eventId; will retry on next sync")
+            }
+        }
+    }
+
+    /**
+     * Deletes one Google Calendar event by provider id. Returns true only
+     * when the provider actually removed a row — a 0 return means the event
+     * was already gone, and is treated as failure by callers (C14).
+     */
+    private fun deleteGoogleEventById(googleEventId: Long): Boolean {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
+            Log.w(TAG, "Cannot delete Google Calendar event $googleEventId: WRITE_CALENDAR not granted")
+            return false
+        }
+        return try {
+            val deleteUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, googleEventId)
+            val rows = context.contentResolver.delete(deleteUri, null, null)
+            if (rows == 0) {
+                Log.w(TAG, "Google Calendar delete removed 0 rows for event $googleEventId (already gone?)")
+                false
+            } else {
+                true
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error removing Google Calendar event: ${e.message}")
+            false
+        }
+    }
 
     fun observeEventsForDay(userId: String, dayMillis: Long): Flow<List<CalendarEventEntity>> {
         val (startOfDay, endOfDay) = getDayBounds(dayMillis)
@@ -396,13 +488,11 @@ class CalendarRepository(
             return@withContext
         }
         target?.googleCalendarEventId?.let { gId ->
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) == PackageManager.PERMISSION_GRANTED) {
-                try {
-                    val deleteUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, gId)
-                    context.contentResolver.delete(deleteUri, null, null)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error removing Google Calendar event: ${e.message}")
-                }
+            // C14: check the provider delete's return value — 0 rows means
+            // the Google event was NOT removed, and the next Google sync
+            // would re-import it and undo this delete.
+            if (!deleteGoogleEventById(gId)) {
+                Log.w(TAG, "deleteEvent: Google Calendar event $gId was not removed; it may be re-imported by the next Google sync")
             }
         }
         val effectiveUserId = userId ?: target?.userId
@@ -564,10 +654,16 @@ class CalendarRepository(
     fun startCloudSync(userId: String) {
         if (userId == com.example.auth.AuthManager.GUEST_USER_ID) return
         snapshotListener?.remove()
-        try {
-            val dbId = context.getString(R.string.firestore_database_id)
-            val firestore = FirebaseFirestore.getInstance(dbId)
-            snapshotListener = firestore.collection("users")
+        // C14(a): drain pending event deletes BEFORE the listener attaches,
+        // so its initial snapshot cannot resurrect an event whose cloud
+        // delete failed. The drain is time-bounded; the listener
+        // additionally skips any id still pending (see below).
+        repoScope.launch {
+            drainPendingEventDeletes(userId)
+            try {
+                val dbId = context.getString(R.string.firestore_database_id)
+                val firestore = FirebaseFirestore.getInstance(dbId)
+                snapshotListener = firestore.collection("users")
                 .document(userId)
                 .collection("events")
                 .addSnapshotListener { snapshot, error ->
@@ -581,6 +677,10 @@ class CalendarRepository(
                                 when (dc.type) {
                                     DocumentChange.Type.ADDED, DocumentChange.Type.MODIFIED -> {
                                         val doc = dc.document
+                                        // C14(a): an event whose cloud delete is
+                                        // still pending must never be re-inserted
+                                        // by the initial snapshot (or any later one).
+                                        if (doc.id in pendingEventDeleteIds(userId)) continue
                                         val title = doc.getString("title") ?: continue
                                         val start = doc.getLong("startEpochMillis") ?: continue
                                         val end = doc.getLong("endEpochMillis") ?: (start + 30 * 60 * 1000L)
@@ -617,6 +717,14 @@ class CalendarRepository(
                                         // remove a group row sharing the id.
                                         val localRow = calendarDao.getEventById(dc.document.id)
                                         if (localRow?.groupId == null) {
+                                            // C14(b): mirror deleteEvent — when the
+                                            // local row carries a Google Calendar id,
+                                            // delete that Google event too, or the
+                                            // next Google sync re-imports it as a
+                                            // brand-new event and undoes the delete.
+                                            localRow?.googleCalendarEventId?.let { gId ->
+                                                deleteGoogleEventById(gId)
+                                            }
                                             calendarDao.deleteEventByIdForUser(userId, dc.document.id)
                                         }
                                     }
@@ -625,8 +733,9 @@ class CalendarRepository(
                         }
                     }
                 }
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not start calendar events sync: ${e.message}")
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not start calendar events sync: ${e.message}")
+            }
         }
         // One-time backfill (per user, per device): events created while
         // cloud sync was unreachable (e.g. the retired applet database id
@@ -721,6 +830,11 @@ class CalendarRepository(
 
     private fun deleteEventFromFirestore(userId: String, eventId: String) {
         if (userId == com.example.auth.AuthManager.GUEST_USER_ID) return
+        // C14(a): record the pending delete in the same step as the local
+        // delete (this runs synchronously on the caller's IO thread, before
+        // the fire-and-forget attempt below). Removed only when the cloud
+        // delete actually succeeds.
+        recordPendingEventDelete(userId, eventId)
         repoScope.launch {
             try {
                 val dbId = context.getString(R.string.firestore_database_id)
@@ -731,6 +845,7 @@ class CalendarRepository(
                     .document(eventId)
                     .delete()
                     .await()
+                removePendingEventDelete(userId, eventId)
             } catch (e: Exception) {
                 Log.w(TAG, "Delete event from Firestore failed: ${e.message}")
             }
@@ -756,5 +871,8 @@ class CalendarRepository(
 
     companion object {
         private const val TAG = "CalendarRepository"
+        private const val KEY_PENDING_EVENT_DELETES = "pending_event_deletes"
+        /** Per-item bound for a pending-delete retry (see drainPendingEventDeletes). */
+        private const val PENDING_DELETE_TIMEOUT_MS = 10_000L
     }
 }

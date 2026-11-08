@@ -372,6 +372,10 @@ class AuthManager(private val context: Context) {
             .clear()
             .putBoolean(KEY_EXPLICITLY_SIGNED_OUT, true)
             .apply()
+        // C5: the BYOK key lives in "nudgy_settings", not in the auth
+        // prefs cleared above — remove it here so the next account on
+        // a shared device cannot silently spend this user's key.
+        clearByokKey()
         _userState.value = null
         scope.launch {
             try {
@@ -399,6 +403,9 @@ class AuthManager(private val context: Context) {
                 purgeLocalData(uid)
                 withContext(Dispatchers.Main) {
                     prefs.edit().clear().putBoolean(KEY_EXPLICITLY_SIGNED_OUT, true).apply()
+                    // C5: also drop the BYOK key (lives in
+                    // "nudgy_settings", not the auth prefs cleared above).
+                    clearByokKey()
                     _userState.value = null
                     onComplete()
                 }
@@ -445,6 +452,9 @@ class AuthManager(private val context: Context) {
                 }
                 credentialManager.clearCredentialState(ClearCredentialStateRequest())
                 prefs.edit().clear().putBoolean(KEY_EXPLICITLY_SIGNED_OUT, true).apply()
+                // C5: also drop the BYOK key (lives in "nudgy_settings",
+                // not the auth prefs cleared above).
+                clearByokKey()
                 _userState.value = null
                 _isLoading.value = false
                 withContext(Dispatchers.Main) {
@@ -493,6 +503,19 @@ class AuthManager(private val context: Context) {
         }
     }
 
+    /**
+     * C5: remove the BYOK Gemini key from "nudgy_settings". Sign-out and
+     * account deletion clear only "nudgy_auth_prefs", so without this
+     * the key would survive and the next account on a shared device
+     * would silently spend the previous user's key and quota.
+     */
+    private fun clearByokKey() {
+        context.getSharedPreferences(SETTINGS_PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_CUSTOM_GEMINI_API_KEY)
+            .apply()
+    }
+
     /** Cancel every scheduled reminder alarm belonging to a user. */
     private suspend fun cancelAllRemindersForUser(userId: String) {
         try {
@@ -535,6 +558,12 @@ class AuthManager(private val context: Context) {
             db.memoryDao().clearMemoriesForUser(userId)
             db.chatDao().clearMessages(userId)
             db.dailyBriefDao().clearBriefsForUser(userId)
+            // C6: the groups tables have no userId column and every read
+            // is unfiltered — without this, the next account on a shared
+            // device would see the deleted user's groups (names, join
+            // codes) and cached member names in the Groups tab.
+            db.groupDao().clearAllGroups()
+            db.groupMemberDao().clearAllMembers()
         } catch (e: Exception) {
             Log.w(TAG, "Local DB purge error: ${e.message}")
         }
@@ -560,6 +589,10 @@ class AuthManager(private val context: Context) {
         const val KEY_ACTIVE_USER_ID = "active_user_id"
         const val KEY_EXPLICITLY_SIGNED_OUT = "nudgy_explicitly_signed_out"
         const val GUEST_USER_ID = "guest_user_local"
+        // C5: prefs file + key where the BYOK Gemini key lives
+        // (written by YourNudgySheet, read by GeminiClient).
+        private const val SETTINGS_PREFS_NAME = "nudgy_settings"
+        private const val KEY_CUSTOM_GEMINI_API_KEY = "custom_gemini_api_key"
 
         fun resolveDisplayName(displayName: String?, email: String?): String {
             return displayName?.takeIf { it.isNotBlank() }

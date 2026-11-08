@@ -67,7 +67,9 @@ jobs:
       - name: Grant Execute Permission to Gradlew
         run: chmod +x gradlew
 
-      - name: Build Android App Bundle (AAB for Google Play) & APK
+      # Release and debug are built in separate steps: a debug failure must
+      # never block the release build (the release APK/AAB are the deliverable).
+      - name: Build Release (AAB for Google Play) & APK
         run: |
           if [ -n "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ]; then
             echo "Configuring Release signing keystore..."
@@ -75,10 +77,15 @@ jobs:
             export KEYSTORE_PATH="$(pwd)/release.keystore"
             export STORE_PASSWORD="${{ secrets.STORE_PASSWORD }}"
             export KEY_PASSWORD="${{ secrets.KEY_PASSWORD }}"
-            ./gradlew bundleRelease assembleRelease assembleDebug bundleDebug --no-daemon --stacktrace
+            ./gradlew bundleRelease assembleRelease --no-daemon --stacktrace
           else
-            ./gradlew assembleDebug bundleDebug --no-daemon --stacktrace
+            echo "No release keystore configured; skipping release build."
           fi
+
+      - name: Build Debug (best effort)
+        continue-on-error: true
+        run: |
+          ./gradlew assembleDebug bundleDebug --no-daemon --stacktrace
 
       - name: Prepare & Verify Artifacts
         run: |
@@ -124,8 +131,13 @@ jobs:
           echo "Verifying build outputs..."
           ls -lh build-artifacts/
 
+      # The artifact upload must never block the release delivery: when the
+      # Actions storage quota is full, the upload fails but the job — and the
+      # GitHub Release below — still go through. Release assets do not count
+      # toward the Actions storage quota.
       - name: Upload Build Artifacts (APK & AAB)
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: nudgy-android-artifacts
           path: build-artifacts/*
@@ -137,7 +149,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG_NAME="${{ github.ref_name }}"
-          if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "main" ] || [ "$TAG_NAME" = "master" ]; then
+          if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "main" ] || [ "$TAG_NAME" = "master" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG_NAME="v1.0.${{ github.run_number }}"
           fi
           echo "Publishing release with tag: $TAG_NAME"

@@ -3,10 +3,10 @@
 
     <!-- Night variant of the launch splash (androidx core-splashscreen):
          same icon, animation and post-splash theme as values/themes.xml —
-         only the background changes to the app's dark background (#1C1E26),
-         so dark-mode users never see a light splash. -->
+         the background stays cream (#F4EFE4) here too, so the splash is
+         always light even in dark mode. -->
     <style name="Theme.Nudgy.Splash" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenBackground">#1C1E26</item>
+        <item name="windowSplashScreenBackground">#F4EFE4</item>
         <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
         <item name="windowSplashScreenAnimationDuration">1000</item>
         <item name="postSplashScreenTheme">@style/Theme.MyApplication</item>

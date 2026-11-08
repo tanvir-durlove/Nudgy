@@ -112,6 +112,9 @@ fun YourNudgySheet(
     var showApiKeyDialog by remember { mutableStateOf(false) }
     var customApiKeyInput by remember { mutableStateOf(settingsPrefs.getString("custom_gemini_api_key", "") ?: "") }
     var newMemoryInput by remember { mutableStateOf("") }
+    // C7: deletion progress — drives the Delete Forever button state
+    // (progress label + disabled while the deletion runs).
+    val isDeleting by authManager.isLoading.collectAsStateWithLifecycle()
 
     var morningBriefEnabled by remember { mutableStateOf(true) }
     var reminderSoundEnabled by remember { mutableStateOf(true) }
@@ -613,22 +616,41 @@ fun YourNudgySheet(
 
     if (showDeleteConfirmDialog) {
         AlertDialog(
-            onDismissRequest = { showDeleteConfirmDialog = false },
+            // C7: keep the dialog up while deletion runs — dismissing it
+            // on tap used to hide a failure entirely. It closes only on
+            // success (onComplete) or an explicit Cancel.
+            onDismissRequest = { if (!isDeleting) showDeleteConfirmDialog = false },
             title = { Text("Delete Account?") },
             text = { Text("This will permanently remove your account, tasks, and Nudgy memory. This action cannot be undone.") },
             confirmButton = {
                 Button(
                     onClick = {
-                        showDeleteConfirmDialog = false
-                        authManager.deleteAccount(scope, onComplete = onDismiss)
+                        authManager.deleteAccount(
+                            scope,
+                            onComplete = {
+                                showDeleteConfirmDialog = false
+                                onDismiss()
+                            },
+                            // C7: a failed deletion used to be completely
+                            // silent (no onError passed, default is a
+                            // no-op). Surface the message and keep the
+                            // sheet open so the user can retry.
+                            onError = { error ->
+                                Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+                            }
+                        )
                     },
+                    enabled = !isDeleting,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
                 ) {
-                    Text("Delete Forever")
+                    Text(if (isDeleting) "Deleting…" else "Delete Forever")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirmDialog = false }) {
+                TextButton(
+                    onClick = { showDeleteConfirmDialog = false },
+                    enabled = !isDeleting
+                ) {
                     Text("Cancel")
                 }
             }

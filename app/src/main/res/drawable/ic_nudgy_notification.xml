@@ -1,9 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- White bear silhouette for the notification small icon and the adaptive-icon
+     monochrome layer. Small icons must be alpha-only (white on transparent);
+     the full-color bear cannot be used there. Same ear/head geometry as the
+     SVG Tanvir sent (2026-11-07); face details omitted — invisible at 24dp. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
+    android:viewportWidth="512"
+    android:viewportHeight="512">
     <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M12,22c1.1,0 2,-0.9 2,-2h-4c0,1.1 0.9,2 2,2zM18,16v-5c0,-3.07 -1.63,-5.64 -4.5,-6.32V4c0,-0.83 -0.67,-1.5 -1.5,-1.5s-1.5,0.67 -1.5,1.5v0.68C7.64,5.36 6,7.92 6,11v5l-2,2v1h16v-1l-2,-2zM16,17H8v-6c0,-2.48 1.51,-4.5 4,-4.5s4,2.02 4,4.5v6z"/>
+        android:fillColor="#FFFFFF"
+        android:pathData="M122,184 a46,46 0 1,0 92,0 a46,46 0 1,0 -92,0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M298,184 a46,46 0 1,0 92,0 a46,46 0 1,0 -92,0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M132,270 a124,104 0 1,0 248,0 a124,104 0 1,0 -248,0" />
 </vector>

@@ -84,7 +84,7 @@ class NudgyRemoteConfig {
                         }
                         _configState.value = RemoteConfigValues(
                             adsEnabled = rc.getBoolean(KEY_ADS_ENABLED),
-                            adFrequencyTasks = rc.getLong(KEY_AD_FREQUENCY),
+                            adFrequencyTasks = rc.getLong(KEY_AD_FREQUENCY).takeIf { it > 0 } ?: 5L,
                             adInterstitialUnitId = rc.getString(KEY_AD_INTERSTITIAL_UNIT_ID).ifEmpty { "ca-app-pub-3940256099942544/1033173712" },
                             adBannerUnitId = rc.getString(KEY_AD_BANNER_UNIT_ID).ifEmpty { "ca-app-pub-3940256099942544/6300978111" },
                             adRewardedUnitId = rc.getString(KEY_AD_REWARDED_UNIT_ID).ifEmpty { "ca-app-pub-3940256099942544/5224354917" },
