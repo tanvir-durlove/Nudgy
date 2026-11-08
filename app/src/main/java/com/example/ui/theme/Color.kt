@@ -31,6 +31,7 @@ val MascotDark = Color(0xFF1C1B1F)
 // Dark palette: dark blue-grey surfaces (NOT pure black), retained elevation
 // feel via the card/background step, accent sparing.
 internal data class NudgyPalette(
+    val isDark: Boolean,
     val canvas: Color,
     val card: Color,
     val charcoal: Color,
@@ -50,6 +51,7 @@ internal data class NudgyPalette(
 )
 
 private val NudgyLightPalette = NudgyPalette(
+    isDark = false,
     canvas = Color(0xFFFBF9F4),       // Warm linen off-white background
     card = Color(0xFFFFFFFF),         // Crisp pure white cards
     charcoal = Color(0xFF1C1B1F),     // Primary text & active dark pills
@@ -69,6 +71,7 @@ private val NudgyLightPalette = NudgyPalette(
 )
 
 private val NudgyDarkPalette = NudgyPalette(
+    isDark = true,
     canvas = Color(0xFF1C1E26),       // Dark blue-grey background
     card = Color(0xFF262833),         // Dark blue-grey surface (step above background = elevation)
     charcoal = Color(0xFFF5F1EA),     // Primary text (14.77:1 on background, 13.01:1 on card)
@@ -100,6 +103,7 @@ internal fun nudgyPaletteFor(darkTheme: Boolean): NudgyPalette =
 val NudgyCanvas: Color @Composable get() = LocalNudgyPalette.current.canvas
 val NudgyCard: Color @Composable get() = LocalNudgyPalette.current.card
 val NudgyCharcoal: Color @Composable get() = LocalNudgyPalette.current.charcoal
+val NudgyIsDarkTheme: Boolean @Composable get() = LocalNudgyPalette.current.isDark
 val NudgyMuted: Color @Composable get() = LocalNudgyPalette.current.muted
 val NudgyPeach: Color @Composable get() = LocalNudgyPalette.current.peach
 val NudgyLavender: Color @Composable get() = LocalNudgyPalette.current.lavender
