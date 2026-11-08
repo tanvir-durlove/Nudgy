@@ -3,6 +3,6 @@
     <item
         android:width="108dp"
         android:height="108dp"
-        android:drawable="@drawable/nudgy_launcher_icon"
+        android:drawable="@drawable/nudgy_bear_foreground"
         android:gravity="center" />
 </layer-list>
