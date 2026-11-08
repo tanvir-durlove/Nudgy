@@ -1,7 +1,6 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,18 +27,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.NudgyCharcoal
+import com.example.ui.theme.NudgyGreen
+import com.example.ui.theme.NudgyIsDarkTheme
 
 @Composable
 fun NudgyCelebrationCard(
     modifier: Modifier = Modifier
 ) {
-    val darkTheme = isSystemInDarkTheme()
+    val darkTheme = NudgyIsDarkTheme
     val cardGradient = if (darkTheme) {
         listOf(Color(0xFF24402B), Color(0xFF1A2E20))
     } else {
         listOf(Color(0xFFE8F5E9), Color(0xFFC8E6C9))
     }
-    val labelGreen = if (darkTheme) Color(0xFF81C784) else Color(0xFF2E7D32)
+    val labelGreen = NudgyGreen
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
