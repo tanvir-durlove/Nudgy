@@ -425,7 +425,17 @@ class AuthManager(private val context: Context) {
                     purgeFirestoreSubcollection(userDocRef.collection("tasks"))
                     purgeFirestoreSubcollection(userDocRef.collection("memories"))
                     purgeFirestoreSubcollection(userDocRef.collection("events"))
-                    purgeFirestoreSubcollection(userDocRef.collection("chats"))
+                    // Also remove the user's membership entries from every
+                    // group (via the groupMemberships mirror) and the mirror
+                    // itself. No "chats" purge: nothing in the app uses
+                    // users/{uid}/chats and the rules have no match for it,
+                    // so listing it denied the whole deletion
+                    // (PERMISSION_DENIED on the delete-account test).
+                    // llmUsage is deliberately NOT purged: the rules forbid
+                    // deleting it (allow delete: if false) so the daily cap
+                    // cannot be reset by deleting the counter; the docs
+                    // become unreachable once the account is gone.
+                    purgeGroupMemberships(db, uid)
                     // B1: the user-doc delete must fail loudly too. If it
                     // throws, deleteAccount aborts before user.delete()
                     // (and before the local purge below), leaving the
@@ -544,6 +554,22 @@ class AuthManager(private val context: Context) {
         } catch (e: Exception) {
             Log.w(TAG, "Subcollection purge error (${collection.path}): ${e.message}")
             throw e
+        }
+    }
+
+    // Delete-account purge: remove the user's member doc from every group
+    // they belong to, then the groupMemberships mirror docs themselves.
+    // The mirror is read first (owner read is allowed); each member-doc
+    // delete is a self-delete (allowed by the members rule). Deleting a
+    // missing doc is a no-op success, so a stale mirror entry cannot fail
+    // the purge. Any real failure rethrows (B1) and aborts the deletion.
+    private suspend fun purgeGroupMemberships(db: FirebaseFirestore, uid: String) {
+        val mirror = db.collection("users").document(uid).collection("groupMemberships")
+        val snapshot = mirror.get().await()
+        for (doc in snapshot.documents) {
+            val gid = doc.id
+            db.collection("groups").document(gid).collection("members").document(uid).delete().await()
+            doc.reference.delete().await()
         }
     }
 
