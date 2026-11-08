@@ -15,6 +15,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -43,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.widget.Toast
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -79,6 +81,7 @@ import com.example.work.GroupPollWorker
 import com.example.data.repository.MemoryRepository
 import com.example.data.repository.TaskRepository
 import com.example.reminders.ReminderManager
+import com.example.ui.components.NudgySplashScreen
 import com.example.ui.components.NudgyTopBar
 import com.example.ui.dialogs.NudgyFloatingBubbleDialog
 import com.example.ui.navigation.NudgyBottomBar
@@ -154,6 +157,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var analytics: NudgyAnalytics
     private lateinit var remoteConfig: NudgyRemoteConfig
     private val deepLinkJoinCodeFlow = MutableStateFlow<String?>(null)
+    // Set when the system splash is dismissed (see the exit listener in
+    // onCreate): the animated splash starts only after this, so its
+    // animation is never hidden behind the system splash overlay.
+    private val systemSplashGoneFlow = MutableStateFlow(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Splash screen: install BEFORE super.onCreate (required). It stays
@@ -164,6 +171,13 @@ class MainActivity : ComponentActivity() {
         // defaults in the meantime and swap to the fetched ID when it
         // arrives (see NudgyAds / the guarded LaunchedEffect below).
         val splashScreen = installSplashScreen()
+        // The custom animated splash starts only once the system splash
+        // is gone: dismiss it immediately here (same cream background,
+        // so the handoff is seamless) and signal the content below.
+        splashScreen.setOnExitAnimationListener { viewProvider ->
+            viewProvider.remove()
+            systemSplashGoneFlow.value = true
+        }
         val splashStartMs = SystemClock.elapsedRealtime()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -211,6 +225,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             val themePrefs = remember { getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE) }
             var themeMode by remember { mutableStateOf(themePrefs.getString("theme_mode", "system") ?: "system") }
+            val systemSplashGone by systemSplashGoneFlow.collectAsStateWithLifecycle()
+            var showSplash by remember { mutableStateOf(true) }
             NudgyTheme(
                 darkTheme = when (themeMode) {
                     "light" -> false
@@ -218,28 +234,40 @@ class MainActivity : ComponentActivity() {
                     else -> isSystemInDarkTheme()
                 }
             ) {
-                NudgyMainFlow(
-                    authManager = authManager,
-                    taskRepository = taskRepository,
-                    calendarRepository = calendarRepository,
-                    groupRepository = groupRepository,
-                    memoryRepository = memoryRepository,
-                    chatRepository = chatRepository,
-                    reminderManager = reminderManager,
-                    preFilter = preFilter,
-                    geminiClient = geminiClient,
-                    voiceAssistantManager = voiceAssistantManager,
-                    analytics = analytics,
-                    remoteConfig = remoteConfig,
-                    initialDestination = initialDestination,
-                    deepLinkJoinCodeFlow = deepLinkJoinCodeFlow,
-                    onDeepLinkCodeConsumed = { deepLinkJoinCodeFlow.value = null },
-                    themeMode = themeMode,
-                    onThemeModeChange = { mode ->
-                        themeMode = mode
-                        themePrefs.edit().putString("theme_mode", mode).apply()
-                    }
-                )
+                if (!systemSplashGone) {
+                    // System splash overlay still up; cream behind it so
+                    // no dark flash is possible when it dismisses.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xFFF4EFE4))
+                    )
+                } else if (showSplash) {
+                    NudgySplashScreen(onFinished = { showSplash = false })
+                } else {
+                    NudgyMainFlow(
+                        authManager = authManager,
+                        taskRepository = taskRepository,
+                        calendarRepository = calendarRepository,
+                        groupRepository = groupRepository,
+                        memoryRepository = memoryRepository,
+                        chatRepository = chatRepository,
+                        reminderManager = reminderManager,
+                        preFilter = preFilter,
+                        geminiClient = geminiClient,
+                        voiceAssistantManager = voiceAssistantManager,
+                        analytics = analytics,
+                        remoteConfig = remoteConfig,
+                        initialDestination = initialDestination,
+                        deepLinkJoinCodeFlow = deepLinkJoinCodeFlow,
+                        onDeepLinkCodeConsumed = { deepLinkJoinCodeFlow.value = null },
+                        themeMode = themeMode,
+                        onThemeModeChange = { mode ->
+                            themeMode = mode
+                            themePrefs.edit().putString("theme_mode", mode).apply()
+                        }
+                    )
+                }
             }
         }
     }
