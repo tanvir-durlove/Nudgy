@@ -28,6 +28,7 @@ import com.google.firebase.firestore.CollectionReference
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -57,6 +58,15 @@ class AuthManager(private val context: Context) {
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
+    // Delete-account runs in this scope, NOT in a composable's scope.
+    // NudgyAppScaffold's rememberCoroutineScope dies the moment the
+    // deletion succeeds (sign-out removes the scaffold from the
+    // composition), which used to cancel the completion path and surface
+    // "The coroutine scope left the composition" as a user error, and
+    // left isLoading stuck on "Deleting…". This scope lives as long as
+    // the AuthManager, so sign-out cannot cancel the deletion.
+    private val deleteScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     init {
         val isGuest = prefs.getBoolean(KEY_IS_GUEST, false)
@@ -395,11 +405,13 @@ class AuthManager(private val context: Context) {
      * Performs a full coordinated purge across Firestore subcollections, local Room database,
      * and voice/audio file caches.
      */
-    fun deleteAccount(scope: CoroutineScope, onComplete: () -> Unit = {}, onError: (String) -> Unit = {}) {
+    // NOTE: no scope parameter on purpose — the deletion runs in
+    // deleteScope (see above), never in a composable's scope.
+    fun deleteAccount(onComplete: () -> Unit = {}, onError: (String) -> Unit = {}) {
         val user = auth?.currentUser
         if (user == null) {
             val uid = getActiveUserId(context)
-            scope.launch(Dispatchers.IO) {
+            deleteScope.launch(Dispatchers.IO) {
                 purgeLocalData(uid)
                 withContext(Dispatchers.Main) {
                     prefs.edit().clear().putBoolean(KEY_EXPLICITLY_SIGNED_OUT, true).apply()
@@ -414,7 +426,7 @@ class AuthManager(private val context: Context) {
         }
 
         _isLoading.value = true
-        scope.launch {
+        deleteScope.launch {
             try {
                 val uid = user.uid
                 val dbId = context.getString(R.string.firestore_database_id)
@@ -425,7 +437,17 @@ class AuthManager(private val context: Context) {
                     purgeFirestoreSubcollection(userDocRef.collection("tasks"))
                     purgeFirestoreSubcollection(userDocRef.collection("memories"))
                     purgeFirestoreSubcollection(userDocRef.collection("events"))
-                    purgeFirestoreSubcollection(userDocRef.collection("chats"))
+                    // Also remove the user's membership entries from every
+                    // group (via the groupMemberships mirror) and the mirror
+                    // itself. No "chats" purge: nothing in the app uses
+                    // users/{uid}/chats and the rules have no match for it,
+                    // so listing it denied the whole deletion
+                    // (PERMISSION_DENIED on the delete-account test).
+                    // llmUsage is deliberately NOT purged: the rules forbid
+                    // deleting it (allow delete: if false) so the daily cap
+                    // cannot be reset by deleting the counter; the docs
+                    // become unreachable once the account is gone.
+                    purgeGroupMemberships(db, uid)
                     // B1: the user-doc delete must fail loudly too. If it
                     // throws, deleteAccount aborts before user.delete()
                     // (and before the local purge below), leaving the
@@ -456,18 +478,28 @@ class AuthManager(private val context: Context) {
                 // not the auth prefs cleared above).
                 clearByokKey()
                 _userState.value = null
-                _isLoading.value = false
                 withContext(Dispatchers.Main) {
                     onComplete()
                 }
+            } catch (e: CancellationException) {
+                // Never surface a cancellation as a deletion failure, and
+                // never swallow it: a cancelled delete must propagate so
+                // structured concurrency stays sound. isLoading is reset
+                // by the finally block below.
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Account deletion failed", e)
                 val msg = e.localizedMessage ?: "Failed to delete account"
                 _errorMessage.value = msg
-                _isLoading.value = false
                 withContext(Dispatchers.Main) {
                     onError(msg)
                 }
+            } finally {
+                // The sign-in flow already has this; the delete flow did
+                // not, which left the button stuck on "Deleting…" after
+                // the old UI scope died mid-delete. A finally runs on
+                // every path, including cancellation.
+                _isLoading.value = false
             }
         }
     }
@@ -544,6 +576,22 @@ class AuthManager(private val context: Context) {
         } catch (e: Exception) {
             Log.w(TAG, "Subcollection purge error (${collection.path}): ${e.message}")
             throw e
+        }
+    }
+
+    // Delete-account purge: remove the user's member doc from every group
+    // they belong to, then the groupMemberships mirror docs themselves.
+    // The mirror is read first (owner read is allowed); each member-doc
+    // delete is a self-delete (allowed by the members rule). Deleting a
+    // missing doc is a no-op success, so a stale mirror entry cannot fail
+    // the purge. Any real failure rethrows (B1) and aborts the deletion.
+    private suspend fun purgeGroupMemberships(db: FirebaseFirestore, uid: String) {
+        val mirror = db.collection("users").document(uid).collection("groupMemberships")
+        val snapshot = mirror.get().await()
+        for (doc in snapshot.documents) {
+            val gid = doc.id
+            db.collection("groups").document(gid).collection("members").document(uid).delete().await()
+            doc.reference.delete().await()
         }
     }
 
