@@ -1,5 +1,6 @@
 package com.example.ai
 
+import android.content.res.AssetManager
 import com.example.data.local.entity.CalendarEventEntity
 import com.example.data.local.entity.TaskEntity
 import com.example.data.model.Priority
@@ -13,6 +14,51 @@ import java.util.Calendar
 import java.util.Locale
 import java.util.regex.Pattern
 
+/**
+ * Pre-filter for chat messages: handles structured intents locally
+ * (tasks, calendar events, reminders, focus time, quick queries) before
+ * the message ever reaches Gemini. Parsing is FULLY INDEPENDENT — no
+ * Gemini, no network, no cap consumption.
+ *
+ * Rebuilt 2026-11-11 (chat-intent-bank rebuild, ships as 1.0.4) around
+ * ONE entry point, [parseIntent], and ONE set of helpers:
+ *
+ * 1. ONE parseIntent() — every creation/message is routed through it.
+ *    A local TF-IDF matcher over a curated sentence bank
+ *    (assets/chat_intent_bank.json, 6275 sentences) decides INTENT ONLY;
+ *    deterministic functions resolve time and title on ONE path; a
+ *    single reply builder writes every creation reply.
+ * 2. NEVER-GUESS invariant — a bare hour with no AM/PM/daypart marker
+ *    creates NOTHING. The user is asked (quick-reply chips) and the
+ *    pending intent waits in memory until they answer. The old
+ *    silent-AM rule (resolveBareHour) is DELETED — it was the bug class
+ *    behind "কালকে ৩ টায়" becoming tomorrow 3:00 AM.
+ * 3. ONE reply builder — the EVENT time is stated first, the reminder
+ *    is labeled separately. The old code stated the reminder time as if
+ *    it were the event time.
+ * 4. ONE title cleanup — Bengali date words (কালকে/কাল/আজকে/পরশু),
+ *    dayparts, time tokens and AM/PM markers are stripped from BOTH
+ *    task and meeting titles.
+ *
+ * Guards that run BEFORE the matcher (negative rejection lives here,
+ * not in the threshold — the matcher cannot separate near-miss commands
+ * by score alone; LOO report: negatives reach 0.794):
+ * - small-talk messages and question-word / "?" messages never reach
+ *   the matcher (they are not creations; same lists as the catch-all).
+ * - explicit schedule words (এপয়েন্টমেন্ট/অ্যাপয়েন্টমেন্ট/appointment
+ *   + শিডিউল করো) route to SCHEDULE_CREATE.
+ * - the call-task trigger ("কল" + করতে/করব/করার/করো/করুন/time)
+ *   routes to TASK before the matcher — the bank is skewed toward
+ *   call-BOOKING (SCHEDULE_CREATE) for "কল করো" phrasings, and a
+ *   call to a person is a task, not a calendar event.
+ * - the 30-min reminder, free-time, focus, plan-my-day, memory,
+ *   clear-completed and complete-task branches run verbatim before
+ *   parseIntent, as do the today query branches.
+ *
+ * Known limitation (deliberate, do not chase): negation is not handled
+ * ("মনে করিয়ে দিও না, তবে টাস্ক বানাও") — a TF-IDF matcher cannot do
+ * negation. Behaviour is left as-is.
+ */
 sealed class PreFilterResult {
     data class Handled(
         val responseText: String,
@@ -28,21 +74,891 @@ sealed class PreFilterResult {
     object Unhandled : PreFilterResult()
 }
 
-/**
- * Client-Side Intent Pre-Filter ($0 AI Bypass):
- * Detects common deterministic productivity commands in English and Bengali locally on device,
- * updating Room DB with zero latency and zero server token costs.
- */
+enum class ParsedKind { TASK, SCHEDULE, REMINDER, QUERY_SCHEDULE, QUERY_TASKS, UNKNOWN }
+
+data class ParsedIntent(
+    val kind: ParsedKind,
+    val title: String,
+    val dayCal: Calendar?,
+    val timeToken: String?,
+    val isBareHour: Boolean,
+    val confidence: Double,
+    val isBengali: Boolean,
+    val priority: Priority,
+    val category: TaskCategory?,
+    val reminderAtDue: Boolean,
+    val scheduleLocation: String?,
+    val scheduleType: String
+)
+
+data class PendingClarification(
+    val kind: ParsedKind,
+    val title: String,
+    val dayCal: Calendar?,
+    val timeToken: String?,
+    val isBengali: Boolean,
+    val priority: Priority,
+    val category: TaskCategory?,
+    val reminderAtDue: Boolean,
+    val scheduleLocation: String?,
+    val scheduleType: String
+)
+
 class ClientIntentPreFilter(
     private val taskRepository: TaskRepository,
     private val calendarRepository: CalendarRepository,
-    private val memoryRepository: MemoryRepository
+    private val memoryRepository: MemoryRepository,
+    assets: AssetManager? = null
 ) {
+    private val matcher: IntentBankMatcher? = try {
+        if (assets != null) IntentBankMatcher(assets) else null
+    } catch (_: Exception) {
+        null
+    }
+
+    @Volatile
+    private var pendingClarification: PendingClarification? = null
+
     private fun formatTime(millis: Long): String =
         SimpleDateFormat("h:mm a", Locale.getDefault()).format(java.util.Date(millis))
 
     private fun formatTime(date: java.util.Date): String =
         SimpleDateFormat("h:mm a", Locale.getDefault()).format(date)
+
+    private fun cleanUserPrompt(prompt: String): String {
+        var text = prompt.trim()
+        val prefixes = listOf(
+            "hey nudgy", "ok nudgy", "hi nudgy", "hello nudgy", "nudgy",
+            "হে নাজি", "নাজি", "হে নাদি",
+            "can you please", "could you please", "can you", "could you", "please",
+            "i want to", "i need to", "help me to", "help me", "i would like to",
+            "tell me to", "would you"
+        )
+        for (prefix in prefixes) {
+            if (text.startsWith(prefix, ignoreCase = true)) {
+                text = text.substring(prefix.length).trim()
+            }
+        }
+        return text.trimStart(',', ':', '.', '-', ' ', '!')
+    }
+
+    // ==================== Deterministic time/title helpers ====================
+    // ONE path for all branches. No branch owns its own time parsing,
+    // title cleaning, or reply text anymore.
+
+    private fun normalizeDigits(text: String): String {
+        val sb = StringBuilder(text.length)
+        for (ch in text) {
+            if (ch in '০'..'৯') sb.append('0' + (ch - '০')) else sb.append(ch)
+        }
+        return sb.toString()
+    }
+
+    private fun isBengali(text: String): Boolean =
+        text.any { it in 'অ'..'হ' || it in 'া'..'ৌ' || it == 'ং' || it == 'ঃ' || it == 'ঁ' }
+
+    private val hourWordToNumber = mapOf(
+        "এক" to 1, "দুই" to 2, "তিন" to 3, "চার" to 4, "পাঁচ" to 5,
+        "ছয়" to 6, "সাত" to 7, "আট" to 8, "নয়" to 9, "দশ" to 10,
+        "এগারো" to 11, "বারো" to 12
+    )
+
+    // Bengali time-of-day words and the hour (24h) they mean when no
+    // explicit hour is given — the OLD rule, preserved: সকালে 9 AM,
+    // দুপুরে 12 PM, বিকেলে/বিকালে 5 PM, সন্ধ্যায় 7 PM, রাতে 9 PM.
+    private val bengaliDaypartHour = mapOf(
+        "সকালে" to 9, "সকাল" to 9, "দুপুরে" to 12, "দুপুর" to 12,
+        "বিকালে" to 17, "বিকেলে" to 17, "সন্ধ্যায়" to 19, "সন্ধ্যা" to 19,
+        "রাতে" to 21, "রাত" to 21
+    )
+
+    /** The daypart word present in the message, if any (ভোর included —
+     *  it matters for clarification answers, though a lone ভোর is not a
+     *  time token by the old rule). */
+    private fun findDaypartWord(text: String): String? {
+        val lower = text.lowercase(Locale.ROOT)
+        return when {
+            lower.contains("ভোর") -> "ভোর"
+            lower.contains("সকালে") || lower.contains("সকাল") -> "সকাল"
+            lower.contains("দুপুরে") || lower.contains("দুপুর") -> "দুপুর"
+            lower.contains("বিকালে") || lower.contains("বিকেলে") || lower.contains("বিকেল") -> "বিকেল"
+            lower.contains("সন্ধ্যায়") || lower.contains("সন্ধ্যা") -> "সন্ধ্যা"
+            lower.contains("রাতে") || lower.contains("রাত") -> "রাত"
+            else -> null
+        }
+    }
+
+    /**
+     * ONE unified time-token scan, in priority order (mirrors the old
+     * extractTimeToken):
+     *  1. am/pm — explicit ("5 PM", "5:30pm").
+     *  2. Bengali টা token, suffix য়/ই/তে REQUIRED — a bare "৩টা"
+     *     count is NOT a time ("৩টা কাজ"). Minutes allowed ("5:30টায়").
+     *  3. 24-hour "15:00" — explicit.
+     *  4. Bengali word-hour টা, suffix required ("তিনটায়").
+     *  5. Daypart word alone ("বিকেলে" -> 5 PM) — the token IS the
+     *     daypart word; parseTimeIntoCalendar resolves its hour.
+     * Returns null when the message carries no time token at all.
+     */
+    private fun extractTimeToken(text: String): String? {
+        val normalized = normalizeDigits(text)
+        val lower = normalized.lowercase(Locale.ROOT)
+        val timeRegex =
+            Regex("""\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)\b""")
+        timeRegex.find(lower)?.let { match ->
+            val hour = match.groupValues[1]
+            val minute = match.groupValues[2].ifEmpty { "00" }
+            val ampm = match.groupValues[3].replace(".", "").uppercase()
+            return "$hour:$minute $ampm"
+        }
+        val bengaliTimeRegex = Regex("""(\d{1,2})(?::(\d{2}))?\s*টা(য়|ই|তে)""")
+        bengaliTimeRegex.find(normalized)?.let { match ->
+            val hour = match.groupValues[1]
+            val minute = match.groupValues[2]
+            return if (minute.isNotEmpty()) "$hour:$minute টা" else "$hour টা"
+        }
+        val militaryRegex = Regex("""\b([01]?\d|2[0-3]):([0-5]\d)\b""")
+        militaryRegex.find(lower)?.let { match ->
+            return "${match.groupValues[1]}:${match.groupValues[2]}"
+        }
+        val bengaliWordRegex = Regex("""(এক|দুই|তিন|চার|পাঁচ|ছয়|সাত|আট|নয়|দশ|এগারো|বারো)\s*টা(য়|ই|তে)""")
+        bengaliWordRegex.find(text)?.let { match ->
+            val hour = hourWordToNumber[match.groupValues[1]] ?: return@let null
+            return "$hour টা"
+        }
+        findDaypartWord(text)?.let { daypart ->
+            if (bengaliDaypartHour.containsKey(daypart)) return daypart
+        }
+        return null
+    }
+
+    private fun parseTimeIntoCalendar(
+        calendar: Calendar,
+        timeToken: String,
+        isBengali: Boolean,
+        daypart: String? = null
+    ) {
+        // Daypart-only token: the token itself is the daypart word.
+        val tokenDaypartHour = bengaliDaypartHour[normalizeDigits(timeToken).trim()]
+        if (tokenDaypartHour != null) {
+            calendar.set(Calendar.HOUR_OF_DAY, tokenDaypartHour)
+            calendar.set(Calendar.MINUTE, 0)
+            calendar.set(Calendar.SECOND, 0)
+            calendar.set(Calendar.MILLISECOND, 0)
+            return
+        }
+        val normalized = normalizeDigits(timeToken)
+        val upper = normalized.uppercase()
+        val hourMinuteRegex = Regex("""(\d{1,2}):(\d{2})\s*(AM|PM)?""")
+        val hmMatch = hourMinuteRegex.find(upper)
+        if (hmMatch != null) {
+            var hour = hmMatch.groupValues[1].toIntOrNull() ?: 0
+            val minute = hmMatch.groupValues[2].toIntOrNull() ?: 0
+            val ampm = hmMatch.groupValues[3]
+            if (ampm == "PM" && hour < 12) hour += 12
+            if (ampm == "AM" && hour == 12) hour = 0
+            calendar.set(Calendar.HOUR_OF_DAY, hour)
+            calendar.set(Calendar.MINUTE, minute)
+            calendar.set(Calendar.SECOND, 0)
+            calendar.set(Calendar.MILLISECOND, 0)
+            return
+        }
+        if (isBengali) {
+            // Bengali টা token: a daypart word in the message moves the
+            // hour to the right half of the day ("৫টায় বিকেলে" -> 5 PM).
+            // am/pm wins over a daypart when both are present (handled
+            // above); a 24h token never reaches this branch.
+            val hour = Regex("""(\d{1,2})\s*টা""").find(normalized)?.groupValues?.get(1)?.toIntOrNull()
+            if (hour != null) {
+                val resolved = if (daypart != null) applyDaypartToHour(daypart, hour) else hour % 24
+                calendar.set(Calendar.HOUR_OF_DAY, resolved)
+                calendar.set(Calendar.MINUTE, 0)
+                calendar.set(Calendar.SECOND, 0)
+                calendar.set(Calendar.MILLISECOND, 0)
+            }
+            return
+        }
+        val hourOnlyRegex = Regex("""\b(\d{1,2})\s*(AM|PM)\b""")
+        val hourMatch = hourOnlyRegex.find(upper)
+        if (hourMatch != null) {
+            var hour = hourMatch.groupValues[1].toIntOrNull() ?: 0
+            val ampm = hourMatch.groupValues[2]
+            if (ampm == "PM" && hour < 12) hour += 12
+            if (ampm == "AM" && hour == 12) hour = 0
+            calendar.set(Calendar.HOUR_OF_DAY, hour)
+            calendar.set(Calendar.MINUTE, 0)
+            calendar.set(Calendar.SECOND, 0)
+            calendar.set(Calendar.MILLISECOND, 0)
+        }
+    }
+
+    /** ONE title cleanup for task and meeting titles. Strips English and
+     *  Bengali date words, dayparts, time tokens and AM/PM markers, so a
+     *  date word never survives into a stored title. */
+    private fun cleanTitle(text: String, kind: ParsedKind): String {
+        var cleaned = normalizeDigits(text)
+        val tokensToRemove = listOf(
+            "আগামীকাল", "আগামিকাল", "কালকে", "আজকে", "পরশু", "কাল", "আজ",
+            "tomorrow", "today", "yesterday",
+            "সকালে", "দুপুরে", "বিকালে", "বিকেলে", "সন্ধ্যায়", "রাতে",
+            "সকাল", "দুপুর", "বিকেল", "সন্ধ্যা", "রাত", "ভোর",
+            "morning", "afternoon", "evening", "night"
+        )
+        for (token in tokensToRemove) {
+            // (?U) makes \b Unicode-aware: an ASCII \b has no boundary
+            // around Bengali letters, so "কাল" would never match.
+            cleaned = cleaned.replace(Regex("(?U)(?i)\\b${Regex.escape(token)}\\b"), " ")
+        }
+        cleaned = cleaned.replace(Regex("""\b\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)\b""", RegexOption.IGNORE_CASE), " ")
+        cleaned = cleaned.replace(Regex("""\d{1,2}\s*টা(য়|ই|তে)"""), " ")
+        cleaned = cleaned.replace(
+            Regex("""(এক|দুই|তিন|চার|পাঁচ|ছয়|সাত|আট|নয়|দশ|এগারো|বারো)\s*টা(য়|ই|তে)"""), " "
+        )
+        cleaned = cleaned.replace(Regex("""\b\d{1,2}:\d{2}\b"""), " ")
+        if (kind == ParsedKind.REMINDER) {
+            cleaned = cleaned.replace("কথা", " ")
+        }
+        val stripWords = when (kind) {
+            ParsedKind.SCHEDULE -> listOf(
+                "শিডিউল করো", "schedule", "শিডিউল", "বুক করো", "বুক", "book",
+                "এপয়েন্টমেন্ট", "অ্যাপয়েন্টমেন্ট", "appointment", "মিটিং", "meeting"
+            )
+            ParsedKind.TASK -> listOf(
+                "টাস্ক", "task", "করতে হবে", "করতে", "করো", "করব", "করার",
+                "বানাও", "অ্যাড করো", "add", "তৈরি করো", "সেট করো", "রাখো"
+            )
+            ParsedKind.REMINDER -> listOf(
+                "মনে করিয়ে দিও", "মনে করিয়ে দিবে", "মনে করিয়ে", "রিমাইন্ডার",
+                "remind me to", "remind me", "reminder", "don't forget to",
+                "don't forget", "remember to", "remember", "মনে করিয়ে দাও"
+            )
+            else -> emptyList()
+        }
+        for (word in stripWords) {
+            cleaned = cleaned.replace(word, " ", ignoreCase = true)
+        }
+        cleaned = cleaned.replace("এর", " ")
+        return cleaned.trim().replace(Regex("\\s+"), " ")
+    }
+
+    private fun extractRelativeDayInfo(text: String): Int? {
+        val lower = text.lowercase(Locale.ROOT)
+        return when {
+            lower.contains("আগামীকাল") || lower.contains("আগামিকাল") ||
+                lower.contains("কালকে") || lower.contains("tomorrow") ||
+                // Standalone কাল / কালকে only — a bare contains("কাল") also
+                // matches সকাল (morning) and বিকাল (afternoon).
+                Regex("(^|\\s)কাল(কে)?(\\s|$|[,.!?])").containsMatchIn(text) -> 1
+            lower.contains("পরশু") || lower.contains("day after tomorrow") -> 2
+            lower.contains("আজকে") || lower.contains("আজ") ||
+                lower.contains("today") -> 0
+            else -> null
+        }
+    }
+
+    private fun formatBengaliHourWord(hour24: Int): String {
+        val hour12 = when (hour24 % 12) {
+            0 -> 12
+            else -> hour24 % 12
+        }
+        val hourWord = when (hour12) {
+            1 -> "১টা"; 2 -> "২টা"; 3 -> "৩টা"; 4 -> "৪টা"; 5 -> "৫টা"; 6 -> "৬টা"
+            7 -> "৭টা"; 8 -> "৮টা"; 9 -> "৯টা"; 10 -> "১০টা"; 11 -> "১১টা"
+            else -> "১২টা"
+        }
+        return hourWord
+    }
+
+    private fun getDaypartLabel(hour24: Int): String = when (hour24) {
+        in 0..4 -> "ভোর"
+        in 5..11 -> "সকাল"
+        12 -> "দুপুর"
+        in 13..16 -> "বিকেল"
+        in 17..18 -> "সন্ধ্যা"
+        else -> "রাত"
+    }
+
+    private fun hourOfDay(text: String): Int? {
+        val normalized = normalizeDigits(text)
+        val upper = normalized.uppercase()
+        val hourMinuteRegex = Regex("""(\d{1,2}):(\d{2})\s*(AM|PM)?""")
+        val hmMatch = hourMinuteRegex.find(upper)
+        if (hmMatch != null) {
+            var hour = hmMatch.groupValues[1].toIntOrNull() ?: 0
+            val ampm = hmMatch.groupValues[3]
+            if (ampm == "PM" && hour < 12) hour += 12
+            if (ampm == "AM" && hour == 12) hour = 0
+            return hour
+        }
+        val bengaliRegex = Regex("""(\d{1,2})\s*টা""")
+        val bengaliMatch = bengaliRegex.find(normalized)
+        if (bengaliMatch != null) return bengaliMatch.groupValues[1].toIntOrNull()
+        val wordRegex =
+            Regex("""(এক|দুই|তিন|চার|পাঁচ|ছয়|সাত|আট|নয়|দশ|এগারো|বারো)\s*টা""")
+        val wordMatch = wordRegex.find(text)
+        if (wordMatch != null) return hourWordToNumber[wordMatch.groupValues[1]]
+        val hourOnlyRegex = Regex("""\b(\d{1,2})\s*(AM|PM)\b""")
+        val hourMatch = hourOnlyRegex.find(upper)
+        if (hourMatch != null) {
+            var hour = hourMatch.groupValues[1].toIntOrNull() ?: 0
+            val ampm = hourMatch.groupValues[2]
+            if (ampm == "PM" && hour < 12) hour += 12
+            if (ampm == "AM" && hour == 12) hour = 0
+            return hour
+        }
+        return null
+    }
+
+    /** "আজ"/"আগামীকাল"/"পরশু"/weekday label for the EVENT date. */
+    private fun dayLabel(eventCal: Calendar, now: Calendar): String {
+        val eventDay = (eventCal.clone() as Calendar).apply {
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }
+        val today = (now.clone() as Calendar).apply {
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }
+        val diffDays = ((eventDay.timeInMillis - today.timeInMillis) / 86_400_000L).toInt()
+        return when (diffDays) {
+            0 -> "আজ"
+            1 -> "আগামীকাল"
+            2 -> "পরশু"
+            else -> SimpleDateFormat("EEEE, d MMMM", Locale("bn")).format(eventCal.time)
+        }
+    }
+
+    /** "আগামীকাল বিকেল ৩টা" — event day + daypart + hour, from the EVENT
+     *  calendar. One place, used by every creation reply. */
+    private fun formatDayTimeLabel(eventCal: Calendar, now: Calendar): String {
+        val day = dayLabel(eventCal, now)
+        val hour24 = eventCal.get(Calendar.HOUR_OF_DAY)
+        val minute = eventCal.get(Calendar.MINUTE)
+        val daypart = getDaypartLabel(hour24)
+        val hourWord = formatBengaliHourWord(hour24)
+        return if (minute == 0) "$day $daypart $hourWord" else "$day $daypart $hourWord ${minute} মিনিট"
+    }
+
+    /** "tomorrow at 3:00 PM" — event day + time, English. */
+    private fun formatDayTimeLabelEn(eventCal: Calendar, now: Calendar): String {
+        val eventDay = (eventCal.clone() as Calendar).apply {
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }
+        val today = (now.clone() as Calendar).apply {
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }
+        val diffDays = ((eventDay.timeInMillis - today.timeInMillis) / 86_400_000L).toInt()
+        val day = when (diffDays) {
+            0 -> "today"
+            1 -> "tomorrow"
+            2 -> "day after tomorrow"
+            else -> SimpleDateFormat("EEEE, d MMMM", Locale.ENGLISH).format(eventCal.time)
+        }
+        return "$day at ${formatTime(eventCal.timeInMillis)}"
+    }
+
+    // ==================== ONE reply builder ====================
+    // Event time FIRST, reminder labeled separately. No branch writes its
+    // own reply text. Bengali input -> Bengali reply, English -> English.
+
+    private fun buildCreationReply(
+        title: String,
+        eventCal: Calendar,
+        reminderCal: Calendar?,
+        reminderAtDue: Boolean,
+        kind: ParsedKind,
+        now: Calendar,
+        isBengali: Boolean,
+        conflictingTitle: String? = null
+    ): String {
+        return when (kind) {
+            ParsedKind.SCHEDULE -> buildScheduleReply(title, eventCal, now, isBengali, conflictingTitle)
+            ParsedKind.REMINDER -> {
+                if (isBengali) {
+                    val eventLabel = formatDayTimeLabel(eventCal, now)
+                    "ঠিক আছে, $eventLabel \"$title\"-এর কথা মনে করিয়ে দেব।"
+                } else {
+                    val eventLabel = formatDayTimeLabelEn(eventCal, now)
+                    "Done! I'll remind you about \"$title\" $eventLabel. 🔔"
+                }
+            }
+            ParsedKind.TASK -> {
+                if (reminderAtDue) {
+                    if (isBengali) {
+                        val eventLabel = formatDayTimeLabel(eventCal, now)
+                        "ঠিক আছে, $eventLabel \"$title\"-এর কথা মনে করিয়ে দেব।"
+                    } else {
+                        val eventLabel = formatDayTimeLabelEn(eventCal, now)
+                        "Done! I'll remind you about \"$title\" $eventLabel. 🔔"
+                    }
+                } else if (reminderCal != null) {
+                    if (isBengali) {
+                        val eventLabel = formatDayTimeLabel(eventCal, now)
+                        val reminderLabel = formatDayTimeLabel(reminderCal, now)
+                        "ঠিক আছে, \"$title\" টাস্ক তৈরি করেছি। $eventLabel নির্ধারিত আছে, আর $reminderLabel মনে করিয়ে দেব।"
+                    } else {
+                        val eventLabel = formatDayTimeLabelEn(eventCal, now)
+                        val reminderLabel = formatDayTimeLabelEn(reminderCal, now)
+                        "Done! Created task \"$title\" for $eventLabel. I'll remind you at $reminderLabel. 🔔"
+                    }
+                } else {
+                    if (isBengali) {
+                        val eventLabel = formatDayTimeLabel(eventCal, now)
+                        "ঠিক আছে, \"$title\" টাস্ক তৈরি করেছি। $eventLabel নির্ধারিত আছে।"
+                    } else {
+                        val eventLabel = formatDayTimeLabelEn(eventCal, now)
+                        "Done! Created task \"$title\" for $eventLabel. 🔔"
+                    }
+                }
+            }
+            else -> {
+                if (isBengali) {
+                    val eventLabel = formatDayTimeLabel(eventCal, now)
+                    "ঠিক আছে, \"$title\" তৈরি করেছি। $eventLabel নির্ধারিত আছে।"
+                } else {
+                    val eventLabel = formatDayTimeLabelEn(eventCal, now)
+                    "Done! Created \"$title\" for $eventLabel. 🔔"
+                }
+            }
+        }
+    }
+
+    /** Schedule reply: event time first, with the pre-creation conflict
+     *  note. The conflict is computed BEFORE the event is created, so
+     *  the new event can never report a conflict with itself. */
+    private fun buildScheduleReply(
+        title: String,
+        eventCal: Calendar,
+        now: Calendar,
+        isBengali: Boolean,
+        conflictingTitle: String?
+    ): String {
+        return if (isBengali) {
+            val eventLabel = formatDayTimeLabel(eventCal, now)
+            val base = "ঠিক আছে, $eventLabel \"$title\" মিটিং শিডিউল করেছি।"
+            if (conflictingTitle != null) {
+                "$base সতর্কতা: ওই সময়ে \"$conflictingTitle\" আছে — সময় মিলিয়ে নিও।"
+            } else {
+                base
+            }
+        } else {
+            val eventLabel = formatDayTimeLabelEn(eventCal, now)
+            val base = "Done! Scheduled \"$title\" for $eventLabel on your calendar. 📅"
+            if (conflictingTitle != null) {
+                "$base ⚠ Heads up: this overlaps with '$conflictingTitle'."
+            } else {
+                base
+            }
+        }
+    }
+
+    // ==================== parseIntent: ONE entry point ====================
+    // Every creation/message routes through here. Order inside:
+    //   guards (small talk / questions) -> call-task shortcut ->
+    //   explicit schedule words -> explicit reminder words ->
+    //   bank matcher -> null (UNKNOWN).
+
+    private val smallTalkPhrases = listOf(
+        "hi", "hello", "hey", "good morning", "good afternoon", "good evening",
+        "good night", "thanks", "thank you", "bye", "goodbye", "ok", "okay",
+        "হাই", "হ্যালো", "ধন্যবাদ", "শুভ সকাল", "শুভ বিকাল", "শুভ সন্ধ্যা",
+        "শুভ রাত্রি", "আসসালামু আলাইকুম", "সালাম"
+    )
+
+    private val questionStartWords = listOf(
+        "what", "when", "where", "why", "how", "who", "which", "whose",
+        "is ", "are ", "was ", "were ", "can ", "could ", "should ", "would ",
+        "do ", "does ", "did ", "tell me", "explain", "describe",
+        "কী", "কি", "কখন", "কোথায়", "কেন", "কেমন", "কে", "কোন"
+    )
+
+    private val explicitReminderPhrases = listOf(
+        "মনে করিয়ে দিও", "মনে করিয়ে দিবে", "মনে করিয়ে দাও", "মনে করিয়ে",
+        "remind me to", "remind me", "don't forget to", "dont forget to",
+        "remember to", "remember"
+    )
+
+    private fun parseIntent(rawInput: String): ParsedIntent {
+        val cleaned = rawInput.trim()
+        val lower = cleaned.lowercase(Locale.ROOT)
+        val bn = isBengali(cleaned)
+        val now = Calendar.getInstance()
+
+        // Day resolution — shared by every kind.
+        val dayOffset = extractRelativeDayInfo(cleaned) ?: 0
+        val dayCal = (now.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, dayOffset) }
+
+        // --- Guard 1: small talk is never a creation. ---
+        val normalizedForTalk = lower.trim()
+        if (smallTalkPhrases.any { normalizedForTalk == it || normalizedForTalk.startsWith("$it ") }) {
+            return ParsedIntent(ParsedKind.UNKNOWN, "", null, null, false, 0.0, bn, Priority.MEDIUM, null, false, null, "meeting")
+        }
+        // --- Guard 2: questions are never creations. ---
+        if (cleaned.contains("?") || cleaned.contains("؟") ||
+            questionStartWords.any { lower.startsWith(it) }) {
+            return ParsedIntent(ParsedKind.UNKNOWN, "", null, null, false, 0.0, bn, Priority.MEDIUM, null, false, null, "meeting")
+        }
+
+        val timeToken = extractTimeToken(cleaned)
+        val priority = if (lower.contains("urgent") || lower.contains("important") ||
+            lower.contains("high") || cleaned.contains("জরুরি")) Priority.HIGH else Priority.MEDIUM
+        val category = when {
+            lower.contains("work") || lower.contains("launch") || lower.contains("project") ||
+                lower.contains("client") -> TaskCategory.WORK
+            lower.contains("study") || lower.contains("class") || lower.contains("book") -> TaskCategory.STUDY
+            else -> TaskCategory.PERSONAL
+        }
+
+        // --- Shortcut: call task ("কল" + করতে/করব/করার/করো/করুন/time). ---
+        // A call to a person is a TASK, not a calendar event — the bank is
+        // skewed toward call-BOOKING (SCHEDULE_CREATE) for "কল করো"
+        // phrasings, so the matcher must not see these.
+        val isCallTask = cleaned.contains("কল") && (
+            cleaned.contains("করতে") || cleaned.contains("করব") ||
+                cleaned.contains("করার") || cleaned.contains("করো") ||
+                cleaned.contains("করুন") || timeToken != null
+            )
+        if (isCallTask) {
+            val title = cleanTitle(cleaned, ParsedKind.TASK)
+            return ParsedIntent(
+                kind = ParsedKind.TASK, title = title.ifBlank { "কল করো" },
+                dayCal = dayCal, timeToken = timeToken,
+                isBareHour = isBareHourToken(timeToken, cleaned),
+                confidence = 1.0, isBengali = bn, priority = Priority.HIGH,
+                category = TaskCategory.WORK, reminderAtDue = true,
+                scheduleLocation = null, scheduleType = "MEETING"
+            )
+        }
+
+        // --- Shortcut: explicit schedule words. ---
+        // "এপয়েন্টমেন্ট শিডিউল করো" must never become a task (defect 1).
+        val hasScheduleWord = cleaned.contains("এপয়েন্টমেন্ট") ||
+            cleaned.contains("অ্যাপয়েন্টমেন্ট") ||
+            lower.contains("appointment") ||
+            cleaned.contains("শিডিউল করো") ||
+            lower.contains("schedule")
+        if (hasScheduleWord) {
+            val title = cleanTitle(cleaned, ParsedKind.SCHEDULE)
+            return ParsedIntent(
+                kind = ParsedKind.SCHEDULE, title = title.ifBlank { "মিটিং" },
+                dayCal = dayCal, timeToken = timeToken,
+                isBareHour = isBareHourToken(timeToken, cleaned),
+                confidence = 1.0, isBengali = bn, priority = priority,
+                category = category, reminderAtDue = false,
+                scheduleLocation = "Google Meet", scheduleType = "MEETING"
+            )
+        }
+
+        // --- Shortcut: explicit reminder words. ---
+        // "মনে করিয়ে দিও" is unambiguous — the matcher confuses
+        // TASK_CREATE <-> REMINDER on 800/6275 bank sentences, so the
+        // explicit phrase wins over the match.
+        if (explicitReminderPhrases.any { lower.contains(it) || cleaned.contains(it) }) {
+            val title = cleanTitle(cleaned, ParsedKind.REMINDER)
+            return ParsedIntent(
+                kind = ParsedKind.REMINDER, title = title.ifBlank { "রিমাইন্ডার" },
+                dayCal = dayCal, timeToken = timeToken,
+                isBareHour = isBareHourToken(timeToken, cleaned),
+                confidence = 1.0, isBengali = bn, priority = priority,
+                category = category, reminderAtDue = true,
+                scheduleLocation = null, scheduleType = "MEETING"
+            )
+        }
+
+        // --- Bank matcher: intent only. ---
+        val match = matcher?.match(cleaned)
+        if (match != null) {
+            val kind = when (match.intent) {
+                BankIntent.TASK_CREATE -> ParsedKind.TASK
+                BankIntent.SCHEDULE_CREATE -> ParsedKind.SCHEDULE
+                BankIntent.REMINDER -> ParsedKind.REMINDER
+                BankIntent.QUERY_SCHEDULE -> ParsedKind.QUERY_SCHEDULE
+                BankIntent.QUERY_TASKS -> ParsedKind.QUERY_TASKS
+            }
+            // A task phrased as an explicit reminder still reminds AT due.
+            val explicitReminder = kind == ParsedKind.TASK &&
+                explicitReminderPhrases.any { lower.contains(it) || cleaned.contains(it) }
+            val title = cleanTitle(cleaned, kind)
+            val fallbackTitle = when (kind) {
+                ParsedKind.TASK -> "New Task"
+                ParsedKind.SCHEDULE -> "মিটিং"
+                ParsedKind.REMINDER -> "রিমাইন্ডার"
+                else -> ""
+            }
+            return ParsedIntent(
+                kind = kind, title = title.ifBlank { fallbackTitle },
+                dayCal = dayCal, timeToken = timeToken,
+                isBareHour = isBareHourToken(timeToken, cleaned),
+                confidence = match.score, isBengali = bn, priority = priority,
+                category = category,
+                reminderAtDue = kind == ParsedKind.REMINDER || explicitReminder,
+                scheduleLocation = if (kind == ParsedKind.SCHEDULE) "Google Meet" else null,
+                scheduleType = "MEETING"
+            )
+        }
+
+        return ParsedIntent(ParsedKind.UNKNOWN, "", null, null, false, 0.0, bn, Priority.MEDIUM, null, false, null, "meeting")
+    }
+
+    /**
+     * A bare hour has a time token but NO AM/PM/daypart marker anywhere
+     * in the message. Such a message creates NOTHING — the caller asks
+     * the user instead. (resolveBareHour's silent-AM rule is deleted.)
+     */
+    private fun isBareHourToken(timeToken: String?, rawInput: String): Boolean {
+        if (timeToken == null) return false
+        // An hour above 12 is unambiguous 24h ("15:00টায়") — not bare.
+        val tokenHour = Regex("""(\d{1,2})""")
+            .find(normalizeDigits(timeToken))?.groupValues?.get(1)?.toIntOrNull()
+        if (tokenHour != null && tokenHour > 12) return false
+        val normalized = normalizeDigits(rawInput)
+        val lower = normalized.lowercase(Locale.ROOT)
+        val hasAmPm = Regex("""\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)\b""").containsMatchIn(lower)
+        val hasDaypart = bengaliDaypartHour.keys.any { lower.contains(it) } ||
+            lower.contains("morning") || lower.contains("afternoon") ||
+            lower.contains("evening") || lower.contains("night") ||
+            lower.contains("ভোর")
+        // A standalone 24h time ("15:00") is explicit — but NOT one
+        // followed by টা ("5:30টায়" is a bare Bengali hour).
+        val hasExplicitHour = Regex("""\b([01]?\d|2[0-3]):([0-5]\d)\b(?! *টা)""").containsMatchIn(lower)
+        return !hasAmPm && !hasDaypart && !hasExplicitHour
+    }
+
+    /** Resolves the event/due calendar for a parsed creation intent.
+     *  Per-kind no-token defaults (preserved branch semantics):
+     *  REMINDER -> 3 PM on the day; SCHEDULE -> 2 PM on the day
+     *  (+2h if past); TASK -> +2h from now (on the day). An explicit
+     *  past time rolls +1 day (TASK/REMINDER) or +2h (SCHEDULE). */
+    private fun resolveCreationTime(parsed: ParsedIntent, now: Calendar, daypart: String? = null): Calendar {
+        val dayCal = parsed.dayCal ?: (now.clone() as Calendar)
+        val eventCal = (dayCal.clone() as Calendar)
+        val token = parsed.timeToken
+        if (token != null) {
+            parseTimeIntoCalendar(eventCal, token, parsed.isBengali, daypart)
+            if (eventCal.timeInMillis <= now.timeInMillis) {
+                when (parsed.kind) {
+                    ParsedKind.SCHEDULE -> eventCal.add(Calendar.HOUR_OF_DAY, 2)
+                    ParsedKind.TASK, ParsedKind.REMINDER -> eventCal.add(Calendar.DAY_OF_YEAR, 1)
+                    else -> Unit
+                }
+            }
+            return eventCal
+        }
+        return when (parsed.kind) {
+            ParsedKind.REMINDER -> {
+                eventCal.set(Calendar.HOUR_OF_DAY, 15)
+                eventCal.set(Calendar.MINUTE, 0)
+                eventCal.set(Calendar.SECOND, 0)
+                eventCal.set(Calendar.MILLISECOND, 0)
+                eventCal
+            }
+            ParsedKind.SCHEDULE -> {
+                eventCal.set(Calendar.HOUR_OF_DAY, 14)
+                eventCal.set(Calendar.MINUTE, 0)
+                eventCal.set(Calendar.SECOND, 0)
+                eventCal.set(Calendar.MILLISECOND, 0)
+                if (eventCal.timeInMillis <= now.timeInMillis) {
+                    eventCal.add(Calendar.HOUR_OF_DAY, 2)
+                }
+                eventCal
+            }
+            else -> { // TASK
+                eventCal.timeInMillis = now.timeInMillis
+                eventCal.add(Calendar.HOUR_OF_DAY, 2)
+                eventCal.set(Calendar.MINUTE, 0)
+                eventCal.set(Calendar.SECOND, 0)
+                eventCal
+            }
+        }
+    }
+
+    // ==================== Clarification (never-guess) ====================
+
+    private fun buildClarificationQuestion(parsed: ParsedIntent, now: Calendar): PreFilterResult.Handled {
+        val hour = hourOfDay(parsed.timeToken ?: "") ?: 12
+        val day = dayLabel(parsed.dayCal ?: now, now)
+        val hourWord = formatBengaliHourWord(hour)
+        val question = if (parsed.isBengali) {
+            "$day $hourWord — সকাল নাকি বিকেল/রাত? সময়টা নিশ্চিত করো, তাহলে \"${
+                parsed.title
+            }\" তৈরি করব।"
+        } else {
+            "You said $day $hourWord — AM or PM? Please confirm so I can create \"${
+                parsed.title
+            }\"."
+        }
+        val chips = if (parsed.isBengali) {
+            val amLabel = "${getDaypartLabel(if (hour % 12 == 0) 0 else hour % 12)} $hourWord"
+            val pmHour = (hour % 12) + 12
+            val pmLabel = "${getDaypartLabel(pmHour)} $hourWord"
+            listOf(amLabel, pmLabel)
+        } else {
+            val hour12 = if (hour % 12 == 0) 12 else hour % 12
+            listOf("$hour12 AM", "$hour12 PM")
+        }
+        return PreFilterResult.Handled(
+            responseText = question,
+            quickSuggestions = chips
+        )
+    }
+
+    /**
+     * A follow-up answering a pending clarification. Returns null when
+     * the message does not answer it — the caller then clears pending
+     * and processes the message normally.
+     *
+     * Answers, in priority order: an AM/PM token; a time token WITH a
+     * daypart marker (the marker may also correct the hour, e.g.
+     * "৪টায় বিকেলে" for a pending "৩ টায়"); a bare daypart word
+     * ("বিকেল") applied to the pending hour. A bare hour alone
+     * ("৩টা") is NOT an answer — it has no marker.
+     */
+    private suspend fun tryAnswerClarification(rawInput: String, userId: String): PreFilterResult? {
+        val pending = pendingClarification ?: return null
+        val cleaned = rawInput.trim()
+        val lower = cleaned.lowercase(Locale.ROOT)
+        val now = Calendar.getInstance()
+        val pendingHour = hourOfDay(pending.timeToken ?: "") ?: 12
+
+        val token = extractTimeToken(cleaned)
+        val tokenHour = token?.let { hourOfDay(it) }
+        val hasMarker = token != null && !isBareHourToken(token, cleaned)
+        val daypart = findDaypartWord(cleaned)
+        val ampmMatch = Regex("""\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)\b""").find(lower)
+        val ampmHour = ampmMatch?.let {
+            var hour = it.groupValues[1].toIntOrNull() ?: 12
+            val ampm = it.groupValues[3].replace(".", "").uppercase()
+            if (ampm == "PM" && hour < 12) hour += 12
+            if (ampm == "AM" && hour == 12) hour = 0
+            hour
+        }
+
+        val resolvedHour: Int? = when {
+            ampmHour != null -> ampmHour
+            tokenHour != null && daypart != null -> applyDaypartToHour(daypart, tokenHour)
+            tokenHour != null && hasMarker -> tokenHour // 24h form, e.g. "15:00"
+            daypart != null -> applyDaypartToHour(daypart, pendingHour)
+            else -> null
+        }
+        if (resolvedHour == null) return null
+
+        pendingClarification = null
+        val eventCal = (pending.dayCal ?: now).clone() as Calendar
+        eventCal.set(Calendar.HOUR_OF_DAY, resolvedHour)
+        eventCal.set(Calendar.MINUTE, 0)
+        eventCal.set(Calendar.SECOND, 0)
+        eventCal.set(Calendar.MILLISECOND, 0)
+        if (eventCal.timeInMillis <= now.timeInMillis) {
+            when (pending.kind) {
+                ParsedKind.SCHEDULE -> eventCal.add(Calendar.HOUR_OF_DAY, 2)
+                ParsedKind.TASK, ParsedKind.REMINDER -> eventCal.add(Calendar.DAY_OF_YEAR, 1)
+                else -> Unit
+            }
+        }
+        return createFromParsed(
+            ParsedIntent(
+                kind = pending.kind, title = pending.title,
+                dayCal = pending.dayCal, timeToken = pending.timeToken,
+                isBareHour = false, confidence = 1.0,
+                isBengali = pending.isBengali, priority = pending.priority,
+                category = pending.category, reminderAtDue = pending.reminderAtDue,
+                scheduleLocation = pending.scheduleLocation,
+                scheduleType = pending.scheduleType
+            ),
+            eventCal, now, userId
+        )
+    }
+
+    /** Applies a Bengali daypart to a 1-12 hour: ভোর/সকাল -> AM,
+     *  দুপুর/বিকেল/সন্ধ্যা -> PM (12 stays 12), রাত -> AM for 1-4,
+     *  PM for 5-11, midnight for 12. */
+    private fun applyDaypartToHour(daypart: String, hour12: Int): Int {
+        val h = if (hour12 % 12 == 0) 12 else hour12 % 12
+        return when (daypart) {
+            "ভোর", "সকাল" -> h % 12
+            "দুপুর", "বিকেল", "সন্ধ্যা" -> if (h == 12) 12 else h + 12
+            "রাত" -> when {
+                h == 12 -> 0
+                h <= 4 -> h
+                else -> h + 12
+            }
+            else -> h
+        }
+    }
+
+    /** Creates the task/event for a fully-resolved parsed intent and
+     *  returns the unified reply. One place — clarification answers and
+     *  fresh parses both land here. */
+    private suspend fun createFromParsed(
+        parsed: ParsedIntent,
+        eventCal: Calendar,
+        now: Calendar,
+        userId: String
+    ): PreFilterResult {
+        return when (parsed.kind) {
+            ParsedKind.SCHEDULE -> {
+                // Conflict checked BEFORE creation, so the new event can
+                // never report a conflict with itself.
+                val startMillis = eventCal.timeInMillis
+                val endMillis = startMillis + 45 * 60 * 1000L
+                val conflict = calendarRepository.checkConflict(userId, startMillis, endMillis)
+                val conflictingTitle = if (conflict.hasConflict) conflict.conflictingEvent?.title else null
+                val event = calendarRepository.addEvent(
+                    userId = userId,
+                    title = parsed.title,
+                    startEpochMillis = startMillis,
+                    endEpochMillis = endMillis,
+                    locationOrLink = parsed.scheduleLocation ?: "Google Meet",
+                    eventType = parsed.scheduleType
+                )
+                PreFilterResult.Handled(
+                    responseText = buildCreationReply(
+                        parsed.title, eventCal, null, false, ParsedKind.SCHEDULE, now,
+                        isBengali = parsed.isBengali,
+                        conflictingTitle = conflictingTitle
+                    ),
+                    createdEvent = event,
+                    actionType = ChatActionType.EVENT_CREATED,
+                    focusStartMillis = startMillis,
+                    focusEndMillis = endMillis,
+                    quickSuggestions = listOf("Show schedule", "Plan my day", "Find free time")
+                )
+            }
+            ParsedKind.TASK, ParsedKind.REMINDER -> {
+                val reminderCal = if (parsed.reminderAtDue) {
+                    eventCal
+                } else {
+                    (eventCal.clone() as Calendar).apply { add(Calendar.HOUR_OF_DAY, -2) }
+                }
+                val task = taskRepository.createTask(
+                    userId = userId,
+                    title = parsed.title,
+                    dueEpochMillis = eventCal.timeInMillis,
+                    priority = parsed.priority,
+                    category = parsed.category ?: TaskCategory.PERSONAL,
+                    reminderSet = true,
+                    reminderEpochMillis = if (parsed.reminderAtDue) eventCal.timeInMillis else reminderCal.timeInMillis
+                )
+                PreFilterResult.Handled(
+                    responseText = buildCreationReply(
+                        parsed.title, eventCal, reminderCal, parsed.reminderAtDue, parsed.kind, now,
+                        isBengali = parsed.isBengali
+                    ),
+                    createdTask = task,
+                    actionType = ChatActionType.TASK_PREVIEW,
+                    quickSuggestions = listOf("Show today's tasks", "Plan my day", "Find free time")
+                )
+            }
+            else -> PreFilterResult.Unhandled
+        }
+    }
+
+    // Bengali time-of-day words and hour tokens, stripped from generated
+    // titles in the verbatim fallback branches (15/16).
+    private val BENGALI_DAYPART_REGEX = Regex("(সকালে|দুপুরে|বিকেলে|বিকালে|সন্ধ্যা(?:\u09df|\u09af\u09bc)|সন্ধ্যাবেলা|রাতে)")
+    private val BENGALI_TIME_TOKEN_REGEX = Regex("[০-৯0-9]{1,2}(?::[০-৯0-9]{2})?\\s*(?:\u099f\u09be(?:\u09df|\u09af\u09bc|\u0987))")
 
     suspend fun tryHandle(
         userId: String,
@@ -51,243 +967,26 @@ class ClientIntentPreFilter(
         events: List<CalendarEventEntity>
     ): PreFilterResult {
         val trimmed = userPrompt.trim()
-        val cleaned = cleanUserPrompt(trimmed)
-        val lower = cleaned.lowercase()
-        // Digit-normalized copy used ONLY for time extraction, so Bengali
-        // digits (৫টায়) parse the same as ASCII (5 PM). Titles keep the
-        // user's original script.
-        val cleanedNorm = normalizeBengaliDigits(cleaned)
+        // Fold precomposed nukta letters to the bank's decomposed form
+        // once, up front — every contains()/matcher check below sees the
+        // same spelling. Stored titles render identically.
+        val cleaned = foldBengaliNukta(cleanUserPrompt(trimmed))
+        val lower = cleaned.lowercase(Locale.ROOT)
         // Timed tasks count as busy time when suggesting focus slots.
         val taskBusyIntervals = todayTasks.filter { !it.isCompleted }
             .map { it.dueDateEpochMillis to (it.dueDateEpochMillis + 30 * 60 * 1000L) }
 
-        // 1. Bengali: Dynamic Call / Reminder Intent (e.g. "রাহুলকে কল করার কথা মনে করিয়ে দিও")
-        // "মনে করিয়ে" is an explicit reminder request; "কল" + করতে/করব/করার
-        // (or a time token) is a call task. Both route here — the reminder
-        // rule differs (see below), the time resolution is shared.
-        val isExplicitReminderRequest = cleaned.contains("মনে করিয়ে")
-        val isCallTask = cleaned.contains("কল") && (
-            cleaned.contains("করার") || cleaned.contains("করতে") || cleaned.contains("করব") ||
-            hasTimeToken(cleaned, cleanedNorm)
-        )
-        if (isExplicitReminderRequest || isCallTask) {
-            val isTomorrow = mentionsTomorrow(cleaned, lower)
-            val cal = Calendar.getInstance()
-            if (isTomorrow) {
-                cal.add(Calendar.DAY_OF_YEAR, 1)
-            }
-            // ONE unified extraction — the 3 PM default fires ONLY when no
-            // time token exists anywhere in the message.
-            val token = extractTimeToken(cleaned, cleanedNorm, cal)
-            if (token != null) {
-                applyExtractedTime(token, cal)
-            } else {
-                cal.set(Calendar.HOUR_OF_DAY, 15) // default 3 PM
-                cal.set(Calendar.MINUTE, 0)
-                cal.set(Calendar.SECOND, 0)
-                cal.set(Calendar.MILLISECOND, 0)
-            }
-
-            var title = cleaned
-                .replace("মনে করিয়ে দিও", "")
-                .replace("মনে করিয়ে দাও", "")
-                .replace("কথা", "")
-                .replace("আগামীকাল", "")
-                .replace(Regex("(^|\\s)কাল(কে)?(?=\\s|$)"), " ")
-                .replace(BENGALI_DAYPART_REGEX, " ")
-                .replace(BENGALI_TIME_TOKEN_REGEX, " ")
-                .trim()
-            if (title.isBlank()) title = "জরুরি কল ও ফলোআপ"
-
-            // "মনে করিয়ে দিও" asks for the reminder AT the stated time. A
-            // call task ("কল করতে হবে") states when the call is due — the
-            // reminder fires 2h before, the user's standing rule
-            // (createTask default).
-            val task = taskRepository.createTask(
-                userId = userId,
-                title = title,
-                dueEpochMillis = cal.timeInMillis,
-                priority = Priority.HIGH,
-                category = TaskCategory.WORK,
-                reminderSet = true,
-                reminderEpochMillis = if (isExplicitReminderRequest) cal.timeInMillis else null
-            )
-            // The reply states the REMINDER time (due - 2h for a call task),
-            // not the due time — same rule as the catch-all (branch 16).
-            // Label from the ACTUAL reminder date: a 1 AM due rolls its
-            // 11 PM reminder back to today — never claim the wrong day.
-            val reminderMillis = task.reminderEpochMillis ?: cal.timeInMillis
-            val reminderCal = Calendar.getInstance().apply { timeInMillis = reminderMillis }
-            val dayLabel = if (reminderCal.get(Calendar.DAY_OF_YEAR) != Calendar.getInstance().get(Calendar.DAY_OF_YEAR)) "আগামীকাল" else "আজ"
-            val formatted = formatTime(reminderMillis)
-            return PreFilterResult.Handled(
-                responseText = "ঠিক আছে! $dayLabel $formatted সময়ে \"$title\" মনে করিয়ে দেব। 🔔",
-                createdTask = task,
-                actionType = ChatActionType.TASK_PREVIEW,
-                quickSuggestions = listOf("দিনের প্ল্যান", "আজকের কাজ", "ফাঁকা সময়")
-            )
+        // (0) Pending clarification first. An answer completes the stored
+        // creation; anything else clears it and is processed normally.
+        if (pendingClarification != null) {
+            val answer = tryAnswerClarification(cleaned, userId)
+            if (answer != null) return answer
+            pendingClarification = null
         }
 
-        // 2. Bengali: "আজকের সব কাজ দেখাও" (From User Brief)
-        if (cleaned.contains("আজকের") && (cleaned.contains("কাজ") || cleaned.contains("দেখাও"))) {
-            val total = todayTasks.size
-            val completed = todayTasks.count { it.isCompleted }
-            val listSummary = if (todayTasks.isEmpty()) {
-                "আজকে কোনো কাজ শিডিউল করা নেই।"
-            } else {
-                todayTasks.joinToString("\n") { task ->
-                    val status = if (task.isCompleted) "✓" else "○"
-                    "$status ${task.title} (${formatTime(task.dueDateEpochMillis)})"
-                }
-            }
-            return PreFilterResult.Handled(
-                responseText = "আজকের কাজ ($completed/$total সম্পন্ন):\n$listSummary",
-                quickSuggestions = listOf("দিনের প্ল্যান", "ফাঁকা সময়", "নতুন কাজ")
-            )
-        }
-
-        // 3. English: "What's on my schedule today?" / "What is on my schedule" / "Show schedule" / "Scheduled"
-        val isScheduleQuery = lower == "scheduled" || lower == "schedule" ||
-                lower.contains("schedule today") || lower.contains("what's on my schedule") ||
-                lower.contains("what is on my schedule") || lower == "my schedule" || lower == "show schedule" ||
-                lower.contains("scheduled items") || lower.contains("scheduled tasks") ||
-                lower.contains("what is scheduled") || lower.contains("what's scheduled") ||
-                lower.contains("show scheduled") || lower.contains("view schedule") ||
-                cleaned.contains("শিডিউল দেখাও") || cleaned.contains("আজকের শিডিউল")
-
-        if (isScheduleQuery) {
-            val totalTasks = todayTasks.size
-            val totalMeetings = events.size
-            val response = if (totalTasks == 0 && totalMeetings == 0) {
-                "You have no items scheduled for today! Your schedule is completely open. Tap + to add a task or say 'Schedule meeting with team tomorrow at 2pm'."
-            } else {
-                val lines = mutableListOf<String>()
-                lines.add("Here is your schedule for today ($totalMeetings ${if (totalMeetings == 1) "meeting" else "meetings"}, $totalTasks ${if (totalTasks == 1) "task" else "tasks"}):")
-                if (events.isNotEmpty()) {
-                    lines.add("\n📅 Meetings & Events:")
-                    events.sortedBy { it.startEpochMillis }.forEach {
-                        lines.add("• ${it.title} (${formatTime(it.startEpochMillis)} – ${formatTime(it.endEpochMillis)})")
-                    }
-                }
-                if (todayTasks.isNotEmpty()) {
-                    lines.add("\n✅ Tasks:")
-                    todayTasks.sortedBy { it.dueDateEpochMillis }.forEach {
-                        val status = if (it.isCompleted) "✓" else "○"
-                        lines.add("$status ${it.title} (due ${formatTime(it.dueDateEpochMillis)})")
-                    }
-                }
-                lines.joinToString("\n")
-            }
-            return PreFilterResult.Handled(
-                responseText = response.trim(),
-                quickSuggestions = listOf("Plan my day", "Find free time", "Show today's tasks")
-            )
-        }
-
-        // 4. Flexible Schedule / Meeting / Appointment Intent (English & Bengali)
-        // Guard against cancellation/deletion commands ("cancel appointment", "delete meeting")
-        val isCancellation = lower.contains("cancel") || lower.contains("delete") ||
-                lower.contains("remove") || cleaned.contains("বাতিল") || cleaned.contains("মুছে")
-        val isMeetingOrScheduleIntent = !isCancellation && (
-                lower.startsWith("schedule ") ||
-                lower.startsWith("schedule a ") ||
-                lower.contains("schedule a meeting") ||
-                lower.contains("schedule meeting") ||
-                lower.contains("book meeting") ||
-                lower.contains("set a meeting") ||
-                lower.contains("new appointment") ||
-                lower.contains("book an appointment") ||
-                lower.contains("schedule appointment") ||
-                lower.contains("মিটিং শিডিউল") ||
-                lower.startsWith("call with") ||
-                lower.startsWith("sync with")
-        )
-
-        if (isMeetingOrScheduleIntent && !isScheduleQuery) {
-            val isTomorrow = mentionsTomorrow(cleaned, lower)
-            val cal = Calendar.getInstance()
-            if (isTomorrow) {
-                cal.add(Calendar.DAY_OF_YEAR, 1)
-            }
-
-            // Extract time if present
-            val timeMatcher = Pattern.compile("(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm))", Pattern.CASE_INSENSITIVE).matcher(cleanedNorm)
-            if (timeMatcher.find()) {
-                parseTimeIntoCalendar(timeMatcher.group(1) ?: "2:00 PM", cal, cleaned)
-            } else if (!applyBengaliTime(cleaned, cleanedNorm, cal)) {
-                // If past 2pm today, default to next open hour
-                val currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-                if (!isTomorrow && currentHour >= 14) {
-                    cal.add(Calendar.HOUR_OF_DAY, 2)
-                    cal.set(Calendar.MINUTE, 0)
-                    cal.set(Calendar.SECOND, 0)
-                } else {
-                    cal.set(Calendar.HOUR_OF_DAY, 14) // 2:00 PM default
-                    cal.set(Calendar.MINUTE, 0)
-                    cal.set(Calendar.SECOND, 0)
-                }
-            }
-
-            val startMillis = cal.timeInMillis
-            val endMillis = startMillis + (45 * 60 * 1000L) // 45 minutes default duration
-
-            // Extract clean title
-            var meetingTitle = cleaned
-                .replace(Regex("(?i)schedule\\s+a\\s+meeting\\s+(?:with|for)?"), "")
-                .replace(Regex("(?i)schedule\\s+meeting\\s+(?:with|for)?"), "")
-                .replace(Regex("(?i)schedule\\s+(?:a\\s+)?call\\s+(?:with|for)?"), "")
-                .replace(Regex("(?i)put\\s+(?:a\\s+)?schedule\\s+(?:for|to|with)?"), "")
-                .replace(Regex("(?i)set\\s+(?:a\\s+)?schedule\\s+(?:for|to|with)?"), "")
-                .replace(Regex("(?i)create\\s+(?:a\\s+)?meeting\\s+(?:with|for)?"), "")
-                .replace(Regex("(?i)add\\s+(?:a\\s+)?meeting\\s+(?:with|for)?"), "")
-                .replace(Regex("(?i)book\\s+(?:a\\s+)?meeting\\s+(?:with|for)?"), "")
-                .replace(Regex("(?i)schedule\\s+for"), "")
-                .replace(Regex("(?i)schedule"), "")
-                .replace(Regex("(?i)meeting\\s+with"), "")
-                .replace(Regex("(?i)meeting"), "")
-                .replace(Regex("(?i)\\b(tomorrow|today)\\b"), "")
-                .replace(Regex("(?i)at\\s+\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?"), "")
-                .replace(Regex("(?i)\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)"), "")
-                .replace(BENGALI_DAYPART_REGEX, " ")
-                .replace(BENGALI_TIME_TOKEN_REGEX, " ")
-                .replace(Regex("^[,:\\s-]+"), "")
-                .replace(Regex("[,:\\s-]+$"), "")
-                .trim()
-
-            if (meetingTitle.isBlank() || meetingTitle.equals("for", ignoreCase = true) || meetingTitle.equals("to", ignoreCase = true)) {
-                meetingTitle = if (lower.contains("call")) "Team Phone Call" else "Team Sync Meeting"
-            } else {
-                meetingTitle = meetingTitle.replaceFirstChar { it.uppercase() }
-            }
-
-            // 1. Add to Calendar
-            val createdEvent = calendarRepository.addEvent(
-                userId = userId,
-                title = meetingTitle,
-                startEpochMillis = startMillis,
-                endEpochMillis = endMillis,
-                locationOrLink = "Google Meet",
-                eventType = "MEETING"
-            )
-
-            // Meetings live on the Calendar only — no shadow task is created.
-            // Label from the ACTUAL date (the parser may roll a past time to
-            // tomorrow) and warn when the slot overlaps an existing event.
-            val dayLabel = if (cal.get(Calendar.DAY_OF_YEAR) != Calendar.getInstance().get(Calendar.DAY_OF_YEAR)) "tomorrow" else "today"
-            val formattedTime = formatTime(startMillis)
-            val conflict = calendarRepository.checkConflict(userId, startMillis, endMillis)
-            val conflictNote = if (conflict.hasConflict && conflict.conflictingEvent?.id != createdEvent.id) {
-                " ⚠ Heads up: this overlaps with '${conflict.conflictingEvent?.title}'."
-            } else ""
-            return PreFilterResult.Handled(
-                responseText = "Done! Scheduled \"$meetingTitle\" for $dayLabel at $formattedTime on your calendar. 📅$conflictNote",
-                createdEvent = createdEvent,
-                actionType = ChatActionType.EVENT_CREATED,
-                focusStartMillis = startMillis,
-                focusEndMillis = endMillis,
-                quickSuggestions = listOf("Show schedule", "Plan my day", "Find free time")
-            )
-        }
+        // (1) Precise non-creation branches, verbatim from the old parser.
+        // They run before parseIntent: a command that matches one exactly
+        // never reaches the matcher.
 
         // 5. English / Bengali: "Remind me in 30 minutes"
         if (lower.contains("30 minute") || lower.contains("30 minutes") || cleaned.contains("৩০ মিনিট")) {
@@ -309,7 +1008,7 @@ class ClientIntentPreFilter(
             )
         }
 
-        // 6. English / Bengali: "Find free time" / "Show free time" / "ফাঁকা সময়"
+        // 6. English / Bengali: "Find free time" / "Show free time" / "ফাঁকা সময়"
         if (lower.contains("free time") || lower.contains("open time") || lower.contains("focus slot") ||
             cleaned.contains("ফাঁকা সময়") || cleaned.contains("ফ্রি সময়")
         ) {
@@ -401,27 +1100,9 @@ class ClientIntentPreFilter(
             )
         }
 
-        // 9. English: "Show today's tasks" / "List tasks" / "Show tasks"
-        if (lower.contains("today's tasks") || lower.contains("my tasks") || lower == "show tasks" || lower == "tasks") {
-            val total = todayTasks.size
-            val completed = todayTasks.count { it.isCompleted }
-            val taskList = if (todayTasks.isEmpty()) {
-                "No tasks scheduled for today yet. Tell me 'Add task [title]' to create one!"
-            } else {
-                todayTasks.joinToString("\n") {
-                    val check = if (it.isCompleted) "✓" else "○"
-                    "$check ${it.title} (${formatTime(it.dueDateEpochMillis)})"
-                }
-            }
-            return PreFilterResult.Handled(
-                responseText = "You have $total tasks today ($completed completed):\n$taskList",
-                quickSuggestions = listOf("Plan my day", "Find free time", "Clear completed tasks")
-            )
-        }
-
         // 10. Memory command: "Remember that [fact]" / "Note that [fact]" / "মনে রাখো [fact]"
-        // Explicitly guard against actionable tasks like "remember to buy milk" or "মনে করিয়ে দিও"
-        val isActionableTask = lower.startsWith("remember to ") || lower.contains("মনে করিয়ে")
+        // Explicitly guard against actionable tasks like "remember to buy milk" or "মনে করিয়ে দিও"
+        val isActionableTask = lower.startsWith("remember to ") || cleaned.contains("মনে করিয়")
         if (!isActionableTask) {
             val rememberPattern = Pattern.compile("^(?:remember that|note that|keep in mind that|মনে রাখো|মনে রেখো)\\s+(.+)$", Pattern.CASE_INSENSITIVE)
             val rememberMatcher = rememberPattern.matcher(cleaned)
@@ -477,120 +1158,190 @@ class ClientIntentPreFilter(
             }
         }
 
-        // 14. Flexible Task Phrases: "remind me to...", "add task...", "create task...", "todo...", "call...", "buy...", etc.
-        val taskKeywords = listOf(
-            "remind me to", "remind me", "add task", "create task", "add a task",
-            "put a task", "new task", "todo", "need to", "have to", "don't forget to", "dont forget to",
-            "remember to", "মনে করিয়ে দাও", "কাজ যোগ করো", "টাস্ক"
-        )
-
-        var matchedPrefix = taskKeywords.firstOrNull { lower.startsWith(it) }
-        var isTaskIntent = matchedPrefix != null
-
-        // Or starts with direct imperative action verb
-        val actionVerbs = listOf(
-            "call ", "buy ", "email ", "finish ", "send ", "review ",
-            "pay ", "clean ", "study ", "cook ", "read ", "write ", "workout ",
-            "order ", "fix ", "check ", "meet ",
-            "go ", "get ", "pick ", "book ", "visit ", "attend ", "submit ", "prepare "
-        )
-        if (!isTaskIntent && actionVerbs.any { lower.startsWith(it) }) {
-            isTaskIntent = true
-            matchedPrefix = ""
-        }
-
-        if (isTaskIntent) {
-            var rawTask = if (matchedPrefix.isNullOrBlank()) cleaned else cleaned.substring(matchedPrefix.length).trim()
-            if (rawTask.startsWith("to ", ignoreCase = true)) {
-                rawTask = rawTask.substring(3).trim()
-            }
-            if (rawTask.startsWith("that ", ignoreCase = true)) {
-                rawTask = rawTask.substring(5).trim()
-            }
-
-            val isTomorrow = mentionsTomorrow(cleaned, lower)
-            val cal = Calendar.getInstance()
-            if (isTomorrow) {
-                cal.add(Calendar.DAY_OF_YEAR, 1)
-            }
-
-            // ONE unified extraction (am/pm, Bengali টায়/টাই, daypart).
-            // The +2h fallback fires ONLY when no time token exists.
-            val token = extractTimeToken(cleaned, cleanedNorm, cal)
-            if (token != null) {
-                applyExtractedTime(token, cal)
-            } else {
-                // If past 2pm today, set in 2 hours
-                cal.add(Calendar.HOUR_OF_DAY, 2)
-                cal.set(Calendar.MINUTE, 0)
-                cal.set(Calendar.SECOND, 0)
-            }
-
-            // Clean title: remove "tomorrow", "today", "at 5 PM"
-            var cleanTitle = rawTask
-                .replace(Regex("(?i)\\b(tomorrow|today)\\b"), "")
-                .replace(Regex("(?i)at\\s+\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?"), "")
-                .replace(Regex("(?i)\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)"), "")
-                .replace(BENGALI_DAYPART_REGEX, " ")
-                .replace(BENGALI_TIME_TOKEN_REGEX, " ")
-                .replace(Regex("^[,:\\s-]+"), "")
-                .replace(Regex("[,:\\s-]+$"), "")
-                .trim()
-
-            if (cleanTitle.isBlank()) {
-                cleanTitle = "New Task"
-            } else {
-                cleanTitle = cleanTitle.replaceFirstChar { it.uppercase() }
-            }
-
-            // "Remind me ..." asks for a reminder AT the stated time — the
-            // 2h lead does not apply. Every other task phrase states when
-            // the task is due, so the reminder fires 2h before (createTask
-            // default).
-            val isExplicitReminder = matchedPrefix != null &&
-                listOf("remind me", "মনে করিয়ে দাও", "don't forget to", "dont forget to", "remember to")
-                    .any { matchedPrefix.startsWith(it) }
-
-            val task = taskRepository.createTask(
-                userId = userId,
-                title = cleanTitle,
-                dueEpochMillis = cal.timeInMillis,
-                priority = if (lower.contains("urgent") || lower.contains("important") || lower.contains("high")) Priority.HIGH else Priority.MEDIUM,
-                category = if (lower.contains("work") || lower.contains("launch") || lower.contains("project") || lower.contains("client")) TaskCategory.WORK
-                else if (lower.contains("study") || lower.contains("class") || lower.contains("book")) TaskCategory.STUDY
-                else TaskCategory.PERSONAL,
-                reminderSet = true,
-                reminderEpochMillis = if (isExplicitReminder) cal.timeInMillis else null
-            )
-
-            // Tasks stay in the Tasks list only — no calendar event is written
-            // for a task, even when it has an explicit time.
-            val formatted = formatTime(cal.timeInMillis)
-            val reminderMillis = task.reminderEpochMillis ?: cal.timeInMillis
-            val reminderFormatted = formatTime(reminderMillis)
-            val isNowTomorrow = cal.get(Calendar.DAY_OF_YEAR) != Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
-            val dayLabel = if (isNowTomorrow) "tomorrow at" else "today at"
+        // (2) Query branches, verbatim. Shared builders below so the
+        // parseIntent QUERY kinds reuse the exact same replies.
+        // 2. Bengali: "আজকের সব কাজ দেখাও"
+        if (cleaned.contains("আজকের") && (cleaned.contains("কাজ") || cleaned.contains("দেখাও"))) {
             return PreFilterResult.Handled(
-                responseText = if (reminderMillis == cal.timeInMillis) {
-                    "Done! Added '$cleanTitle' for $dayLabel $formatted with a reminder set. 🔔"
-                } else {
-                    "Done! Added '$cleanTitle' for $dayLabel $formatted. I'll remind you at $reminderFormatted. 🔔"
-                },
-                createdTask = task,
-                actionType = ChatActionType.TASK_PREVIEW,
-                quickSuggestions = listOf("Show today's tasks", "Plan my day", "Find free time")
+                responseText = buildTodayTasksBengaliReply(todayTasks),
+                quickSuggestions = listOf("দিনের প্ল্যান", "ফাঁকা সময়", "নতুন কাজ")
             )
         }
 
-        // 15. Intelligent Fallback for Specific Scheduled Events (e.g. "Doctor appointment 5pm", "Gym session tomorrow at 6am")
-        // Strictly require valid time regex and actionable nouns so casual phrases like "I am busy" or names like "Sam" are not hijacked!
+        // 3. English: "What's on my schedule today?" / "Show schedule" / "Scheduled"
+        val isScheduleQuery = lower == "scheduled" || lower == "schedule" ||
+                lower.contains("schedule today") || lower.contains("what's on my schedule") ||
+                lower.contains("what is on my schedule") || lower == "my schedule" || lower == "show schedule" ||
+                lower.contains("scheduled items") || lower.contains("scheduled tasks") ||
+                lower.contains("what is scheduled") || lower.contains("what's scheduled") ||
+                lower.contains("show scheduled") || lower.contains("view schedule") ||
+                cleaned.contains("শিডিউল দেখাও") || cleaned.contains("আজকের শিডিউল")
+
+        if (isScheduleQuery) {
+            return PreFilterResult.Handled(
+                responseText = buildScheduleQueryReply(todayTasks, events),
+                quickSuggestions = listOf("Plan my day", "Find free time", "Show today's tasks")
+            )
+        }
+
+        // 9. English: "Show today's tasks" / "List tasks" / "Show tasks"
+        if (lower.contains("today's tasks") || lower.contains("my tasks") || lower == "show tasks" || lower == "tasks") {
+            return PreFilterResult.Handled(
+                responseText = buildTodayTasksEnglishReply(todayTasks),
+                quickSuggestions = listOf("Plan my day", "Find free time", "Clear completed tasks")
+            )
+        }
+
+        // (3) parseIntent — bank matcher + unified time/title/reply.
+        val parsed = parseIntent(cleaned)
+        handleParsedIntentStep3(parsed, cleaned, userId, todayTasks, events)?.let { return it }
+
+        // (4) Event fallback (old branch 15).
+        handleEventFallbackStep4(cleaned, lower, userId)?.let { return it }
+
+        // (5) Catch-all (old branch 16).
+        return handleCatchAllStep5(cleaned, lower, userId)
+    }
+
+    // Shared query reply builders (verbatim text from old branches 2/3/9),
+    // so the parseIntent QUERY kinds answer exactly like the old branches.
+    private fun buildTodayTasksBengaliReply(todayTasks: List<TaskEntity>): String {
+        val total = todayTasks.size
+        val completed = todayTasks.count { it.isCompleted }
+        val listSummary = if (todayTasks.isEmpty()) {
+            "আজকে কোনো কাজ শিডিউল করা নেই।"
+        } else {
+            todayTasks.joinToString("\n") { task ->
+                val status = if (task.isCompleted) "✓" else "○"
+                "$status ${task.title} (${formatTime(task.dueDateEpochMillis)})"
+            }
+        }
+        return "আজকের কাজ ($completed/$total সম্পন্ন):\n$listSummary"
+    }
+
+    private fun buildScheduleQueryReply(
+        todayTasks: List<TaskEntity>,
+        events: List<CalendarEventEntity>
+    ): String {
+        val totalTasks = todayTasks.size
+        val totalMeetings = events.size
+        return if (totalTasks == 0 && totalMeetings == 0) {
+            "You have no items scheduled for today! Your schedule is completely open. Tap + to add a task or say 'Schedule meeting with team tomorrow at 2pm'."
+        } else {
+            val lines = mutableListOf<String>()
+            lines.add("Here is your schedule for today ($totalMeetings ${if (totalMeetings == 1) "meeting" else "meetings"}, $totalTasks ${if (totalTasks == 1) "task" else "tasks"}):")
+            if (events.isNotEmpty()) {
+                lines.add("\n📅 Meetings & Events:")
+                events.sortedBy { it.startEpochMillis }.forEach {
+                    lines.add("• ${it.title} (${formatTime(it.startEpochMillis)} – ${formatTime(it.endEpochMillis)})")
+                }
+            }
+            if (todayTasks.isNotEmpty()) {
+                lines.add("\n✅ Tasks:")
+                todayTasks.sortedBy { it.dueDateEpochMillis }.forEach {
+                    val status = if (it.isCompleted) "✓" else "○"
+                    lines.add("$status ${it.title} (due ${formatTime(it.dueDateEpochMillis)})")
+                }
+            }
+            lines.joinToString("\n").trim()
+        }
+    }
+
+    private fun buildTodayTasksEnglishReply(todayTasks: List<TaskEntity>): String {
+        val total = todayTasks.size
+        val completed = todayTasks.count { it.isCompleted }
+        val taskList = if (todayTasks.isEmpty()) {
+            "No tasks scheduled for today yet. Tell me 'Add task [title]' to create one!"
+        } else {
+            todayTasks.joinToString("\n") {
+                val check = if (it.isCompleted) "✓" else "○"
+                "$check ${it.title} (${formatTime(it.dueDateEpochMillis)})"
+            }
+        }
+        return "You have $total tasks today ($completed completed):\n$taskList"
+    }
+
+    /** A weekday name means the query is NOT about today — hand it to
+     *  Gemini rather than answering with today's schedule. */
+    private fun mentionsWeekday(text: String): Boolean {
+        val lower = text.lowercase(Locale.ROOT)
+        val weekdays = listOf(
+            "সোমবার", "মঙ্গলবার", "বুধবার", "বৃহস্পতিবার", "শুক্রবার", "শনিবার", "রবিবার",
+            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"
+        )
+        return weekdays.any { lower.contains(it) }
+    }
+
+    private suspend fun handleParsedIntentStep3(
+        parsed: ParsedIntent,
+        cleaned: String,
+        userId: String,
+        todayTasks: List<TaskEntity>,
+        events: List<CalendarEventEntity>
+    ): PreFilterResult? {
+        // (3) parseIntent — bank matcher + unified time/title/reply.
+        return when (parsed.kind) {
+            ParsedKind.QUERY_SCHEDULE -> {
+                if ((extractRelativeDayInfo(cleaned) ?: 0) != 0 || mentionsWeekday(cleaned)) {
+                    PreFilterResult.Unhandled
+                } else {
+                    PreFilterResult.Handled(
+                        responseText = buildScheduleQueryReply(todayTasks, events),
+                        quickSuggestions = listOf("Plan my day", "Find free time", "Show today's tasks")
+                    )
+                }
+            }
+            ParsedKind.QUERY_TASKS -> {
+                if ((extractRelativeDayInfo(cleaned) ?: 0) != 0 || mentionsWeekday(cleaned)) {
+                    PreFilterResult.Unhandled
+                } else if (parsed.isBengali) {
+                    PreFilterResult.Handled(
+                        responseText = buildTodayTasksBengaliReply(todayTasks),
+                        quickSuggestions = listOf("দিনের প্ল্যান", "ফাঁকা সময়", "নতুন কাজ")
+                    )
+                } else {
+                    PreFilterResult.Handled(
+                        responseText = buildTodayTasksEnglishReply(todayTasks),
+                        quickSuggestions = listOf("Plan my day", "Find free time", "Clear completed tasks")
+                    )
+                }
+            }
+            ParsedKind.TASK, ParsedKind.SCHEDULE, ParsedKind.REMINDER -> {
+                val now = Calendar.getInstance()
+                if (parsed.isBareHour) {
+                    // NEVER-GUESS: store the intent, ask, create nothing.
+                    pendingClarification = PendingClarification(
+                        kind = parsed.kind, title = parsed.title,
+                        dayCal = parsed.dayCal, timeToken = parsed.timeToken,
+                        isBengali = parsed.isBengali, priority = parsed.priority,
+                        category = parsed.category, reminderAtDue = parsed.reminderAtDue,
+                        scheduleLocation = parsed.scheduleLocation,
+                        scheduleType = parsed.scheduleType
+                    )
+                    buildClarificationQuestion(parsed, now)
+                } else {
+                    val eventCal = resolveCreationTime(parsed, now, findDaypartWord(cleaned))
+                    createFromParsed(parsed, eventCal, now, userId)
+                }
+            }
+            ParsedKind.UNKNOWN -> null
+        }
+    }
+
+    private suspend fun handleEventFallbackStep4(
+        cleaned: String,
+        lower: String,
+        userId: String
+    ): PreFilterResult? {
+        // (4) Intelligent Fallback for Specific Scheduled Events
+        // (e.g. "Doctor appointment 5pm", "Gym session tomorrow at 6am").
+        // Strictly require a valid time and an actionable noun so casual
+        // phrases like "I am busy" or names like "Sam" are not hijacked.
         val isEventCancellation = lower.contains("cancel") || lower.contains("delete") ||
                 lower.contains("remove") || cleaned.contains("বাতিল") || cleaned.contains("মুছে")
-        // The gate needs the token, and the token needs the target day —
-        // build the calendar first, then gate on the extracted token.
-        val eventCal = Calendar.getInstance()
-        if (lower.contains("tomorrow")) eventCal.add(Calendar.DAY_OF_YEAR, 1)
-        val eventTimeToken = extractTimeToken(cleaned, cleanedNorm, eventCal)
+        val dayOffset = extractRelativeDayInfo(cleaned) ?: 0
+        val eventCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, dayOffset) }
+        val eventTimeToken = extractTimeToken(cleaned)
         val hasTimePattern = eventTimeToken != null
         val hasActionContext = lower.contains("appointment") || lower.contains("session") ||
                 lower.contains("doctor") || lower.contains("dentist") || lower.contains("workout") ||
@@ -598,11 +1349,10 @@ class ClientIntentPreFilter(
                 lower.contains("class") || lower.contains("practice")
 
         if (!isEventCancellation && hasTimePattern && hasActionContext) {
-            val cal = eventCal
-            eventTimeToken?.let { applyExtractedTime(it, cal) }
-
+            val token = eventTimeToken!!
             var fallbackTitle = cleaned
                 .replace(Regex("(?i)\\b(tomorrow|today)\\b"), "")
+                .replace(Regex("(?U)\\b(আগামীকাল|আগামিকাল|কালকে|আজকে|পরশু|কাল|আজ)\\b"), " ")
                 .replace(Regex("(?i)at\\s+\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?"), "")
                 .replace(Regex("(?i)\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)"), "")
                 .replace(BENGALI_DAYPART_REGEX, " ")
@@ -610,10 +1360,33 @@ class ClientIntentPreFilter(
                 .replace(Regex("^[,:\\s-]+"), "")
                 .replace(Regex("[,:\\s-]+$"), "")
                 .trim()
-
             if (fallbackTitle.isNotBlank() && fallbackTitle.length in 3..60) {
+                if (isBareHourToken(token, cleaned)) {
+                    // Bare hour: ask, don't create (never-guess invariant).
+                    val bn = isBengali(cleaned)
+                    pendingClarification = PendingClarification(
+                        kind = ParsedKind.SCHEDULE, title = fallbackTitle,
+                        dayCal = eventCal, timeToken = token, isBengali = bn,
+                        priority = Priority.MEDIUM, category = null,
+                        reminderAtDue = false, scheduleLocation = "Personal",
+                        scheduleType = "EVENT"
+                    )
+                    return buildClarificationQuestion(
+                        ParsedIntent(
+                            kind = ParsedKind.SCHEDULE, title = fallbackTitle,
+                            dayCal = eventCal, timeToken = token, isBareHour = true,
+                            confidence = 1.0, isBengali = bn, priority = Priority.MEDIUM,
+                            category = null, reminderAtDue = false,
+                            scheduleLocation = "Personal", scheduleType = "EVENT"
+                        ),
+                        Calendar.getInstance()
+                    )
+                }
                 fallbackTitle = fallbackTitle.replaceFirstChar { it.uppercase() }
-                val conflict = calendarRepository.checkConflict(userId, cal.timeInMillis, cal.timeInMillis + (45 * 60 * 1000L))
+                parseTimeIntoCalendar(eventCal, token, isBengali(cleaned), findDaypartWord(cleaned))
+                val conflict = calendarRepository.checkConflict(
+                    userId, eventCal.timeInMillis, eventCal.timeInMillis + (45 * 60 * 1000L)
+                )
                 val conflictNote = if (conflict.hasConflict) {
                     " ⚠ Heads up: this overlaps with '${conflict.conflictingEvent?.title}'."
                 } else ""
@@ -622,13 +1395,13 @@ class ClientIntentPreFilter(
                 val event = calendarRepository.addEvent(
                     userId = userId,
                     title = fallbackTitle,
-                    startEpochMillis = cal.timeInMillis,
-                    endEpochMillis = cal.timeInMillis + (45 * 60 * 1000L),
+                    startEpochMillis = eventCal.timeInMillis,
+                    endEpochMillis = eventCal.timeInMillis + (45 * 60 * 1000L),
                     locationOrLink = "Personal",
                     eventType = "EVENT"
                 )
-                val formatted = formatTime(cal.timeInMillis)
-                val isNowTomorrow = cal.get(Calendar.DAY_OF_YEAR) != Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
+                val formatted = formatTime(eventCal.timeInMillis)
+                val isNowTomorrow = eventCal.get(Calendar.DAY_OF_YEAR) != Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
                 val dayLabel = if (isNowTomorrow) "tomorrow at" else "today at"
                 return PreFilterResult.Handled(
                     responseText = "Got it! I've scheduled '$fallbackTitle' for $dayLabel $formatted on your calendar. 📅$conflictNote",
@@ -638,33 +1411,58 @@ class ClientIntentPreFilter(
                 )
             }
         }
+        return null
+    }
 
-        // 16. Catch-all: a short, non-question statement that matched nothing
-        // above is most likely a to-do the user wants captured (e.g. "Go for
-        // petrol"). Create it as a task and say exactly what was created —
-        // never let a create attempt die silently in the chat fallback.
-        val isBengali = cleaned.any { it in '\u0980'..'\u09FF' }
+    private suspend fun handleCatchAllStep5(
+        cleaned: String,
+        lower: String,
+        userId: String
+    ): PreFilterResult {
+        // (5) Catch-all: a short, non-question statement that matched
+        // nothing above is most likely a to-do the user wants captured
+        // (e.g. "Go for petrol"). Create it as a task and say exactly
+        // what was created — never let a create attempt die silently in
+        // the chat fallback. The reply states the EVENT time first, the
+        // reminder labeled separately (unified reply builder).
+        val bn = isBengali(cleaned)
         val wordCount = cleaned.split(Regex("\\s+")).filter { it.isNotBlank() }.size
-        val startsWithQuestionWord = listOf(
-            "what", "when", "where", "why", "how", "who", "which", "whose",
-            "is ", "are ", "was ", "were ", "can ", "could ", "should ", "would ",
-            "do ", "does ", "did ", "tell me", "explain", "describe"
-        ).any { lower.startsWith(it) }
-        val isSmallTalk = cleaned.length <= 24 && listOf(
-            "hi", "hello", "hey", "thanks", "thank you", "ok", "okay", "bye",
-            "good morning", "good afternoon", "good evening", "good night"
-        ).any { lower == it || lower.startsWith("$it ") || lower.startsWith("$it!") }
+        val startsWithQuestionWord = questionStartWords.any { lower.startsWith(it) }
+        val isSmallTalk = cleaned.length <= 24 && smallTalkPhrases.any {
+            lower == it || lower.startsWith("$it ") || lower.startsWith("$it!")
+        }
         if (!cleaned.contains("?") && !startsWithQuestionWord && !isSmallTalk &&
             cleaned.length in 3..80 && wordCount in 1..10
         ) {
-            val isTomorrow = mentionsTomorrow(cleaned, lower)
-            val cal = Calendar.getInstance()
-            if (isTomorrow) cal.add(Calendar.DAY_OF_YEAR, 1)
+            val dayOffset = extractRelativeDayInfo(cleaned) ?: 0
+            val cal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, dayOffset) }
             // ONE unified extraction (am/pm, Bengali টায়/টাই, daypart).
             // The +2h fallback fires ONLY when no time token exists.
-            val token = extractTimeToken(cleaned, cleanedNorm, cal)
+            val token = extractTimeToken(cleaned)
             if (token != null) {
-                applyExtractedTime(token, cal)
+                if (isBareHourToken(token, cleaned)) {
+                    // Bare hour: ask, don't create (never-guess invariant).
+                    var bareTitle = cleanTitle(cleaned, ParsedKind.TASK)
+                    if (bareTitle.isBlank()) bareTitle = cleaned
+                    pendingClarification = PendingClarification(
+                        kind = ParsedKind.TASK, title = bareTitle,
+                        dayCal = cal, timeToken = token, isBengali = bn,
+                        priority = Priority.MEDIUM, category = TaskCategory.PERSONAL,
+                        reminderAtDue = false, scheduleLocation = null,
+                        scheduleType = "MEETING"
+                    )
+                    return buildClarificationQuestion(
+                        ParsedIntent(
+                            kind = ParsedKind.TASK, title = bareTitle,
+                            dayCal = cal, timeToken = token, isBareHour = true,
+                            confidence = 1.0, isBengali = bn, priority = Priority.MEDIUM,
+                            category = TaskCategory.PERSONAL, reminderAtDue = false,
+                            scheduleLocation = null, scheduleType = "MEETING"
+                        ),
+                        Calendar.getInstance()
+                    )
+                }
+                parseTimeIntoCalendar(cal, token, bn, findDaypartWord(cleaned))
             } else {
                 cal.add(Calendar.HOUR_OF_DAY, 2)
                 cal.set(Calendar.MINUTE, 0)
@@ -673,6 +1471,7 @@ class ClientIntentPreFilter(
             }
             var catchTitle = cleaned
                 .replace(Regex("(?i)\\b(tomorrow|today)\\b"), "")
+                .replace(Regex("(?U)\\b(আগামীকাল|আগামিকাল|কালকে|আজকে|পরশু|কাল|আজ)\\b"), " ")
                 .replace(Regex("(?i)at\\s+\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?"), "")
                 .replace(Regex("(?i)\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)"), "")
                 .replace(BENGALI_DAYPART_REGEX, " ")
@@ -690,21 +1489,14 @@ class ClientIntentPreFilter(
                 category = TaskCategory.PERSONAL,
                 reminderSet = true
             )
-            // The reply states the REMINDER time (due - 2h), not the due
-            // time — the task card shows the due time.
             val reminderMillis = task.reminderEpochMillis ?: cal.timeInMillis
             val reminderCal = Calendar.getInstance().apply { timeInMillis = reminderMillis }
-            val formatted = formatTime(reminderMillis)
-            val isNowTomorrow = reminderCal.get(Calendar.DAY_OF_YEAR) != Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
-            val responseText = if (isBengali) {
-                val dayLabel = if (isNowTomorrow) "আগামীকাল" else "আজ"
-                "টাস্ক তৈরি হয়েছে: \"$catchTitle\" — $dayLabel $formatted সময়ে মনে করিয়ে দেব। 🔔"
-            } else {
-                val dayLabel = if (isNowTomorrow) "tomorrow at" else "today at"
-                "Task created: '$catchTitle' — I'll remind you $dayLabel $formatted. 🔔"
-            }
+            val now = Calendar.getInstance()
             return PreFilterResult.Handled(
-                responseText = responseText,
+                responseText = buildCreationReply(
+                    catchTitle, cal, reminderCal, false, ParsedKind.TASK, now,
+                    isBengali = bn
+                ),
                 createdTask = task,
                 actionType = ChatActionType.TASK_PREVIEW,
                 quickSuggestions = listOf("Show today's tasks", "Plan my day", "Find free time")
@@ -714,264 +1506,4 @@ class ClientIntentPreFilter(
         return PreFilterResult.Unhandled
     }
 
-    private fun normalizeBengaliDigits(text: String): String {
-        val bn = "০১২৩৪৫৬৭৮৯"
-        val sb = StringBuilder(text.length)
-        for (ch in text) {
-            val idx = bn.indexOf(ch)
-            sb.append(if (idx >= 0) ('0' + idx) else ch)
-        }
-        return sb.toString()
-    }
-
-    private fun mentionsTomorrow(cleaned: String, lower: String): Boolean {
-        if (lower.contains("tomorrow") || cleaned.contains("আগামীকাল")) return true
-        // Standalone কাল / কালকে only — a bare contains("কাল") also matches
-        // সকাল (morning) and বিকাল (afternoon) and would shift tasks a day.
-        return Regex("(^|\\s)কাল(কে)?(\\s|$|[,.!?])").containsMatchIn(cleaned)
-    }
-
-    private fun cleanUserPrompt(prompt: String): String {
-        var text = prompt.trim()
-        val prefixes = listOf(
-            "hey nudgy", "ok nudgy", "hi nudgy", "hello nudgy", "nudgy",
-            "হে নাজি", "নাজি", "হে নাদি",
-            "can you please", "could you please", "can you", "could you", "please",
-            "i want to", "i need to", "help me to", "help me", "i would like to",
-            "tell me to", "would you"
-        )
-        for (prefix in prefixes) {
-            if (text.startsWith(prefix, ignoreCase = true)) {
-                text = text.substring(prefix.length).trim()
-            }
-        }
-        return text.trimStart(',', ':', '.', '-', ' ', '!')
-    }
-
-    // Bengali time-of-day words, stripped from generated titles (the time
-    // itself lives in the due/reminder fields, not the title).
-    private val BENGALI_DAYPART_REGEX = Regex("(সকালে|দুপুরে|বিকেলে|বিকালে|সন্ধ্যা(?:\u09df|\u09af\u09bc)|সন্ধ্যাবেলা|রাতে)")
-    // An explicit Bengali hour token ("৫টায়", "৫টাই", "5:30টায়") —
-    // stripped from generated titles the same way.
-    private val BENGALI_TIME_TOKEN_REGEX = Regex("[০-৯0-9]{1,2}(?::[০-৯0-9]{2})?\\s*(?:\u099f\u09be(?:\u09df|\u09af\u09bc|\u0987))")
-
-    // Bengali time-of-day words and the hour (24h) they mean when no
-    // explicit hour is given: সকালে 9 AM, দুপুরে 12 PM, বিকেলে/বিকালে 5 PM,
-    // সন্ধ্যায় 7 PM, রাতে 9 PM.
-    private fun bengaliDaypartHour(text: String): Int? = when {
-        text.contains("সকাল") -> 9
-        text.contains("দুপুর") -> 12
-        text.contains("বিকেল") || text.contains("বিকাল") -> 17
-        text.contains("সন্ধ্যা") -> 19
-        text.contains("রাত") -> 21
-        else -> null
-    }
-
-    /**
-     * Moves an hour (0-23) to the half of the day a Bengali daypart word
-     * names: "৫টায় বিকেলে" -> 17, "৫টায় সকালে" -> 5, "১২টায় রাতে" -> 0.
-     * No daypart word -> the hour is unchanged.
-     */
-    private fun applyBengaliDaypart(hour24: Int, text: String): Int {
-        val daypart = bengaliDaypartHour(text) ?: return hour24
-        val h12 = hour24 % 12
-        return if (daypart >= 12) {
-            if (h12 == 0) 12 else h12 + 12
-        } else {
-            h12
-        }
-    }
-
-    /**
-     * Resolves a due time from Bengali daypart words alone ("বিকেলে" -> 5 PM)
-     * or with an explicit Bengali hour token ("৩টায় বিকেলে" -> 3 PM).
-     * Returns false when no daypart word is present. A resolved time already
-     * in the past rolls to tomorrow, same rule as parseTimeIntoCalendar.
-     * A bare "টা" count ("৩টা কাজ") is deliberately NOT treated as a time.
-     */
-    private fun applyBengaliTime(cleaned: String, cleanedNorm: String, cal: Calendar): Boolean {
-        val daypart = bengaliDaypartHour(cleaned) ?: return false
-        val hourMatcher = Pattern.compile("(\\d{1,2})(?::(\\d{2}))?\\s*(?:\u099f\u09be(?:\u09df|\u09af\u09bc))").matcher(cleanedNorm)
-        if (hourMatcher.find()) {
-            val hour = applyBengaliDaypart(hourMatcher.group(1)?.toIntOrNull() ?: daypart, cleaned)
-            val minute = hourMatcher.group(2)?.toIntOrNull() ?: 0
-            cal.set(Calendar.HOUR_OF_DAY, hour)
-            cal.set(Calendar.MINUTE, minute)
-        } else {
-            cal.set(Calendar.HOUR_OF_DAY, daypart)
-            cal.set(Calendar.MINUTE, 0)
-        }
-        cal.set(Calendar.SECOND, 0)
-        cal.set(Calendar.MILLISECOND, 0)
-        if (cal.timeInMillis <= System.currentTimeMillis()) {
-            cal.add(Calendar.DAY_OF_YEAR, 1)
-        }
-        return true
-    }
-
-    // Shared am/pm token scan (used by extractTimeToken and hasTimeToken so
-    // the two can never disagree about what counts as a time).
-    private val AMPM_TOKEN_PATTERN: Pattern =
-        Pattern.compile("(\\d{1,2})(?::(\\d{2}))?\\s*(am|pm)", Pattern.CASE_INSENSITIVE)
-
-    /**
-     * ONE unified time-token scan — the single place that decides whether a
-     * message contains a time. Branches 1, 14, 15 and 16 all call this
-     * instead of each keeping its own regex, so a token can never be
-     * recognized by one branch (e.g. for title-stripping) and ignored by
-     * another (the "৫ টায়" -> 7 AM bug: the title-cleaner stripped the
-     * token while the time-resolver fell back to +2h).
-     *
-     * Recognizes, in priority order:
-     *  1. am/pm — "5 PM", "5:30pm" (Bengali digits normalized first).
-     *  2. Bengali টায়/টাই token — "৫টায়", "৫ টায়", "5:30টায়", "৫টাই".
-     *     With a daypart word ("৫টায় বিকেলে") the daypart moves the hour
-     *     to the right half of the day (same rule as parseTimeIntoCalendar).
-     *  3. A daypart word alone — "বিকেলে" -> 5 PM (bengaliDaypartHour).
-     *
-     * A bare "টা" count ("৩টা কাজ") has no marker and is NOT a time, and
-     * neither is a bare number ("call Rahul 5 times").
-     *
-     * Returns null when the message carries no time token at all — the
-     * caller then falls back (+2h / 3 PM default). INVARIANT: a present
-     * token is ALWAYS used; the fallback never fires past a recognized
-     * token. `cal` is read-only here (its day is the target day — branches
-     * shift it +1 day first when the message says tomorrow).
-     */
-    private data class ExtractedTime(
-        val hour24: Int,
-        val minute: Int,
-        /** True when the token carried am/pm or a daypart word. False for a
-         *  bare hour token ("৫ টায়") — resolved by the next-occurrence
-         *  rule in resolveBareHour. */
-        val hasExplicitMarker: Boolean,
-        /** True when the resolved time falls on the NEXT day (a bare hour
-         *  whose AM and PM occurrences today are both past). The caller
-         *  adds a day in applyExtractedTime. */
-        val rollToNextDay: Boolean = false
-    )
-
-    private fun extractTimeToken(cleaned: String, cleanedNorm: String, cal: Calendar): ExtractedTime? {
-        // 1. am/pm wins — it is explicit (a daypart word is ignored when
-        //    am/pm is present, same rule as parseTimeIntoCalendar).
-        val ampmMatcher = AMPM_TOKEN_PATTERN.matcher(cleanedNorm)
-        if (ampmMatcher.find()) {
-            var hour = ampmMatcher.group(1)?.toIntOrNull() ?: return null
-            val minute = ampmMatcher.group(2)?.toIntOrNull() ?: 0
-            if (ampmMatcher.group(3)?.equals("pm", ignoreCase = true) == true) {
-                if (hour < 12) hour += 12
-            } else if (hour == 12) {
-                hour = 0
-            }
-            return ExtractedTime(hour, minute, hasExplicitMarker = true)
-        }
-        // 2. Bengali টায়/টাই token. The match text is digits + the suffix
-        //    ("5 টায়", "5:30টায়") — filtering to digits and ':' yields
-        //    the time ("5", "5:30").
-        val bnMatch = BENGALI_TIME_TOKEN_REGEX.find(cleanedNorm)
-        if (bnMatch != null) {
-            val digits = bnMatch.value.filter { it.isDigit() || it == ':' }
-            val parts = digits.split(":")
-            val hour12 = parts.getOrNull(0)?.toIntOrNull() ?: return null
-            val minute = parts.getOrNull(1)?.toIntOrNull() ?: 0
-            if (bengaliDaypartHour(cleaned) != null) {
-                return ExtractedTime(applyBengaliDaypart(hour12, cleaned), minute, hasExplicitMarker = true)
-            }
-            return resolveBareHour(hour12, minute, cal)
-        }
-        // 3. Daypart word alone ("বিকেলে" -> 5 PM).
-        val daypart = bengaliDaypartHour(cleaned) ?: return null
-        return ExtractedTime(daypart, 0, hasExplicitMarker = true)
-    }
-
-    /**
-     * BARE HOUR RULE: a bare hour token with no daypart and no am/pm
-     * ("৫ টায়") resolves to the NEXT future occurrence of that hour — the
-     * AM occurrence if it is still ahead today, else the PM occurrence
-     * today, else AM tomorrow. So "৫ টায়" sent at 5:29 AM means 5:00 PM
-     * today, never tomorrow 5 AM. When the branch already shifted the
-     * calendar to a future day ("আগামীকাল ৫ টায়") the bare hour is the AM
-     * occurrence on that day (bare-hour = AM default).
-     */
-    private fun resolveBareHour(hour12: Int, minute: Int, cal: Calendar): ExtractedTime {
-        val amHour = hour12 % 12
-        val now = Calendar.getInstance()
-        val targetIsToday = cal.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR) &&
-            cal.get(Calendar.YEAR) == now.get(Calendar.YEAR)
-        if (!targetIsToday) {
-            return ExtractedTime(amHour, minute, hasExplicitMarker = false)
-        }
-        val amToday = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, amHour)
-            set(Calendar.MINUTE, minute)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-        if (now.before(amToday)) {
-            return ExtractedTime(amHour, minute, hasExplicitMarker = false)
-        }
-        val pmToday = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, amHour + 12)
-            set(Calendar.MINUTE, minute)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-        if (now.before(pmToday)) {
-            return ExtractedTime(amHour + 12, minute, hasExplicitMarker = false)
-        }
-        return ExtractedTime(amHour, minute, hasExplicitMarker = false, rollToNextDay = true)
-    }
-
-    /** Applies an extracted time to the branch's calendar. A bare hour's
-     *  "AM tomorrow" case adds the day; an explicit time already in the
-     *  past rolls to tomorrow (same rule as parseTimeIntoCalendar). */
-    private fun applyExtractedTime(token: ExtractedTime, cal: Calendar) {
-        cal.set(Calendar.HOUR_OF_DAY, token.hour24)
-        cal.set(Calendar.MINUTE, token.minute)
-        cal.set(Calendar.SECOND, 0)
-        cal.set(Calendar.MILLISECOND, 0)
-        if (token.rollToNextDay) {
-            cal.add(Calendar.DAY_OF_YEAR, 1)
-        } else if (token.hasExplicitMarker && cal.timeInMillis <= System.currentTimeMillis()) {
-            cal.add(Calendar.DAY_OF_YEAR, 1)
-        }
-    }
-
-    /** True when the message carries ANY time token (am/pm, a Bengali
-     *  টায়/টাই token, or a daypart word). Routing-only check for the
-     *  branch-1 trigger; the actual resolution lives in extractTimeToken. */
-    private fun hasTimeToken(cleaned: String, cleanedNorm: String): Boolean {
-        if (AMPM_TOKEN_PATTERN.matcher(cleanedNorm).find()) return true
-        if (BENGALI_TIME_TOKEN_REGEX.containsMatchIn(cleanedNorm)) return true
-        return bengaliDaypartHour(cleaned) != null
-    }
-
-    private fun parseTimeIntoCalendar(timeStr: String, cal: Calendar, daypartText: String? = null) {
-        val lower = normalizeBengaliDigits(timeStr).lowercase().trim()
-        val isPm = lower.contains("pm")
-        val clean = lower.replace("am", "").replace("pm", "").trim()
-        val parts = clean.split(":")
-        var hour = parts.getOrNull(0)?.toIntOrNull() ?: 12
-        val minute = parts.getOrNull(1)?.toIntOrNull() ?: 0
-
-        if (daypartText != null && !isPm && !lower.contains("am")) {
-            // A Bengali daypart word ("বিকেলে") moves the hour to the right
-            // half of the day — applied BEFORE the past-roll below, so
-            // "৫টায় বিকেলে" at 4 PM lands today at 5 PM, not tomorrow.
-            hour = applyBengaliDaypart(hour, daypartText)
-        } else {
-            if (isPm && hour < 12) hour += 12
-            if (!isPm && hour == 12) hour = 0
-        }
-
-        cal.set(Calendar.HOUR_OF_DAY, hour)
-        cal.set(Calendar.MINUTE, minute)
-        cal.set(Calendar.SECOND, 0)
-        cal.set(Calendar.MILLISECOND, 0)
-
-        // Prevent scheduling reminders in the past: roll over to tomorrow
-        if (cal.timeInMillis <= System.currentTimeMillis()) {
-            cal.add(Calendar.DAY_OF_YEAR, 1)
-        }
-    }
 }

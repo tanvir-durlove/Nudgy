@@ -203,7 +203,7 @@ class MainActivity : ComponentActivity() {
         // until Remote Config ads_enabled is flipped on.
         NudgyAds.initialize(this)
 
-        preFilter = ClientIntentPreFilter(taskRepository, calendarRepository, memoryRepository)
+        preFilter = ClientIntentPreFilter(taskRepository, calendarRepository, memoryRepository, applicationContext.assets)
         geminiClient = GeminiClient(applicationContext)
         voiceAssistantManager = VoiceAssistantManager(this)
 
