@@ -19,10 +19,12 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -171,10 +173,25 @@ fun ChatScreen(
         "আজকের সব কাজ দেখাও"
     )
 
-    LaunchedEffect(messages.size, isThinking) {
-        val count = messages.size + if (isThinking) 1 else 0
-        if (count > 0) {
-            listState.animateScrollToItem(count - 1)
+    // The keyboard opening/closing resizes the viewport but changes
+    // no message state, so the list must re-pin to the bottom on IME
+    // visibility changes too — otherwise it sits at a stale offset
+    // with empty space below the last message (the keyboard gap).
+    // WindowInsets.isImeVisible is snapshot-state-backed, so reading
+    // it here re-runs this effect when the keyboard opens or closes.
+    val isImeVisible = WindowInsets.isImeVisible
+    LaunchedEffect(messages.size, isThinking, isListening, isImeVisible) {
+        // True last index: hero (0) + listening banner if shown +
+        // messages + thinking indicator if shown + trailing spacer.
+        // The old target (messages.size + thinking − 1) was 2 items
+        // short (3 with the banner), so the list stopped above the
+        // last message and left a gap below it. Scrolling to the very
+        // last item clamps to max scroll, pinning the last message at
+        // the bottom.
+        val lastIndex = 1 + (if (isListening) 1 else 0) +
+            messages.size + (if (isThinking) 1 else 0)
+        if (lastIndex > 0) {
+            listState.animateScrollToItem(lastIndex)
         }
     }
 

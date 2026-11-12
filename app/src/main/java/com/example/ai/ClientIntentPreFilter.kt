@@ -488,6 +488,29 @@ class ClientIntentPreFilter(
         }
     }
 
+    /** "today"/"tomorrow"/"day after tomorrow"/weekday label for the
+     *  EVENT date — the English mirror of dayLabel. English replies
+     *  must never interpolate the Bengali dayLabel: sharing one
+     *  Bengali label across both languages was the "আজ ৯টা" leak in
+     *  the clarification question ("You said আজ ৯টা — AM or PM?"). */
+    private fun dayLabelEn(eventCal: Calendar, now: Calendar): String {
+        val eventDay = (eventCal.clone() as Calendar).apply {
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }
+        val today = (now.clone() as Calendar).apply {
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }
+        val diffDays = ((eventDay.timeInMillis - today.timeInMillis) / 86_400_000L).toInt()
+        return when (diffDays) {
+            0 -> "today"
+            1 -> "tomorrow"
+            2 -> "day after tomorrow"
+            else -> SimpleDateFormat("EEEE, d MMMM", Locale.ENGLISH).format(eventCal.time)
+        }
+    }
+
     /** "আগামীকাল বিকেল ৩টা" — event day + daypart + hour, from the EVENT
      *  calendar. One place, used by every creation reply. */
     private fun formatDayTimeLabel(eventCal: Calendar, now: Calendar): String {
@@ -860,20 +883,28 @@ class ClientIntentPreFilter(
 
     // ==================== Clarification (never-guess) ====================
 
+    // NOTE: the day + hour words are computed PER LANGUAGE below.
+    // One shared Bengali day/hour word across both branches was the
+    // "আজ ৯টা" leak: an English question interpolated Bengali
+    // ("You said আজ ৯টা — AM or PM?"). English gets its own day
+    // label (dayLabelEn) and hour number.
     private fun buildClarificationQuestion(parsed: ParsedIntent, now: Calendar): PreFilterResult.Handled {
         val hour = hourOfDay(parsed.timeToken ?: "") ?: 12
-        val day = dayLabel(parsed.dayCal ?: now, now)
-        val hourWord = formatBengaliHourWord(hour)
         val question = if (parsed.isBengali) {
+            val day = dayLabel(parsed.dayCal ?: now, now)
+            val hourWord = formatBengaliHourWord(hour)
             "$day $hourWord — সকাল নাকি বিকেল/রাত? সময়টা নিশ্চিত করো, তাহলে \"${
                 parsed.title
             }\" তৈরি করব।"
         } else {
-            "You said $day $hourWord — AM or PM? Please confirm so I can create \"${
+            val dayEn = dayLabelEn(parsed.dayCal ?: now, now)
+            val hour12 = if (hour % 12 == 0) 12 else hour % 12
+            "You said $dayEn at $hour12 — AM or PM? Please confirm so I can create \"${
                 parsed.title
             }\"."
         }
         val chips = if (parsed.isBengali) {
+            val hourWord = formatBengaliHourWord(hour)
             val amLabel = "${getDaypartLabel(if (hour % 12 == 0) 0 else hour % 12)} $hourWord"
             val pmHour = (hour % 12) + 12
             val pmLabel = "${getDaypartLabel(pmHour)} $hourWord"
