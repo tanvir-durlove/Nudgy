@@ -4,6 +4,11 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -54,6 +59,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -112,6 +118,10 @@ fun ChatScreen(
     isListening: Boolean,
     isSpeaking: Boolean,
     isThinking: Boolean,
+    // Thinking indicator: phase text for the thinking bubble, set by
+    // MainActivity.handleUserChat ("ভাবছি…" / "শিডিউল করছি…" /
+    // "টাস্ক তৈরি করছি…", or the English equivalents).
+    thinkingText: String = "Nudgy is thinking...",
     onSendMessage: (String) -> Unit,
     onStartVoice: () -> Unit,
     onStopVoice: () -> Unit,
@@ -589,14 +599,32 @@ fun ChatScreen(
                                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(14.dp),
-                                        color = NudgyPrimary,
-                                        strokeWidth = 2.dp
-                                    )
+                                    // Thinking dots: three dots fading in
+                                    // sequence, Gemini-style, next to the
+                                    // phase text (ভাবছি… / শিডিউল করছি… /
+                                    // টাস্ক তৈরি করছি…).
+                                    val infiniteTransition = rememberInfiniteTransition(label = "thinking_dots")
+                                    repeat(3) { index ->
+                                        val dotAlpha by infiniteTransition.animateFloat(
+                                            initialValue = 0.25f,
+                                            targetValue = 1f,
+                                            animationSpec = infiniteRepeatable(
+                                                animation = tween(durationMillis = 600, delayMillis = index * 200),
+                                                repeatMode = RepeatMode.Reverse
+                                            ),
+                                            label = "thinking_dot_$index"
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .size(6.dp)
+                                                .alpha(dotAlpha)
+                                                .background(NudgyMuted, CircleShape)
+                                        )
+                                        if (index < 2) Spacer(modifier = Modifier.width(4.dp))
+                                    }
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "Nudgy is thinking...",
+                                        text = thinkingText,
                                         style = MaterialTheme.typography.bodyMedium.copy(
                                             fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
                                             fontSize = 13.sp

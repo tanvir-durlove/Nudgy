@@ -105,6 +105,7 @@ import com.example.ui.theme.NudgyCharcoal
 import com.example.ui.theme.NudgyMuted
 import com.example.ui.theme.NudgyPrimary
 import com.example.ui.theme.NudgyTheme
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -140,6 +141,12 @@ private val BANNER_DESTINATIONS = setOf(
 // counter. The per-session flag itself is in-memory (remember), so a new
 // process starts clean; only the first-session marker is persisted.
 private const val INTERSTITIAL_MIN_GAP_MS = 3 * 60 * 1000L
+
+// Chat thinking indicator: local replies are instant, so without a floor
+// the thinking bubble would flash for ~0ms and the user would never see
+// it. Every reply path below waits out this minimum (Gemini replies are
+// already slower, so the wait is a no-op for them).
+private const val MIN_THINKING_DISPLAY_MS = 900L
 private const val KEY_LAST_INTERSTITIAL_SHOWN_AT = "last_interstitial_shown_at"
 private const val KEY_ADS_SESSION_SEEN = "nudgy_ads_session_seen"
 
@@ -494,6 +501,12 @@ fun NudgyAppScaffold(
     var selectedCalendarDayMillis by remember { mutableStateOf(System.currentTimeMillis()) }
     var showFloatingBubbleDialog by remember { mutableStateOf(false) }
     var isThinking by remember { mutableStateOf(false) }
+    // Chat thinking indicator: phase text for the thinking bubble
+    // (ChatScreen). Follows what handleUserChat is actually doing and the
+    // prompt's language, like the replies do: ভাবছি… while parsing or
+    // generating, শিডিউল করছি… while creating a schedule, টাস্ক তৈরি
+    // করছি… while creating a task.
+    var thinkingText by remember { mutableStateOf("ভাবছি…") }
     var isCalendarConnected by remember { mutableStateOf(calendarRepository.hasCalendarPermissions()) }
 
     // C10: notification permission — when POST_NOTIFICATIONS is denied
@@ -751,6 +764,23 @@ fun NudgyAppScaffold(
 
     val chatMessages by chatRepository.observeMessages(user.uid).collectAsStateWithLifecycle(emptyList())
 
+    // Chat thinking indicator: same Bengali detection as
+    // ClientIntentPreFilter.isBengali — the phase text follows the
+    // prompt's language, like the replies do.
+    fun isBengaliPrompt(text: String): Boolean =
+        text.any { it in 'অ'..'হ' || it in 'া'..'ৌ' || it == 'ং' || it == 'ঃ' || it == 'ঁ' }
+
+    // Chat thinking indicator: wait out the minimum display time so the
+    // bubble is actually seen. No-op when the work already took longer
+    // (Gemini generation). Must run BEFORE the reply is posted — a delay
+    // after posting would leave the bubble up next to the answer.
+    suspend fun ensureMinThinkingTime(startedAtMillis: Long) {
+        val elapsed = SystemClock.uptimeMillis() - startedAtMillis
+        if (elapsed < MIN_THINKING_DISPLAY_MS) {
+            delay(MIN_THINKING_DISPLAY_MS - elapsed)
+        }
+    }
+
     /**
      * Chat entry point for typed text, suggestion taps, and mic input.
      * [fromVoice] is true only when the prompt came from the mic: the
@@ -765,6 +795,8 @@ fun NudgyAppScaffold(
         // double-spend turns.
         if (isThinking) return
         val userMsg = ChatMessage(UUID.randomUUID().toString(), true, prompt)
+        val thinkingStartedAtMillis = SystemClock.uptimeMillis()
+        thinkingText = if (isBengaliPrompt(prompt)) "ভাবছি…" else "Thinking…"
         isThinking = true
 
         scope.launch {
@@ -776,6 +808,7 @@ fun NudgyAppScaffold(
                 // stored either, so refused content never reaches the cloud.
                 when (val guard = ChatGuardrails.check(prompt)) {
                     is ChatGuardrails.GuardResult.Refused -> {
+                        ensureMinThinkingTime(thinkingStartedAtMillis)
                         chatRepository.addMessage(
                             user.uid,
                             ChatMessage(
@@ -805,6 +838,18 @@ fun NudgyAppScaffold(
                         preFilterResult.createdTask?.let { created ->
                             analytics.logTaskCreated(created.title, created.priority.name, created.category.name, created.reminderSet)
                         }
+                        // Thinking indicator: phase follows what was just
+                        // created — schedule, task, or (query /
+                        // clarification / anything else) still thinking.
+                        // Set before the minimum-display wait so the user
+                        // sees the creation phase, not the parsing one.
+                        val bn = isBengaliPrompt(prompt)
+                        thinkingText = when {
+                            preFilterResult.createdEvent != null -> if (bn) "শিডিউল করছি…" else "Scheduling…"
+                            preFilterResult.createdTask != null -> if (bn) "টাস্ক তৈরি করছি…" else "Creating task…"
+                            else -> if (bn) "ভাবছি…" else "Thinking…"
+                        }
+                        ensureMinThinkingTime(thinkingStartedAtMillis)
                         val handledMsg = ChatMessage(
                             id = UUID.randomUUID().toString(),
                             senderIsUser = false,
@@ -872,6 +917,7 @@ fun NudgyAppScaffold(
                                         userMemories = memories.map { it.content },
                                         modelVersion = remoteConfigValues.geminiModelVersion
                                     )
+                                    ensureMinThinkingTime(thinkingStartedAtMillis)
                                     val geminiMsg = ChatMessage(
                                         id = UUID.randomUUID().toString(),
                                         senderIsUser = false,
@@ -1072,6 +1118,7 @@ fun NudgyAppScaffold(
                             isListening = isListening,
                             isSpeaking = isSpeaking,
                             isThinking = isThinking,
+                            thinkingText = thinkingText,
                             onSendMessage = { prompt -> handleUserChat(prompt) },
                             onStartVoice = {
                                 analytics.logVoiceUsed("voice_input")
