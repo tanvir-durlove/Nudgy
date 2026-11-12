@@ -305,9 +305,10 @@ class ClientIntentPreFilter(
             "morning", "afternoon", "evening", "night"
         )
         for (token in tokensToRemove) {
-            // (?U) makes \b Unicode-aware: an ASCII \b has no boundary
-            // around Bengali letters, so "কাল" would never match.
-            cleaned = cleaned.replace(Regex("(?U)(?i)\\b${Regex.escape(token)}\\b"), " ")
+            // No (?U) here: Android's \b is already Unicode-aware, so the
+            // flag is unnecessary on Android — and (?U) is the suspect
+            // behind the 2026-11-11 chat failure. Do not re-add it.
+            cleaned = cleaned.replace(Regex("(?i)\\b${Regex.escape(token)}\\b"), " ")
         }
         cleaned = cleaned.replace(Regex("""\b\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)\b""", RegexOption.IGNORE_CASE), " ")
         cleaned = cleaned.replace(Regex("""\d{1,2}\s*টা(য়|ই|তে)"""), " ")
@@ -1352,7 +1353,7 @@ class ClientIntentPreFilter(
             val token = eventTimeToken!!
             var fallbackTitle = cleaned
                 .replace(Regex("(?i)\\b(tomorrow|today)\\b"), "")
-                .replace(Regex("(?U)\\b(আগামীকাল|আগামিকাল|কালকে|আজকে|পরশু|কাল|আজ)\\b"), " ")
+                .replace(Regex("\\b(আগামীকাল|আগামিকাল|কালকে|আজকে|পরশু|কাল|আজ)\\b"), " ")
                 .replace(Regex("(?i)at\\s+\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?"), "")
                 .replace(Regex("(?i)\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)"), "")
                 .replace(BENGALI_DAYPART_REGEX, " ")
@@ -1471,7 +1472,7 @@ class ClientIntentPreFilter(
             }
             var catchTitle = cleaned
                 .replace(Regex("(?i)\\b(tomorrow|today)\\b"), "")
-                .replace(Regex("(?U)\\b(আগামীকাল|আগামিকাল|কালকে|আজকে|পরশু|কাল|আজ)\\b"), " ")
+                .replace(Regex("\\b(আগামীকাল|আগামিকাল|কালকে|আজকে|পরশু|কাল|আজ)\\b"), " ")
                 .replace(Regex("(?i)at\\s+\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?"), "")
                 .replace(Regex("(?i)\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)"), "")
                 .replace(BENGALI_DAYPART_REGEX, " ")
