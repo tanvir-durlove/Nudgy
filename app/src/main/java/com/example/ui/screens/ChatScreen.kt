@@ -65,7 +65,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -180,7 +179,7 @@ fun ChatScreen(
     // with empty space below the last message (the keyboard gap).
     // WindowInsets.isImeVisible is snapshot-state-backed, so reading
     // it here re-runs this effect when the keyboard opens or closes.
-    val isImeVisible = WindowInsets.isImeVisible.getBottom(LocalDensity.current) > 0
+    val isImeVisible = WindowInsets.isImeVisible
     LaunchedEffect(messages.size, isThinking, isListening, isImeVisible) {
         // True last index: hero (0) + listening banner if shown +
         // messages + thinking indicator if shown + trailing spacer.
