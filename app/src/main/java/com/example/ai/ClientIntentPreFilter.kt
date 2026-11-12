@@ -983,8 +983,8 @@ class ClientIntentPreFilter(
      * Answers, in priority order: an AM/PM token; a time token WITH a
      * daypart marker (the marker may also correct the hour, e.g.
      * "৪টায় বিকেলে" for a pending "৩ টায়"); a bare daypart word
-     *  ("বিকেল") applied to the pending hour. A bare hour alone
-     *  ("৩টা") is NOT an answer — it has no marker.
+     * ("বিকেল") applied to the pending hour. A bare hour alone
+     * ("৩টা") is NOT an answer — it has no marker.
      *
      *  When the pending kind was only a matcher guess, answering the
      *  hour does NOT create — it asks task-vs-schedule once, and the
