@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.asStateFlow
 data class RemoteConfigValues(
     val adsEnabled: Boolean = false,
     val adFrequencyTasks: Long = 5L,
+    // Interstitial after every N local-chat replies (see MainActivity).
+    val adFrequencyLocalChats: Long = 5L,
     val adInterstitialUnitId: String = "ca-app-pub-3940256099942544/1033173712",
     val adBannerUnitId: String = "ca-app-pub-3940256099942544/6300978111",
     val adRewardedUnitId: String = "ca-app-pub-3940256099942544/5224354917",
@@ -63,6 +65,7 @@ class NudgyRemoteConfig {
                 val defaults = mapOf<String, Any>(
                     KEY_ADS_ENABLED to false,
                     KEY_AD_FREQUENCY to 5L,
+                    KEY_AD_CHAT_FREQUENCY to 5L,
                     KEY_AD_INTERSTITIAL_UNIT_ID to "ca-app-pub-3940256099942544/1033173712",
                     KEY_AD_BANNER_UNIT_ID to "ca-app-pub-3940256099942544/6300978111",
                     KEY_AD_REWARDED_UNIT_ID to "ca-app-pub-3940256099942544/5224354917",
@@ -85,6 +88,7 @@ class NudgyRemoteConfig {
                         _configState.value = RemoteConfigValues(
                             adsEnabled = rc.getBoolean(KEY_ADS_ENABLED),
                             adFrequencyTasks = rc.getLong(KEY_AD_FREQUENCY).takeIf { it > 0 } ?: 5L,
+                            adFrequencyLocalChats = rc.getLong(KEY_AD_CHAT_FREQUENCY).takeIf { it > 0 } ?: 5L,
                             adInterstitialUnitId = rc.getString(KEY_AD_INTERSTITIAL_UNIT_ID).ifEmpty { "ca-app-pub-3940256099942544/1033173712" },
                             adBannerUnitId = rc.getString(KEY_AD_BANNER_UNIT_ID).ifEmpty { "ca-app-pub-3940256099942544/6300978111" },
                             adRewardedUnitId = rc.getString(KEY_AD_REWARDED_UNIT_ID).ifEmpty { "ca-app-pub-3940256099942544/5224354917" },
@@ -114,6 +118,7 @@ class NudgyRemoteConfig {
         private const val TAG = "NudgyRemoteConfig"
         const val KEY_ADS_ENABLED = "ads_enabled"
         const val KEY_AD_FREQUENCY = "ad_interstitial_task_frequency"
+        const val KEY_AD_CHAT_FREQUENCY = "ad_interstitial_local_chat_frequency"
         const val KEY_AD_INTERSTITIAL_UNIT_ID = "ad_interstitial_unit_id"
         const val KEY_AD_BANNER_UNIT_ID = "ad_banner_unit_id"
         const val KEY_AD_REWARDED_UNIT_ID = "ad_rewarded_unit_id"

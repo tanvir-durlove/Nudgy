@@ -867,6 +867,39 @@ fun NudgyAppScaffold(
                         // notification ting; only mic input is spoken back.
                         if (fromVoice) voiceAssistantManager.speak(preFilterResult.responseText)
                         else voiceAssistantManager.playReplySound()
+                        // Ads: 1 interstitial per N local-chat replies (N
+                        // from Remote Config, key
+                        // ad_interstitial_local_chat_frequency, default 5).
+                        // Only preFilter-handled (local) replies count —
+                        // Gemini replies never reach this branch. Same
+                        // rules as the task interstitial: ads_enabled kill
+                        // switch, shared C15 throttle (max 1/session,
+                        // 3-min gap, never first session — the session flag
+                        // and last-shown timestamp are shared, so a chat
+                        // ad and a task ad can never double-show), and the
+                        // counter resets ONLY when an ad actually shows.
+                        // Dormant while ads are OFF: nothing is counted.
+                        if (remoteValues.adsEnabled) {
+                            val sinceLastAd = adsPrefs.getInt("local_chats_since_ad", 0) + 1
+                            val gapElapsed = System.currentTimeMillis() -
+                                adsPrefs.getLong(KEY_LAST_INTERSTITIAL_SHOWN_AT, 0L) >= INTERSTITIAL_MIN_GAP_MS
+                            if (sinceLastAd >= remoteValues.adFrequencyLocalChats &&
+                                gapElapsed && !interstitialShownThisSession && !isFirstSession
+                            ) {
+                                val shown = (context as? Activity)?.let { NudgyAds.showInterstitial(it) } == true
+                                if (shown) {
+                                    adsPrefs.edit()
+                                        .putInt("local_chats_since_ad", 0)
+                                        .putLong(KEY_LAST_INTERSTITIAL_SHOWN_AT, System.currentTimeMillis())
+                                        .apply()
+                                    interstitialShownThisSession = true
+                                } else {
+                                    adsPrefs.edit().putInt("local_chats_since_ad", sinceLastAd).apply()
+                                }
+                            } else {
+                                adsPrefs.edit().putInt("local_chats_since_ad", sinceLastAd).apply()
+                            }
+                        }
                     }
                     is PreFilterResult.Unhandled -> {
                         // Ads: the free daily cap gates Gemini turns only.
