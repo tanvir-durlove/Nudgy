@@ -173,26 +173,21 @@ fun ChatScreen(
         "আজকের সব কাজ দেখাও"
     )
 
-    // The keyboard opening/closing resizes the viewport but changes
-    // no message state, so the list must re-pin to the bottom on IME
-    // visibility changes too — otherwise it sits at a stale offset
-    // with empty space below the last message (the keyboard gap).
+    // Bottom-anchored list: reverseLayout lays items out from the
+    // bottom, so the newest message sits directly above the input bar
+    // and short content sits at the bottom too — no void below the
+    // last message, with the keyboard open or closed. Pinning to the
+    // bottom is scrollToItem(0): offset 0 in a reversed list, which
+    // does NOT depend on viewport size — unlike the old
+    // scroll-to-lastIndex, whose bottom-pinned offset changed while
+    // the IME was still resizing, so the scroll ended stale and the
+    // keyboard gap remained (PR #48). Instant, not animated: an
+    // animation target computed mid-resize goes stale the same way.
     // WindowInsets.isImeVisible is snapshot-state-backed, so reading
     // it here re-runs this effect when the keyboard opens or closes.
     val isImeVisible = WindowInsets.isImeVisible
     LaunchedEffect(messages.size, isThinking, isListening, isImeVisible) {
-        // True last index: hero (0) + listening banner if shown +
-        // messages + thinking indicator if shown + trailing spacer.
-        // The old target (messages.size + thinking − 1) was 2 items
-        // short (3 with the banner), so the list stopped above the
-        // last message and left a gap below it. Scrolling to the very
-        // last item clamps to max scroll, pinning the last message at
-        // the bottom.
-        val lastIndex = 1 + (if (isListening) 1 else 0) +
-            messages.size + (if (isThinking) 1 else 0)
-        if (lastIndex > 0) {
-            listState.animateScrollToItem(lastIndex)
-        }
+        listState.scrollToItem(0)
     }
 
     val currentMascotMood = when {
@@ -211,82 +206,64 @@ fun ChatScreen(
         ) {
             LazyColumn(
                 state = listState,
+                reverseLayout = true,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Hero Mascot & Greeting
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 16.dp, bottom = 8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        NudgyMascot(
-                            size = 100.dp,
-                            mood = currentMascotMood
-                        )
+                item(key = "trailing_spacer") {
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
 
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        Text(
-                            text = "YOUR PRODUCTIVITY PARTNER",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = NudgyAccent
-                        )
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Text(
-                            text = "What can I help you\nget done?",
-                            style = MaterialTheme.typography.displayMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 28.sp
-                            ),
-                            textAlign = TextAlign.Center,
-                            color = NudgyCharcoal
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = "I can manage tasks, schedule focus time, and keep your day moving in English or বাংলা.",
-                            style = MaterialTheme.typography.bodyLarge,
-                            textAlign = TextAlign.Center,
-                            color = NudgyMuted,
-                            modifier = Modifier.padding(horizontal = 20.dp)
-                        )
-
-                        Spacer(modifier = Modifier.height(18.dp))
-
-                        // Quick Prompt Pills
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                if (isThinking) {
+                    item(key = "thinking_indicator") {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            quickPrompts.forEach { prompt ->
-                                Surface(
-                                    shape = RoundedCornerShape(100.dp),
-                                    color = Color.Transparent,
-                                    border = androidx.compose.foundation.BorderStroke(1.2.dp, Color(0xFFE2DCD1)),
-                                    // C1: disabled while a reply is pending —
-                                    // a second prompt must not start a second
-                                    // handleUserChat run (duplicate tasks /
-                                    // double-spent turns). The guard in
-                                    // MainActivity.handleUserChat is the
-                                    // backstop; this is the visible one.
-                                    modifier = Modifier.clickable(enabled = !isThinking) { onSendMessage(prompt) }
+                            NudgyMascot(size = 28.dp, mood = MascotMood.THINKING)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = NudgyCard,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    // Thinking dots: three dots fading in
+                                    // sequence, Gemini-style, next to the
+                                    // phase text (ভাবছি… / শিডিউল করছি… /
+                                    // টাস্ক তৈরি করছি…).
+                                    val infiniteTransition = rememberInfiniteTransition(label = "thinking_dots")
+                                    repeat(3) { index ->
+                                        val dotAlpha by infiniteTransition.animateFloat(
+                                            initialValue = 0.25f,
+                                            targetValue = 1f,
+                                            animationSpec = infiniteRepeatable(
+                                                animation = tween(durationMillis = 600, delayMillis = index * 200),
+                                                repeatMode = RepeatMode.Reverse
+                                            ),
+                                            label = "thinking_dot_$index"
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .size(6.dp)
+                                                .alpha(dotAlpha)
+                                                .background(NudgyMuted, CircleShape)
+                                        )
+                                        if (index < 2) Spacer(modifier = Modifier.width(4.dp))
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = prompt,
+                                        text = thinkingText,
                                         style = MaterialTheme.typography.bodyMedium.copy(
-                                            fontWeight = FontWeight.SemiBold,
+                                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
                                             fontSize = 13.sp
                                         ),
-                                        color = NudgyCharcoal,
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                                        color = NudgyMuted
                                     )
                                 }
                             }
@@ -294,36 +271,8 @@ fun ChatScreen(
                     }
                 }
 
-                // Voice Listening Indicator Banner
-                if (isListening) {
-                    item {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            color = NudgyButter
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(14.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    color = NudgyPrimary,
-                                    strokeWidth = 2.dp
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Text(
-                                    text = "🎙️ Listening... Speak now",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 14.sp),
-                                    color = NudgyCharcoal
-                                )
-                            }
-                        }
-                    }
-                }
-
                 // Chat Message Stream
-                items(messages, key = { it.id }) { message ->
+                items(messages.reversed(), key = { it.id }) { message ->
                     if (message.senderIsUser) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -599,63 +548,110 @@ fun ChatScreen(
                     }
                 }
 
-                if (isThinking) {
-                    item(key = "thinking_indicator") {
-                        Row(
+                // Voice Listening Indicator Banner
+                if (isListening) {
+                    item(key = "listening_banner") {
+                        Surface(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
+                            shape = RoundedCornerShape(16.dp),
+                            color = NudgyButter
                         ) {
-                            NudgyMascot(size = 28.dp, mood = MascotMood.THINKING)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Surface(
-                                shape = RoundedCornerShape(18.dp),
-                                color = NudgyCard,
-                                border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    // Thinking dots: three dots fading in
-                                    // sequence, Gemini-style, next to the
-                                    // phase text (ভাবছি… / শিডিউল করছি… /
-                                    // টাস্ক তৈরি করছি…).
-                                    val infiniteTransition = rememberInfiniteTransition(label = "thinking_dots")
-                                    repeat(3) { index ->
-                                        val dotAlpha by infiniteTransition.animateFloat(
-                                            initialValue = 0.25f,
-                                            targetValue = 1f,
-                                            animationSpec = infiniteRepeatable(
-                                                animation = tween(durationMillis = 600, delayMillis = index * 200),
-                                                repeatMode = RepeatMode.Reverse
-                                            ),
-                                            label = "thinking_dot_$index"
-                                        )
-                                        Box(
-                                            modifier = Modifier
-                                                .size(6.dp)
-                                                .alpha(dotAlpha)
-                                                .background(NudgyMuted, CircleShape)
-                                        )
-                                        if (index < 2) Spacer(modifier = Modifier.width(4.dp))
-                                    }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = thinkingText,
-                                        style = MaterialTheme.typography.bodyMedium.copy(
-                                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
-                                            fontSize = 13.sp
-                                        ),
-                                        color = NudgyMuted
-                                    )
-                                }
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = NudgyPrimary,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = "🎙️ Listening... Speak now",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 14.sp),
+                                    color = NudgyCharcoal
+                                )
                             }
                         }
                     }
                 }
 
-                item {
-                    Spacer(modifier = Modifier.height(12.dp))
+                // Hero Mascot & Greeting
+                item(key = "hero") {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp, bottom = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        NudgyMascot(
+                            size = 100.dp,
+                            mood = currentMascotMood
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Text(
+                            text = "YOUR PRODUCTIVITY PARTNER",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = NudgyAccent
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Text(
+                            text = "What can I help you\nget done?",
+                            style = MaterialTheme.typography.displayMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 28.sp
+                            ),
+                            textAlign = TextAlign.Center,
+                            color = NudgyCharcoal
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = "I can manage tasks, schedule focus time, and keep your day moving in English or বাংলা.",
+                            style = MaterialTheme.typography.bodyLarge,
+                            textAlign = TextAlign.Center,
+                            color = NudgyMuted,
+                            modifier = Modifier.padding(horizontal = 20.dp)
+                        )
+
+                        Spacer(modifier = Modifier.height(18.dp))
+
+                        // Quick Prompt Pills
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            quickPrompts.forEach { prompt ->
+                                Surface(
+                                    shape = RoundedCornerShape(100.dp),
+                                    color = Color.Transparent,
+                                    border = androidx.compose.foundation.BorderStroke(1.2.dp, Color(0xFFE2DCD1)),
+                                    // C1: disabled while a reply is pending —
+                                    // a second prompt must not start a second
+                                    // handleUserChat run (duplicate tasks /
+                                    // double-spent turns). The guard in
+                                    // MainActivity.handleUserChat is the
+                                    // backstop; this is the visible one.
+                                    modifier = Modifier.clickable(enabled = !isThinking) { onSendMessage(prompt) }
+                                ) {
+                                    Text(
+                                        text = prompt,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 13.sp
+                                        ),
+                                        color = NudgyCharcoal,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
