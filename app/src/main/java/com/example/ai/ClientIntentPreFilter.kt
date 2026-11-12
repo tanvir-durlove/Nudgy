@@ -652,17 +652,21 @@ class ClientIntentPreFilter(
             else -> TaskCategory.PERSONAL
         }
 
-        // --- Shortcut: call task ("কল" / "call" + করতে/করব/করার/করো/করুন/time). ---
+        // --- Shortcut: call task ("কল" / "call" + করতে/করব/করার/করো/করুন/time/callee). ---
         // A call to a person is a TASK, not a calendar event — the bank is
         // skewed toward call-BOOKING (SCHEDULE_CREATE) for "কল করো"
         // phrasings, so the matcher must not see these. Same rule in
         // English: "call" is the verb, so the guard is a word after it
         // (the callee) or a time token. "call off" is excluded — that
-        // verb means cancel, not phone someone.
+        // verb means cancel, not phone someone. The Bengali side has the
+        // same callee guard ("কল" + a following word, e.g. "কল তাসনিম"),
+        // so a bare "কল <name>" with no verb form and no time is still a
+        // task. "কল" alone (no following word) does not fire it.
         val isCallTask = (cleaned.contains("কল") && (
             cleaned.contains("করতে") || cleaned.contains("করব") ||
                 cleaned.contains("করার") || cleaned.contains("করো") ||
-                cleaned.contains("করুন") || timeToken != null
+                cleaned.contains("করুন") || timeToken != null ||
+                Regex("""(^|\s)কল\s+\S+""").containsMatchIn(cleaned)
             )) || (
             Regex("""\bcall\b""").containsMatchIn(lower) &&
                 !lower.contains("call off") &&
