@@ -37,6 +37,12 @@ import java.util.regex.Pattern
  *    so it asks the same way; and a SCHEDULE with no time token at
  *    all asks for the time instead of silently inventing 14:00 (the
  *    4 PM bug — 14:00 +2h when past).
+ *    A past resolved time moves to the NEXT DAY for every kind — never
+ *    +2h (that was the 4 PM / 7 PM bug shape: a past 17:00 became
+ *    19:00 the same day). And a kind the matcher merely guessed is
+ *    never frozen: after the hour is answered, the app asks
+ *    task-vs-schedule ("টাস্ক নাকি শিডিউল?" / "Task or schedule?")
+ *    once before creating anything.
  * 3. ONE reply builder — the EVENT time is stated first, the reminder
  *    is labeled separately. The old code stated the reminder time as if
  *    it were the event time.
@@ -94,7 +100,12 @@ data class ParsedIntent(
     val category: TaskCategory?,
     val reminderAtDue: Boolean,
     val scheduleLocation: String?,
-    val scheduleType: String
+    val scheduleType: String,
+    /** True when the kind came from an explicit shortcut (call-task,
+     *  schedule-word, reminder-word) — the kind is certain. False
+     *  when the bank matcher merely guessed it: the hour answer then
+     *  asks task-vs-schedule first instead of creating. */
+    val kindCertain: Boolean = true
 )
 
 data class PendingClarification(
@@ -107,7 +118,15 @@ data class PendingClarification(
     val category: TaskCategory?,
     val reminderAtDue: Boolean,
     val scheduleLocation: String?,
-    val scheduleType: String
+    val scheduleType: String,
+    /** True when the kind is certain (explicit shortcut, or a by-design
+     *  fallback such as the step-4 event fallback / step-5 catch-all
+     *  task capture) — no kind question is asked. False when the bank
+     *  matcher merely guessed it. */
+    val kindCertain: Boolean = true,
+    /** Hour (0-23) resolved by a clarification answer while the kind
+     *  question is pending; null while waiting for the time answer. */
+    val resolvedHour: Int? = null
 )
 
 class ClientIntentPreFilter(
@@ -747,7 +766,10 @@ class ClientIntentPreFilter(
                 category = category,
                 reminderAtDue = kind == ParsedKind.REMINDER || explicitReminder,
                 scheduleLocation = if (kind == ParsedKind.SCHEDULE) "Google Meet" else null,
-                scheduleType = "MEETING"
+                scheduleType = "MEETING",
+                // Matcher guess, not an explicit shortcut — the kind is
+                // NOT certain; the hour answer asks task-vs-schedule.
+                kindCertain = false
             )
         }
 
@@ -788,8 +810,9 @@ class ClientIntentPreFilter(
      *  The SCHEDULE 2 PM default below is UNREACHABLE by design — the
      *  step-3 dispatch asks for the time first when a SCHEDULE has no
      *  token (the 4 PM bug); it stays only so this function is total.
-     *  An explicit past time rolls +1 day (TASK/REMINDER) or +2h
-     *  (SCHEDULE). */
+     *  An explicit past time rolls +1 day for EVERY kind — never +2h
+     *  (the +2h rule was the 4 PM / 7 PM bug shape: a past 17:00
+     *  became 19:00 the same day). */
     private fun resolveCreationTime(parsed: ParsedIntent, now: Calendar, daypart: String? = null): Calendar {
         val dayCal = parsed.dayCal ?: (now.clone() as Calendar)
         val eventCal = (dayCal.clone() as Calendar)
@@ -797,9 +820,11 @@ class ClientIntentPreFilter(
         if (token != null) {
             parseTimeIntoCalendar(eventCal, token, parsed.isBengali, daypart)
             if (eventCal.timeInMillis <= now.timeInMillis) {
+                // Past time moves to the next day — never +2h (the old
+                // 4 PM / 7 PM bug shape). Same rule for every kind.
                 when (parsed.kind) {
-                    ParsedKind.SCHEDULE -> eventCal.add(Calendar.HOUR_OF_DAY, 2)
-                    ParsedKind.TASK, ParsedKind.REMINDER -> eventCal.add(Calendar.DAY_OF_YEAR, 1)
+                    ParsedKind.SCHEDULE, ParsedKind.TASK, ParsedKind.REMINDER ->
+                        eventCal.add(Calendar.DAY_OF_YEAR, 1)
                     else -> Unit
                 }
             }
@@ -908,6 +933,48 @@ class ClientIntentPreFilter(
         )
     }
 
+    /** Builds the event calendar for a resolved hour on the pending
+     *  day. A past time moves to the next day — never +2h (the old
+     *  4 PM / 7 PM bug shape). Same rule for every kind. */
+    private fun resolvedEventCal(
+        pending: PendingClarification,
+        resolvedHour: Int,
+        now: Calendar
+    ): Calendar {
+        val eventCal = (pending.dayCal ?: now).clone() as Calendar
+        eventCal.set(Calendar.HOUR_OF_DAY, resolvedHour)
+        eventCal.set(Calendar.MINUTE, 0)
+        eventCal.set(Calendar.SECOND, 0)
+        eventCal.set(Calendar.MILLISECOND, 0)
+        if (eventCal.timeInMillis <= now.timeInMillis) {
+            eventCal.add(Calendar.DAY_OF_YEAR, 1)
+        }
+        return eventCal
+    }
+
+    /** The matcher guessed the kind (no verb in the message) and the
+     *  hour is now resolved — ask task-vs-schedule instead of creating
+     *  with the guessed kind. The label shows the adjusted time (a
+     *  past hour already moved to the next day), so the question
+     *  states exactly what will be created. */
+    private fun buildKindQuestion(
+        pending: PendingClarification,
+        resolvedHour: Int,
+        now: Calendar
+    ): PreFilterResult.Handled {
+        val eventCal = resolvedEventCal(pending, resolvedHour, now)
+        val question = if (pending.isBengali) {
+            "\"${pending.title}\" ${formatDayTimeLabel(eventCal, now)} — টাস্ক নাকি শিডিউল?"
+        } else {
+            "\"${pending.title}\" ${formatDayTimeLabelEn(eventCal, now)} — Task or schedule?"
+        }
+        val chips = if (pending.isBengali) listOf("টাস্ক", "শিডিউল") else listOf("Task", "Schedule")
+        return PreFilterResult.Handled(
+            responseText = question,
+            quickSuggestions = chips
+        )
+    }
+
     /**
      * A follow-up answering a pending clarification. Returns null when
      * the message does not answer it — the caller then clears pending
@@ -918,12 +985,46 @@ class ClientIntentPreFilter(
      * "৪টায় বিকেলে" for a pending "৩ টায়"); a bare daypart word
      * ("বিকেল") applied to the pending hour. A bare hour alone
      * ("৩টা") is NOT an answer — it has no marker.
+     *
+     *  When the pending kind was only a matcher guess, answering the
+     *  hour does NOT create — it asks task-vs-schedule once, and the
+     *  kind answer (chip or typed) creates with the stored hour.
      */
     private suspend fun tryAnswerClarification(rawInput: String, userId: String): PreFilterResult? {
         val pending = pendingClarification ?: return null
         val cleaned = rawInput.trim()
         val lower = cleaned.lowercase(Locale.ROOT)
         val now = Calendar.getInstance()
+
+        // (A) Awaiting a kind answer: the hour is already resolved.
+        // A chip tap ("Task"/"Schedule"/"টাস্ক"/"শিডিউল") or the same
+        // words typed out chooses the kind; anything else is not an
+        // answer — return null so the caller clears the pending state
+        // and processes the message normally.
+        if (pending.resolvedHour != null) {
+            val chosenKind = when {
+                lower == "task" || lower.startsWith("task ") ||
+                    cleaned == "টাস্ক" || cleaned.startsWith("টাস্ক ") -> ParsedKind.TASK
+                lower == "schedule" || lower.startsWith("schedule ") ||
+                    cleaned == "শিডিউল" || cleaned.startsWith("শিডিউল ") -> ParsedKind.SCHEDULE
+                else -> null
+            } ?: return null
+            pendingClarification = null
+            val eventCal = resolvedEventCal(pending, pending.resolvedHour, now)
+            return createFromParsed(
+                ParsedIntent(
+                    kind = chosenKind, title = pending.title,
+                    dayCal = pending.dayCal, timeToken = pending.timeToken,
+                    isBareHour = false, confidence = 1.0,
+                    isBengali = pending.isBengali, priority = pending.priority,
+                    category = pending.category, reminderAtDue = pending.reminderAtDue,
+                    scheduleLocation = pending.scheduleLocation,
+                    scheduleType = pending.scheduleType
+                ),
+                eventCal, now, userId
+            )
+        }
+
         val pendingHour = hourOfDay(pending.timeToken ?: "") ?: 12
 
         val token = extractTimeToken(cleaned)
@@ -948,19 +1049,16 @@ class ClientIntentPreFilter(
         }
         if (resolvedHour == null) return null
 
-        pendingClarification = null
-        val eventCal = (pending.dayCal ?: now).clone() as Calendar
-        eventCal.set(Calendar.HOUR_OF_DAY, resolvedHour)
-        eventCal.set(Calendar.MINUTE, 0)
-        eventCal.set(Calendar.SECOND, 0)
-        eventCal.set(Calendar.MILLISECOND, 0)
-        if (eventCal.timeInMillis <= now.timeInMillis) {
-            when (pending.kind) {
-                ParsedKind.SCHEDULE -> eventCal.add(Calendar.HOUR_OF_DAY, 2)
-                ParsedKind.TASK, ParsedKind.REMINDER -> eventCal.add(Calendar.DAY_OF_YEAR, 1)
-                else -> Unit
-            }
+        // (B) The kind was only a matcher guess (no verb in the
+        // message): do NOT create with the guessed kind. Store the
+        // resolved hour and ask task-vs-schedule once.
+        if (!pending.kindCertain) {
+            pendingClarification = pending.copy(resolvedHour = resolvedHour)
+            return buildKindQuestion(pending, resolvedHour, now)
         }
+
+        pendingClarification = null
+        val eventCal = resolvedEventCal(pending, resolvedHour, now)
         return createFromParsed(
             ParsedIntent(
                 kind = pending.kind, title = pending.title,
@@ -1420,7 +1518,8 @@ class ClientIntentPreFilter(
                         isBengali = parsed.isBengali, priority = parsed.priority,
                         category = parsed.category, reminderAtDue = parsed.reminderAtDue,
                         scheduleLocation = parsed.scheduleLocation,
-                        scheduleType = parsed.scheduleType
+                        scheduleType = parsed.scheduleType,
+                        kindCertain = parsed.kindCertain
                     )
                     buildClarificationQuestion(parsed, now)
                 } else if (parsed.kind == ParsedKind.SCHEDULE && parsed.timeToken == null) {
@@ -1435,7 +1534,8 @@ class ClientIntentPreFilter(
                         isBengali = parsed.isBengali, priority = parsed.priority,
                         category = parsed.category, reminderAtDue = parsed.reminderAtDue,
                         scheduleLocation = parsed.scheduleLocation,
-                        scheduleType = parsed.scheduleType
+                        scheduleType = parsed.scheduleType,
+                        kindCertain = parsed.kindCertain
                     )
                     buildNoTimeQuestion(parsed, now)
                 } else {
