@@ -1,6 +1,7 @@
 package com.example.ui.sheets
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -71,6 +73,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.BuildConfig
 import com.example.auth.AuthManager
 import com.example.auth.NudgyUser
 import com.example.data.local.entity.NudgyMemoryEntity
@@ -86,6 +89,7 @@ import com.example.ui.theme.NudgyPrimary
 import kotlinx.coroutines.CoroutineScope
 
 private const val PRIVACY_POLICY_URL = "https://tanvir-durlove.github.io/nudgy/privacy-policy.html"
+private const val FEEDBACK_EMAIL = "nextgentoolbd@gmail.com"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -358,6 +362,29 @@ fun YourNudgySheet(
                     context.startActivity(
                         Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_POLICY_URL))
                     )
+                }
+            )
+            HorizontalDivider(color = NudgyBorder.copy(alpha = 0.5f))
+
+            NudgyMenuItem(
+                icon = Icons.Outlined.Email,
+                title = "Help & feedback",
+                onClick = {
+                    onDismiss()
+                    val feedbackIntent = Intent(Intent.ACTION_SENDTO).apply {
+                        data = Uri.parse("mailto:$FEEDBACK_EMAIL")
+                        putExtra(Intent.EXTRA_EMAIL, arrayOf(FEEDBACK_EMAIL))
+                        putExtra(Intent.EXTRA_SUBJECT, "Nudgy feedback")
+                        putExtra(
+                            Intent.EXTRA_TEXT,
+                            "Hi Nudgy team,\n\nApp version: ${BuildConfig.VERSION_NAME}\n\n"
+                        )
+                    }
+                    try {
+                        context.startActivity(feedbackIntent)
+                    } catch (e: ActivityNotFoundException) {
+                        Toast.makeText(context, "No email app found", Toast.LENGTH_SHORT).show()
+                    }
                 }
             )
 
