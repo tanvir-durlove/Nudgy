@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Nudgy brand tokens - scratch rebuild v2 (2026-11-15).
+  Source: nudgy-logo-kit GUIDE.md (exact HEX).
+  Teal #0F766E primary, coral #F97360 accent, cream #FFF1E8 icon/splash background.
+  Contrast: teal on cream 5.0:1, teal on white 5.5:1.
+  Coral on cream is only 2.5:1 - NEVER use coral for text or for icons
+  that carry meaning on their own. Coral is for the mark + small accents only.
+  Font (locked 2026-11-15 night): Material default - Roboto / system sans-serif.
+  No Figma font needed. Compose Typography uses the default font family;
+  no custom font files in this rebuild.
+-->
+<resources>
+    <color name="nudgy_teal">#0F766E</color>
+    <color name="nudgy_coral">#F97360</color>
+    <color name="nudgy_cream">#FFF1E8</color>
+    <color name="nudgy_background">#F4F6F5</color>
+    <color name="nudgy_ink">#111827</color>
+    <color name="nudgy_muted">#475569</color>
+</resources>
