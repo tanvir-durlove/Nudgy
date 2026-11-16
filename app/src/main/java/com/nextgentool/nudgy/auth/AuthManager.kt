@@ -1,0 +1,662 @@
+package com.nextgentool.nudgy.auth
+
+import android.app.Activity
+import android.content.Context
+import android.util.Log
+import androidx.credentials.ClearCredentialStateRequest
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.NoCredentialException
+import com.nextgentool.nudgy.R
+import com.nextgentool.nudgy.data.local.NudgyDatabase
+import android.content.Intent
+import android.provider.Settings
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+import com.google.firebase.Firebase
+import android.accounts.AccountManager
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthRecentLoginRequiredException
+import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.auth
+import com.google.firebase.firestore.CollectionReference
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
+
+class AuthManager(private val context: Context) {
+    // Nullable: Firebase is unavailable when google-services.json is absent (e.g. CI builds).
+    private val auth: FirebaseAuth? = try {
+        Firebase.auth
+    } catch (e: Exception) {
+        Log.w(TAG, "FirebaseAuth unavailable: ${e.message}")
+        null
+    }
+    private val credentialManager: CredentialManager = CredentialManager.create(context)
+    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    private val _userState = MutableStateFlow<NudgyUser?>(extractUser())
+    val userState: StateFlow<NudgyUser?> = _userState.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
+    // Delete-account runs in this scope, NOT in a composable's scope.
+    // NudgyAppScaffold's rememberCoroutineScope dies the moment the
+    // deletion succeeds (sign-out removes the scaffold from the
+    // composition), which used to cancel the completion path and surface
+    // "The coroutine scope left the composition" as a user error, and
+    // left isLoading stuck on "Deleting…". This scope lives as long as
+    // the AuthManager, so sign-out cannot cancel the deletion.
+    private val deleteScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    init {
+        val isGuest = prefs.getBoolean(KEY_IS_GUEST, false)
+        val explicitlySignedOut = prefs.getBoolean(KEY_EXPLICITLY_SIGNED_OUT, false)
+        if (isGuest && !explicitlySignedOut && auth?.currentUser == null) {
+            _userState.value = NudgyUser(
+                uid = GUEST_USER_ID,
+                displayName = "Guest User",
+                email = "guest@nudgy.local",
+                isGuest = true
+            )
+        }
+
+        auth?.addAuthStateListener { firebaseAuth ->
+            val user = firebaseAuth.currentUser
+            if (user != null) {
+                prefs.edit()
+                    .putString(KEY_ACTIVE_USER_ID, user.uid)
+                    .putBoolean(KEY_IS_GUEST, false)
+                    .putBoolean(KEY_EXPLICITLY_SIGNED_OUT, false)
+                    .apply()
+                _userState.value = NudgyUser(
+                    uid = user.uid,
+                    displayName = resolveDisplayName(user.displayName, user.email),
+                    email = resolveEmail(user.email),
+                    photoUrl = user.photoUrl?.toString(),
+                    isGuest = false
+                )
+            } else if (!prefs.getBoolean(KEY_IS_GUEST, false)) {
+                _userState.value = null
+            }
+        }
+    }
+
+    fun continueAsGuest() {
+        val guest = NudgyUser(
+            uid = GUEST_USER_ID,
+            displayName = "Guest User",
+            email = "guest@nudgy.local",
+            isGuest = true
+        )
+        prefs.edit()
+            .putString(KEY_ACTIVE_USER_ID, GUEST_USER_ID)
+            .putBoolean(KEY_IS_GUEST, true)
+            .putBoolean(KEY_EXPLICITLY_SIGNED_OUT, false)
+            .apply()
+        _userState.value = guest
+    }
+
+    private fun extractUser(): NudgyUser? {
+        val user = auth?.currentUser
+        if (user != null) {
+            prefs.edit()
+                .putString(KEY_ACTIVE_USER_ID, user.uid)
+                .apply()
+            return NudgyUser(
+                uid = user.uid,
+                displayName = resolveDisplayName(user.displayName, user.email),
+                email = resolveEmail(user.email),
+                photoUrl = user.photoUrl?.toString()
+            )
+        }
+        return null
+    }
+
+    private fun getWebClientId(): String {
+        return try {
+            val resId = context.resources.getIdentifier(
+                "default_web_client_id", "string", context.packageName
+            )
+            if (resId != 0) {
+                context.getString(resId)
+            } else {
+                // No direct R.string reference here on purpose: that resource is
+                // generated by the google-services plugin, so referencing it
+                // breaks builds where google-services.json is absent (CI).
+                ""
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Missing default_web_client_id string resource", e)
+            ""
+        }
+    }
+
+    /**
+     * Silent Auto-Sign-In on App Startup
+     */
+    fun attemptSilentSignIn(scope: CoroutineScope) {
+        if (auth?.currentUser != null) {
+            _userState.value = extractUser()
+            return
+        }
+
+        val explicitlySignedOut = prefs.getBoolean(KEY_EXPLICITLY_SIGNED_OUT, false)
+        if (explicitlySignedOut) {
+            Log.d(TAG, "Silent sign-in skipped: user explicitly signed out")
+            return
+        }
+
+        if (prefs.getBoolean(KEY_IS_GUEST, false)) {
+            _userState.value = NudgyUser(
+                uid = GUEST_USER_ID,
+                displayName = "Guest User",
+                email = "guest@nudgy.local",
+                isGuest = true
+            )
+            return
+        }
+
+        val clientId = getWebClientId()
+        if (clientId.isEmpty()) return
+
+        val googleIdOption = GetGoogleIdOption.Builder()
+            .setFilterByAuthorizedAccounts(true)
+            .setServerClientId(clientId)
+            .setAutoSelectEnabled(true)
+            .build()
+
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(googleIdOption)
+            .build()
+
+        val firebaseAuth = auth ?: return
+
+        scope.launch {
+            try {
+                val result = credentialManager.getCredential(context, request)
+                val credential = result.credential
+                if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                    val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
+                    val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
+                    val authResult = firebaseAuth.signInWithCredential(authCredential).await()
+                    val user = authResult.user
+                    if (user != null) {
+                        prefs.edit()
+                            .putBoolean(KEY_EXPLICITLY_SIGNED_OUT, false)
+                            .putBoolean(KEY_IS_GUEST, false)
+                            .putString(KEY_ACTIVE_USER_ID, user.uid)
+                            .apply()
+                        migrateGuestDataToUser(user.uid)
+                        syncUserToFirestore(user.uid, user.displayName, user.email, user.photoUrl?.toString())
+                    }
+                }
+            } catch (e: Exception) {
+                // Expected when no prior authorized account is stored on device
+                Log.d(TAG, "Silent sign-in not available: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Interactive Google Sign-In with Credential Manager
+     */
+    fun signInWithGoogle(
+        activity: Activity,
+        scope: CoroutineScope,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        val clientId = getWebClientId()
+        if (clientId.isEmpty()) {
+            val error = "Google Sign-In configuration missing: client ID not found"
+            _errorMessage.value = error
+            onError(error)
+            return
+        }
+
+        val firebaseAuth = auth ?: run {
+            val error = "Google Sign-In unavailable: Firebase is not configured in this build (missing google-services.json). Use Guest Mode, or a build with Firebase set up."
+            _errorMessage.value = error
+            onError(error)
+            return
+        }
+
+        _isLoading.value = true
+        _errorMessage.value = null
+
+        val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(signInOption)
+            .build()
+
+        scope.launch {
+            try {
+                val result = credentialManager.getCredential(activity, request)
+                val credential = result.credential
+                val isGoogleToken = credential is CustomCredential && (
+                    credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL ||
+                    credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_SIWG_CREDENTIAL ||
+                    credential.type.contains("google", ignoreCase = true)
+                )
+
+                if (isGoogleToken && credential is CustomCredential) {
+                    val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
+                    val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
+                    val authResult = firebaseAuth.signInWithCredential(authCredential).await()
+                    val user = authResult.user
+
+                    if (user != null) {
+                        prefs.edit()
+                            .putBoolean(KEY_EXPLICITLY_SIGNED_OUT, false)
+                            .putBoolean(KEY_IS_GUEST, false)
+                            .putString(KEY_ACTIVE_USER_ID, user.uid)
+                            .apply()
+                        migrateGuestDataToUser(user.uid)
+                        syncUserToFirestore(user.uid, user.displayName, user.email, user.photoUrl?.toString())
+                        _userState.value = NudgyUser(
+                            uid = user.uid,
+                            displayName = resolveDisplayName(user.displayName, user.email),
+                            email = resolveEmail(user.email),
+                            photoUrl = user.photoUrl?.toString(),
+                            isGuest = false
+                        )
+                        withContext(Dispatchers.Main) {
+                            onSuccess()
+                        }
+                    } else {
+                        failSignIn("Sign-in failed: no user was returned. Please try again.", onError)
+                    }
+                } else {
+                    failSignIn("Sign-in failed: unexpected credential type (${credential.type}). Please try again.", onError)
+                }
+            } catch (e: GetCredentialCancellationException) {
+                // On emulators this also fires when no Google account / Play Services
+                // is available, so never fail silently here.
+                Log.w(TAG, "Google Sign-In flow cancelled or dismissed: ${e.message}")
+                failSignIn("Sign-in didn't complete. If you're testing on an emulator, add a Google account first (Settings \u2192 Accounts), or continue as Guest.", onError)
+            } catch (e: NoCredentialException) {
+                Log.w(TAG, "No credential available: ${e.message}")
+                failSignIn("No Google account found on this device. Add a Google account in Settings \u2192 Accounts, or continue as Guest.", onError)
+            } catch (e: Exception) {
+                Log.e(TAG, "Google Sign-In failed", e)
+                val isCancelled = e.message?.contains("cancel", ignoreCase = true) == true
+                if (isCancelled) {
+                    failSignIn("Sign-in didn't complete. If you're testing on an emulator, add a Google account first (Settings \u2192 Accounts), or continue as Guest.", onError)
+                } else {
+                    failSignIn("Sign-in failed: ${e.localizedMessage ?: "unknown error"}. On an emulator, add a Google account or continue as Guest.", onError)
+                }
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    private fun failSignIn(message: String, onError: (String) -> Unit) {
+        _errorMessage.value = message
+        onError(message)
+    }
+
+    /**
+     * Migrate local guest-created tasks, memories, calendar events, and chat messages
+     * to the authenticated user account so nothing is lost.
+     */
+    suspend fun migrateGuestDataToUser(newUserId: String) = withContext(Dispatchers.IO) {
+        if (newUserId.isBlank() || newUserId == GUEST_USER_ID) return@withContext
+        try {
+            val db = NudgyDatabase.getInstance(context)
+            db.taskDao().reassignUser(GUEST_USER_ID, newUserId)
+            db.memoryDao().reassignUser(GUEST_USER_ID, newUserId)
+            db.chatDao().reassignUser(GUEST_USER_ID, newUserId)
+            db.calendarDao().reassignUser(GUEST_USER_ID, newUserId)
+            db.dailyBriefDao().reassignUser(GUEST_USER_ID, newUserId)
+            Log.d(TAG, "Migrated all local guest data to user $newUserId")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error migrating guest data", e)
+        }
+    }
+
+    /**
+     * Store or update user metadata in Firestore
+     */
+    private suspend fun syncUserToFirestore(
+        uid: String,
+        displayName: String?,
+        email: String?,
+        photoUrl: String?
+    ) = withContext(Dispatchers.IO) {
+        if (uid == GUEST_USER_ID) return@withContext
+        try {
+            val dbId = context.getString(R.string.firestore_database_id)
+            val db = FirebaseFirestore.getInstance(dbId)
+            val userDoc = db.collection("users").document(uid)
+
+            val resolvedName = resolveDisplayName(displayName, email)
+            val resolvedEmail = resolveEmail(email)
+
+            val payload = hashMapOf<String, Any>(
+                "userId" to uid,
+                "displayName" to resolvedName,
+                "email" to resolvedEmail,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            if (photoUrl != null) {
+                payload["photoUrl"] = photoUrl
+            }
+            payload["preferredLanguage"] = "en"
+            payload["workingHoursStart"] = "09:00"
+            payload["workingHoursEnd"] = "18:00"
+            payload["streakCount"] = 1
+
+            userDoc.set(payload, SetOptions.merge()).await()
+        } catch (e: Exception) {
+            Log.w(TAG, "Firestore user profile sync warning: ${e.message}")
+        }
+    }
+
+    /**
+     * Sign Out
+     */
+    fun signOut(scope: CoroutineScope, onComplete: () -> Unit = {}) {
+        auth?.signOut()
+        prefs.edit()
+            .clear()
+            .putBoolean(KEY_EXPLICITLY_SIGNED_OUT, true)
+            .apply()
+        // C5: the BYOK key lives in "nudgy_settings", not in the auth
+        // prefs cleared above — remove it here so the next account on
+        // a shared device cannot silently spend this user's key.
+        clearByokKey()
+        _userState.value = null
+        scope.launch {
+            try {
+                credentialManager.clearCredentialState(ClearCredentialStateRequest())
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to clear credential state", e)
+            } finally {
+                withContext(Dispatchers.Main) {
+                    onComplete()
+                }
+            }
+        }
+    }
+
+    /**
+     * Delete Account (Google Play Policy Compliant)
+     * Performs a full coordinated purge across Firestore subcollections, local Room database,
+     * and voice/audio file caches.
+     */
+    // NOTE: no scope parameter on purpose — the deletion runs in
+    // deleteScope (see above), never in a composable's scope.
+    fun deleteAccount(onComplete: () -> Unit = {}, onError: (String) -> Unit = {}) {
+        val user = auth?.currentUser
+        if (user == null) {
+            val uid = getActiveUserId(context)
+            deleteScope.launch(Dispatchers.IO) {
+                purgeLocalData(uid)
+                withContext(Dispatchers.Main) {
+                    prefs.edit().clear().putBoolean(KEY_EXPLICITLY_SIGNED_OUT, true).apply()
+                    // C5: also drop the BYOK key (lives in
+                    // "nudgy_settings", not the auth prefs cleared above).
+                    clearByokKey()
+                    _userState.value = null
+                    onComplete()
+                }
+            }
+            return
+        }
+
+        _isLoading.value = true
+        deleteScope.launch {
+            try {
+                val uid = user.uid
+                val dbId = context.getString(R.string.firestore_database_id)
+                val db = FirebaseFirestore.getInstance(dbId)
+                val userDocRef = db.collection("users").document(uid)
+
+                withContext(Dispatchers.IO) {
+                    purgeFirestoreSubcollection(userDocRef.collection("tasks"))
+                    purgeFirestoreSubcollection(userDocRef.collection("memories"))
+                    purgeFirestoreSubcollection(userDocRef.collection("events"))
+                    // Also remove the user's membership entries from every
+                    // group (via the groupMemberships mirror) and the mirror
+                    // itself. No "chats" purge: nothing in the app uses
+                    // users/{uid}/chats and the rules have no match for it,
+                    // so listing it denied the whole deletion
+                    // (PERMISSION_DENIED on the delete-account test).
+                    // llmUsage is deliberately NOT purged: the rules forbid
+                    // deleting it (allow delete: if false) so the daily cap
+                    // cannot be reset by deleting the counter; the docs
+                    // become unreachable once the account is gone.
+                    purgeGroupMemberships(db, uid)
+                    // B1: the user-doc delete must fail loudly too. If it
+                    // throws, deleteAccount aborts before user.delete()
+                    // (and before the local purge below), leaving the
+                    // account intact so the user can retry when back online.
+                    userDocRef.delete().await()
+                    purgeLocalData(uid)
+                }
+
+                // The auth user is deleted LAST because the Firestore purge
+                // above needs the live session (per-user rules). But delete()
+                // refuses on stale sessions — previously that stranded the
+                // user: data already gone, account alive, no way forward.
+                // Now: re-authenticate with Google and retry once. If the
+                // user cancels, fail honestly — the account still exists
+                // (its data already removed) and deletion can be retried
+                // after a fresh sign-in.
+                try {
+                    user.delete().await()
+                } catch (e: FirebaseAuthRecentLoginRequiredException) {
+                    if (!reauthenticateWithGoogle(user)) {
+                        throw Exception("Google requires a fresh sign-in to delete your account. Your data has been removed; please sign in again and retry account deletion to finish.")
+                    }
+                    user.delete().await()
+                }
+                credentialManager.clearCredentialState(ClearCredentialStateRequest())
+                prefs.edit().clear().putBoolean(KEY_EXPLICITLY_SIGNED_OUT, true).apply()
+                // C5: also drop the BYOK key (lives in "nudgy_settings",
+                // not the auth prefs cleared above).
+                clearByokKey()
+                _userState.value = null
+                withContext(Dispatchers.Main) {
+                    onComplete()
+                }
+            } catch (e: CancellationException) {
+                // Never surface a cancellation as a deletion failure, and
+                // never swallow it: a cancelled delete must propagate so
+                // structured concurrency stays sound. isLoading is reset
+                // by the finally block below.
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Account deletion failed", e)
+                val msg = e.localizedMessage ?: "Failed to delete account"
+                _errorMessage.value = msg
+                withContext(Dispatchers.Main) {
+                    onError(msg)
+                }
+            } finally {
+                // The sign-in flow already has this; the delete flow did
+                // not, which left the button stuck on "Deleting…" after
+                // the old UI scope died mid-delete. A finally runs on
+                // every path, including cancellation.
+                _isLoading.value = false
+            }
+        }
+    }
+
+    /**
+     * Fresh Google re-authentication for sensitive operations. Returns true
+     * when the user re-authenticated successfully.
+     */
+    private suspend fun reauthenticateWithGoogle(user: FirebaseUser): Boolean {
+        val clientId = getWebClientId()
+        if (clientId.isEmpty()) return false
+        val googleIdOption = GetGoogleIdOption.Builder()
+            .setFilterByAuthorizedAccounts(true)
+            .setServerClientId(clientId)
+            .setAutoSelectEnabled(true)
+            .build()
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(googleIdOption)
+            .build()
+        return try {
+            val result = credentialManager.getCredential(context, request)
+            val credential = result.credential
+            if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                val idToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
+                user.reauthenticate(GoogleAuthProvider.getCredential(idToken, null)).await()
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Re-authentication failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * C5: remove the BYOK Gemini key from "nudgy_settings". Sign-out and
+     * account deletion clear only "nudgy_auth_prefs", so without this
+     * the key would survive and the next account on a shared device
+     * would silently spend the previous user's key and quota.
+     */
+    private fun clearByokKey() {
+        context.getSharedPreferences(SETTINGS_PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_CUSTOM_GEMINI_API_KEY)
+            .apply()
+    }
+
+    /** Cancel every scheduled reminder alarm belonging to a user. */
+    private suspend fun cancelAllRemindersForUser(userId: String) {
+        try {
+            val db = NudgyDatabase.getInstance(context)
+            val reminderManager = com.nextgentool.nudgy.reminders.ReminderManager(context)
+            db.taskDao().getAllTasksOnce(userId).forEach { task ->
+                reminderManager.cancelReminder(task.id)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Reminder cancel error: ${e.message}")
+        }
+    }
+
+    private suspend fun purgeFirestoreSubcollection(collection: CollectionReference) {
+        // B1: failures must NOT be swallowed. A failed purge aborts the
+        // whole deletion (see deleteAccount) so the account stays intact
+        // and the user can retry. Swallowing here used to orphan the
+        // user's Firestore data forever once user.delete() ran, because
+        // a re-signed-in user gets a new uid and can never satisfy
+        // isOwner(oldUid) again.
+        try {
+            val snapshot = collection.get().await()
+            for (doc in snapshot.documents) {
+                doc.reference.delete().await()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Subcollection purge error (${collection.path}): ${e.message}")
+            throw e
+        }
+    }
+
+    // Delete-account purge: remove the user's member doc from every group
+    // they belong to, then the groupMemberships mirror docs themselves.
+    // The mirror is read first (owner read is allowed); each member-doc
+    // delete is a self-delete (allowed by the members rule). Deleting a
+    // missing doc is a no-op success, so a stale mirror entry cannot fail
+    // the purge. Any real failure rethrows (B1) and aborts the deletion.
+    private suspend fun purgeGroupMemberships(db: FirebaseFirestore, uid: String) {
+        val mirror = db.collection("users").document(uid).collection("groupMemberships")
+        val snapshot = mirror.get().await()
+        for (doc in snapshot.documents) {
+            val gid = doc.id
+            db.collection("groups").document(gid).collection("members").document(uid).delete().await()
+            doc.reference.delete().await()
+        }
+    }
+
+    private suspend fun purgeLocalData(userId: String) = withContext(Dispatchers.IO) {
+        // Alarms first: once the task rows are gone their PendingIntents
+        // can no longer be matched and cancelled.
+        cancelAllRemindersForUser(userId)
+        try {
+            val db = NudgyDatabase.getInstance(context)
+            db.taskDao().clearTasksForUser(userId)
+            db.calendarDao().clearEventsForUser(userId)
+            db.memoryDao().clearMemoriesForUser(userId)
+            db.chatDao().clearMessages(userId)
+            db.dailyBriefDao().clearBriefsForUser(userId)
+            // C6: the groups tables have no userId column and every read
+            // is unfiltered — without this, the next account on a shared
+            // device would see the deleted user's groups (names, join
+            // codes) and cached member names in the Groups tab.
+            db.groupDao().clearAllGroups()
+            db.groupMemberDao().clearAllMembers()
+        } catch (e: Exception) {
+            Log.w(TAG, "Local DB purge error: ${e.message}")
+        }
+        try {
+            context.cacheDir.listFiles()?.forEach { file ->
+                if (file.name.endsWith(".pcm") || file.name.endsWith(".wav") || file.name.contains("audio") || file.name.contains("voice")) {
+                    file.delete()
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Audio cache purge error: ${e.message}")
+        }
+    }
+
+    fun clearError() {
+        _errorMessage.value = null
+    }
+
+    companion object {
+        private const val TAG = "NudgyAuth"
+        const val PREFS_NAME = "nudgy_auth_prefs"
+        const val KEY_IS_GUEST = "is_guest"
+        const val KEY_ACTIVE_USER_ID = "active_user_id"
+        const val KEY_EXPLICITLY_SIGNED_OUT = "nudgy_explicitly_signed_out"
+        const val GUEST_USER_ID = "guest_user_local"
+        // C5: prefs file + key where the BYOK Gemini key lives
+        // (written by YourNudgySheet, read by GeminiClient).
+        private const val SETTINGS_PREFS_NAME = "nudgy_settings"
+        private const val KEY_CUSTOM_GEMINI_API_KEY = "custom_gemini_api_key"
+
+        fun resolveDisplayName(displayName: String?, email: String?): String {
+            return displayName?.takeIf { it.isNotBlank() }
+                ?: email?.substringBefore("@")?.takeIf { it.isNotBlank() }
+                ?: "User"
+        }
+
+        fun resolveEmail(email: String?): String {
+            return email ?: ""
+        }
+
+        fun getActiveUserId(context: Context): String {
+            val firebaseAuth = try { Firebase.auth } catch (e: Exception) { null }
+            firebaseAuth?.currentUser?.uid?.let { return it }
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return prefs.getString(KEY_ACTIVE_USER_ID, "") ?: ""
+        }
+    }
+}

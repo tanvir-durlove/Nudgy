@@ -1,0 +1,1492 @@
+package com.nextgentool.nudgy
+
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.os.Bundle
+import android.os.SystemClock
+import android.provider.Settings
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import android.util.Log
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import android.widget.Toast
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import com.nextgentool.nudgy.ai.ChatGuardrails
+import com.nextgentool.nudgy.ai.ClientIntentPreFilter
+import com.nextgentool.nudgy.ai.GeminiClient
+import com.nextgentool.nudgy.ai.LlmUsageCounter
+import com.nextgentool.nudgy.ai.PreFilterResult
+import com.nextgentool.nudgy.ai.VoiceAssistantManager
+import com.nextgentool.nudgy.ads.ChatTurnCap
+import com.nextgentool.nudgy.ads.ChatTurnConsumeResult
+import com.nextgentool.nudgy.ads.NudgyAds
+import com.nextgentool.nudgy.ads.NudgyBannerAd
+import com.nextgentool.nudgy.analytics.NudgyAnalytics
+import com.nextgentool.nudgy.analytics.NudgyRemoteConfig
+import com.nextgentool.nudgy.analytics.RemoteConfigValues
+import com.nextgentool.nudgy.auth.AuthManager
+import com.nextgentool.nudgy.auth.NudgyUser
+import com.nextgentool.nudgy.auth.SignInScreen
+import com.nextgentool.nudgy.data.model.Priority
+import com.nextgentool.nudgy.data.model.TaskCategory
+import com.nextgentool.nudgy.data.repository.CalendarRepository
+import com.nextgentool.nudgy.data.repository.ChatRepository
+import com.nextgentool.nudgy.data.repository.DailyTaskStats
+import com.nextgentool.nudgy.data.repository.GroupRepository
+import com.nextgentool.nudgy.data.repository.GroupResult
+import com.nextgentool.nudgy.work.GroupPollWorker
+import com.nextgentool.nudgy.data.repository.MemoryRepository
+import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.reminders.ReminderManager
+import com.nextgentool.nudgy.ui.components.NudgySplashScreen
+import com.nextgentool.nudgy.ui.components.NudgyTopBar
+import com.nextgentool.nudgy.ui.dialogs.NudgyFloatingBubbleDialog
+import com.nextgentool.nudgy.ui.navigation.NudgyBottomBar
+import com.nextgentool.nudgy.ui.navigation.NudgyNavDestination
+import com.nextgentool.nudgy.ui.screens.CalendarScreen
+import com.nextgentool.nudgy.ui.screens.ChatMessage
+import com.nextgentool.nudgy.ui.screens.ChatScreen
+import com.nextgentool.nudgy.ui.screens.GroupsScreen
+import com.nextgentool.nudgy.ui.screens.HomeScreen
+import com.nextgentool.nudgy.ui.screens.TasksScreen
+import com.nextgentool.nudgy.data.local.entity.TaskEntity
+import com.nextgentool.nudgy.ui.sheets.CreateTaskSheet
+import com.nextgentool.nudgy.ui.sheets.EditTaskSheet
+import com.nextgentool.nudgy.ui.sheets.GroupTaskDetailSheet
+import com.nextgentool.nudgy.ui.sheets.NotificationsSheet
+import com.nextgentool.nudgy.ui.sheets.YourNudgySheet
+import com.nextgentool.nudgy.ui.theme.NudgyCanvas
+import com.nextgentool.nudgy.ui.theme.NudgyCard
+import com.nextgentool.nudgy.ui.theme.NudgyCardBorder
+import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
+import com.nextgentool.nudgy.ui.theme.NudgyMuted
+import com.nextgentool.nudgy.ui.theme.NudgyPrimary
+import com.nextgentool.nudgy.ui.theme.NudgyTheme
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import java.util.UUID
+
+// SharedPreferences key for a group-join code stashed while signed out
+// (App Links); consumed right after sign-in, then cleared.
+private const val KEY_PENDING_GROUP_CODE = "pending_group_code"
+
+// Splash screen: longest it may stay up while the Remote Config fetch
+// (started in Application.onCreate) is still in flight, and the shortest
+// it is shown at all — without a minimum the splash is invisible when the
+// fetch completes from cache before the first frame. The splash hides as
+// soon as the fetch completes AND the minimum has passed, OR the timeout
+// elapses, whichever comes first — the launch is never held hostage to
+// the network.
+private const val SPLASH_MIN_SHOW_MS = 1200L
+private const val SPLASH_MAX_WAIT_MS = 1500L
+
+// Ads: tabs that show the bottom banner. Chat never shows one (the banner
+// must not sit over the chat input), and neither do sheets/dialogs, which
+// render above the scaffold content.
+private val BANNER_DESTINATIONS = setOf(
+    NudgyNavDestination.HOME,
+    NudgyNavDestination.TASKS,
+    NudgyNavDestination.CALENDAR,
+    NudgyNavDestination.GROUPS
+)
+
+// C15: interstitial throttle (locked plan: max 1/session, 3–4 min gap,
+// never first session). Minimum gap is the low end of the locked 3–4 min
+// range; keys live in the "nudgy_ads" prefs alongside the completions
+// counter. The per-session flag itself is in-memory (remember), so a new
+// process starts clean; only the first-session marker is persisted.
+private const val INTERSTITIAL_MIN_GAP_MS = 3 * 60 * 1000L
+
+// Chat thinking indicator: local replies are instant, so without a floor
+// the thinking bubble would flash for ~0ms and the user would never see
+// it. Every reply path below waits out this minimum (Gemini replies are
+// already slower, so the wait is a no-op for them).
+private const val MIN_THINKING_DISPLAY_MS = 900L
+private const val KEY_LAST_INTERSTITIAL_SHOWN_AT = "last_interstitial_shown_at"
+private const val KEY_ADS_SESSION_SEEN = "nudgy_ads_session_seen"
+
+class MainActivity : ComponentActivity() {
+    private lateinit var authManager: AuthManager
+    private lateinit var taskRepository: TaskRepository
+    private lateinit var calendarRepository: CalendarRepository
+    private lateinit var groupRepository: GroupRepository
+    private lateinit var memoryRepository: MemoryRepository
+    private lateinit var chatRepository: ChatRepository
+    private lateinit var preFilter: ClientIntentPreFilter
+    private lateinit var geminiClient: GeminiClient
+    private lateinit var voiceAssistantManager: VoiceAssistantManager
+    private lateinit var reminderManager: ReminderManager
+    private lateinit var analytics: NudgyAnalytics
+    private lateinit var remoteConfig: NudgyRemoteConfig
+    private val deepLinkJoinCodeFlow = MutableStateFlow<String?>(null)
+    // Set when the system splash is dismissed (see the exit listener in
+    // onCreate): the animated splash starts only after this, so its
+    // animation is never hidden behind the system splash overlay.
+    private val systemSplashGoneFlow = MutableStateFlow(false)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        // Splash screen: install BEFORE super.onCreate (required). It stays
+        // up for at least SPLASH_MIN_SHOW_MS (measured from install, so it
+        // is actually visible even when the fetch completes from cache
+        // before the first frame) and at most SPLASH_MAX_WAIT_MS while the
+        // Remote Config fetch is in flight; ads preload with test-ID
+        // defaults in the meantime and swap to the fetched ID when it
+        // arrives (see NudgyAds / the guarded LaunchedEffect below).
+        val splashScreen = installSplashScreen()
+        // The custom animated splash starts only once the system splash
+        // is gone: dismiss it immediately here (same cream background,
+        // so the handoff is seamless) and signal the content below.
+        splashScreen.setOnExitAnimationListener { viewProvider ->
+            viewProvider.remove()
+            systemSplashGoneFlow.value = true
+        }
+        val splashStartMs = SystemClock.elapsedRealtime()
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+
+        authManager = AuthManager(this)
+        taskRepository = TaskRepository(this)
+        calendarRepository = CalendarRepository(this)
+        groupRepository = GroupRepository(this)
+        memoryRepository = MemoryRepository(this)
+        chatRepository = ChatRepository(this)
+        reminderManager = ReminderManager(this)
+        analytics = NudgyAnalytics(this)
+        // Remote Config lives in the Application (fetch started in
+        // Application.onCreate); use that single shared instance.
+        remoteConfig = (application as NudgyApplication).remoteConfig
+        splashScreen.setKeepOnScreenCondition {
+            val elapsed = SystemClock.elapsedRealtime() - splashStartMs
+            elapsed < SPLASH_MIN_SHOW_MS ||
+                (!remoteConfig.fetchCompleted.value && elapsed < SPLASH_MAX_WAIT_MS)
+        }
+
+        // Ads: consent (UMP) + Mobile Ads SDK. Ads themselves stay OFF
+        // until Remote Config ads_enabled is flipped on.
+        NudgyAds.initialize(this)
+
+        preFilter = ClientIntentPreFilter(taskRepository, calendarRepository, memoryRepository, applicationContext.assets)
+        geminiClient = GeminiClient(applicationContext)
+        voiceAssistantManager = VoiceAssistantManager(this)
+
+        authManager.attemptSilentSignIn(lifecycleScope)
+
+        // Group-notification tap: open the Groups tab. The tap intent uses
+        // CLEAR_TASK, so this onCreate read handles it; App Links intents
+        // are additionally routed via onNewIntent (see parseGroupJoinCode).
+        val initialDestination = if (intent.getBooleanExtra(GroupPollWorker.EXTRA_OPEN_GROUPS, false)) {
+            NudgyNavDestination.GROUPS
+        } else {
+            NudgyNavDestination.HOME
+        }
+
+        // App Links group-join: the launch intent may already carry a
+        // /nudgy/join code (cold start, or a fresh instance on top).
+        parseGroupJoinCode(intent)?.let { deepLinkJoinCodeFlow.value = it }
+
+        setContent {
+            val themePrefs = remember { getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE) }
+            var themeMode by remember { mutableStateOf(themePrefs.getString("theme_mode", "system") ?: "system") }
+            val systemSplashGone by systemSplashGoneFlow.collectAsStateWithLifecycle()
+            var showSplash by remember { mutableStateOf(true) }
+            NudgyTheme(
+                darkTheme = when (themeMode) {
+                    "light" -> false
+                    "dark" -> true
+                    else -> isSystemInDarkTheme()
+                }
+            ) {
+                if (!systemSplashGone) {
+                    // System splash overlay still up; cream behind it so
+                    // no dark flash is possible when it dismisses.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xFFF4EFE4))
+                    )
+                } else if (showSplash) {
+                    NudgySplashScreen(onFinished = { showSplash = false })
+                } else {
+                    NudgyMainFlow(
+                        authManager = authManager,
+                        taskRepository = taskRepository,
+                        calendarRepository = calendarRepository,
+                        groupRepository = groupRepository,
+                        memoryRepository = memoryRepository,
+                        chatRepository = chatRepository,
+                        reminderManager = reminderManager,
+                        preFilter = preFilter,
+                        geminiClient = geminiClient,
+                        voiceAssistantManager = voiceAssistantManager,
+                        analytics = analytics,
+                        remoteConfig = remoteConfig,
+                        initialDestination = initialDestination,
+                        deepLinkJoinCodeFlow = deepLinkJoinCodeFlow,
+                        onDeepLinkCodeConsumed = { deepLinkJoinCodeFlow.value = null },
+                        themeMode = themeMode,
+                        onThemeModeChange = { mode ->
+                            themeMode = mode
+                            themePrefs.edit().putString("theme_mode", mode).apply()
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        parseGroupJoinCode(intent)?.let { deepLinkJoinCodeFlow.value = it }
+    }
+
+    /**
+     * App Links group-join parser. Returns the code only for an exact
+     * https://tanvir-durlove.github.io/nudgy/join?code=... VIEW intent;
+     * anything else is ignored (never a crash, never a silent join).
+     */
+    private fun parseGroupJoinCode(intent: Intent?): String? {
+        return try {
+            if (intent?.action != Intent.ACTION_VIEW) return null
+            val uri = intent.data ?: return null
+            if (uri.scheme != "https") return null
+            if (uri.host != "tanvir-durlove.github.io") return null
+            if (uri.path != "/nudgy/join") return null
+            uri.getQueryParameter("code")?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        voiceAssistantManager.destroy()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Minimization: drives the poll worker's 30-day inactive pause.
+        // Every foregrounding counts as an app open; a fresh timestamp
+        // resumes polling on the next tick.
+        GroupPollWorker.recordAppOpen(this)
+    }
+}
+
+@Composable
+fun NudgyMainFlow(
+    authManager: AuthManager,
+    taskRepository: TaskRepository,
+    calendarRepository: CalendarRepository,
+    groupRepository: GroupRepository,
+    memoryRepository: MemoryRepository,
+    chatRepository: ChatRepository,
+    reminderManager: ReminderManager,
+    preFilter: ClientIntentPreFilter,
+    geminiClient: GeminiClient,
+    voiceAssistantManager: VoiceAssistantManager,
+    analytics: NudgyAnalytics,
+    remoteConfig: NudgyRemoteConfig,
+    initialDestination: NudgyNavDestination = NudgyNavDestination.HOME,
+    deepLinkJoinCodeFlow: StateFlow<String?>,
+    onDeepLinkCodeConsumed: () -> Unit,
+    themeMode: String = "system",
+    onThemeModeChange: (String) -> Unit = {}
+) {
+    val user by authManager.userState.collectAsStateWithLifecycle()
+    val deepLinkCode by deepLinkJoinCodeFlow.collectAsStateWithLifecycle()
+    // Stashed deep-link code, delivered to the scaffold once per user.
+    var stashedJoinCode by remember { mutableStateOf<String?>(null) }
+    val isLoading by authManager.isLoading.collectAsStateWithLifecycle()
+    val errorMessage by authManager.errorMessage.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { /* Permission callback */ }
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val hasNotificationPermission = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!hasNotificationPermission) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
+    if (user == null) {
+        // Signed out (or not yet signed in): stop group polling. This
+        // is the ONLY cancel path — never cancel in onDispose, or
+        // polling would die whenever the activity is destroyed.
+        LaunchedEffect(Unit) {
+            GroupPollWorker.cancel(context)
+        }
+        // App Links while signed out: stash the code; the signed-in branch
+        // below completes the join right after sign-in, then clears it.
+        LaunchedEffect(deepLinkCode) {
+            if (deepLinkCode != null) {
+                context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(KEY_PENDING_GROUP_CODE, deepLinkCode)
+                    .apply()
+                onDeepLinkCodeConsumed()
+            }
+        }
+        SignInScreen(
+            authManager = authManager,
+            scope = scope,
+            isLoading = isLoading,
+            errorMessage = errorMessage,
+            onSignInSuccess = {}
+        )
+    } else {
+        val currentUser = user!!
+
+        LaunchedEffect(currentUser.uid) {
+            chatRepository.checkAndSeedWelcomeMessage(currentUser.uid, currentUser.displayName)
+            if (!currentUser.isGuest) {
+                taskRepository.startCloudSync(currentUser.uid)
+                memoryRepository.startCloudSync(currentUser.uid)
+                calendarRepository.startCloudSync(currentUser.uid)
+                // Restore first: a fresh install has no local groups yet,
+                // so sync alone would attach nothing.
+                groupRepository.restoreGroupsFromMirror(currentUser.uid)
+                groupRepository.startGroupSync(currentUser.uid)
+                // KEEP policy: re-scheduling never duplicates the work.
+                GroupPollWorker.schedule(context)
+                // App Links stashed while signed out: complete the join now
+                // (prefilled sheet, never silent), then clear the stash.
+                val stashed = context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE)
+                    .getString(KEY_PENDING_GROUP_CODE, null)
+                if (!stashed.isNullOrBlank()) {
+                    context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE)
+                        .edit()
+                        .remove(KEY_PENDING_GROUP_CODE)
+                        .apply()
+                    stashedJoinCode = stashed
+                }
+            }
+        }
+
+        DisposableEffect(currentUser.uid) {
+            onDispose {
+                if (!currentUser.isGuest) {
+                    taskRepository.stopCloudSync()
+                    calendarRepository.stopCloudSync()
+                    memoryRepository.stopCloudSync()
+                    groupRepository.stopGroupSync()
+                }
+            }
+        }
+
+        NudgyAppScaffold(
+            user = currentUser,
+            authManager = authManager,
+            taskRepository = taskRepository,
+            calendarRepository = calendarRepository,
+            groupRepository = groupRepository,
+            memoryRepository = memoryRepository,
+            chatRepository = chatRepository,
+            reminderManager = reminderManager,
+            preFilter = preFilter,
+            geminiClient = geminiClient,
+            voiceAssistantManager = voiceAssistantManager,
+            analytics = analytics,
+            remoteConfig = remoteConfig,
+            initialDestination = initialDestination,
+            pendingJoinCode = stashedJoinCode ?: deepLinkCode,
+            onPendingJoinCodeConsumed = {
+                stashedJoinCode = null
+                onDeepLinkCodeConsumed()
+            },
+            themeMode = themeMode,
+            onThemeModeChange = onThemeModeChange
+        )
+    }
+}
+
+@Composable
+fun NudgyAppScaffold(
+    user: NudgyUser,
+    authManager: AuthManager,
+    taskRepository: TaskRepository,
+    calendarRepository: CalendarRepository,
+    groupRepository: GroupRepository,
+    memoryRepository: MemoryRepository,
+    chatRepository: ChatRepository,
+    reminderManager: ReminderManager,
+    preFilter: ClientIntentPreFilter,
+    geminiClient: GeminiClient,
+    voiceAssistantManager: VoiceAssistantManager,
+    analytics: NudgyAnalytics,
+    remoteConfig: NudgyRemoteConfig,
+    initialDestination: NudgyNavDestination = NudgyNavDestination.HOME,
+    pendingJoinCode: String? = null,
+    onPendingJoinCodeConsumed: () -> Unit = {},
+    themeMode: String = "system",
+    onThemeModeChange: (String) -> Unit = {}
+) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var currentDestination by remember { mutableStateOf(initialDestination) }
+    // App Links join: one-shot prefill for the Groups Join sheet. Guests get
+    // the Groups tab's sign-in prompt instead (code stashed for after sign-in).
+    var groupJoinPrefill by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(pendingJoinCode) {
+        if (pendingJoinCode != null) {
+            currentDestination = NudgyNavDestination.GROUPS
+            if (user.isGuest) {
+                context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(KEY_PENDING_GROUP_CODE, pendingJoinCode)
+                    .apply()
+            } else {
+                groupJoinPrefill = pendingJoinCode
+            }
+            onPendingJoinCodeConsumed()
+        }
+    }
+    var showProfileSheet by remember { mutableStateOf(false) }
+    var showNotificationsSheet by remember { mutableStateOf(false) }
+    var showCreateTaskSheet by remember { mutableStateOf(false) }
+    var taskToEdit by remember { mutableStateOf<TaskEntity?>(null) }
+    var selectedCalendarDayMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+    var showFloatingBubbleDialog by remember { mutableStateOf(false) }
+    var isThinking by remember { mutableStateOf(false) }
+    // Chat thinking indicator: phase text for the thinking bubble
+    // (ChatScreen). Follows what handleUserChat is actually doing and the
+    // prompt's language, like the replies do: ভাবছি… while parsing or
+    // generating, শিডিউল করছি… while creating a schedule, টাস্ক তৈরি
+    // করছি… while creating a task.
+    var thinkingText by remember { mutableStateOf("ভাবছি…") }
+    var isCalendarConnected by remember { mutableStateOf(calendarRepository.hasCalendarPermissions()) }
+
+    // C10: notification permission — when POST_NOTIFICATIONS is denied
+    // the OS silently drops every reminder notification, so the denial
+    // must be visible wherever reminders are configured/shown (the
+    // Home/Tasks banner below, plus the CreateTaskSheet toggle row).
+    // Re-checked on resume: the user may grant it in system Settings
+    // and come back.
+    var notificationsBlocked by remember { mutableStateOf(false) }
+    var notificationBannerDismissed by remember { mutableStateOf(false) }
+    fun refreshNotificationPermissionState() {
+        notificationsBlocked = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+    }
+    LaunchedEffect(Unit) { refreshNotificationPermissionState() }
+    fun openNotificationSettings() {
+        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        }
+        try {
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Could not open notification settings: ${e.message}")
+        }
+    }
+
+    // System Back: dismiss the topmost open surface first, then fall back
+    // to the HOME tab. Only on HOME with nothing open does Back exit the
+    // app (previously Back quit from any tab or sheet).
+    BackHandler(
+        enabled = showFloatingBubbleDialog || taskToEdit != null || showCreateTaskSheet ||
+            showNotificationsSheet || showProfileSheet ||
+            currentDestination != NudgyNavDestination.HOME
+    ) {
+        when {
+            showFloatingBubbleDialog -> showFloatingBubbleDialog = false
+            taskToEdit != null -> taskToEdit = null
+            showCreateTaskSheet -> showCreateTaskSheet = false
+            showNotificationsSheet -> showNotificationsSheet = false
+            showProfileSheet -> showProfileSheet = false
+            else -> currentDestination = NudgyNavDestination.HOME
+        }
+    }
+
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val readGranted = permissions[Manifest.permission.READ_CALENDAR] == true
+        val writeGranted = permissions[Manifest.permission.WRITE_CALENDAR] == true
+        isCalendarConnected = readGranted && writeGranted
+        if (isCalendarConnected) {
+            scope.launch {
+                calendarRepository.syncGoogleCalendar(user.uid, taskRepository)
+            }
+        }
+    }
+
+    LaunchedEffect(user.uid) {
+        if (calendarRepository.hasCalendarPermissions()) {
+            isCalendarConnected = true
+            calendarRepository.syncGoogleCalendar(user.uid, taskRepository)
+        }
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, user.uid) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                taskRepository.syncDirtyTasksToCloud(user.uid, scope)
+                // C10: the user may have granted notifications in Settings.
+                refreshNotificationPermissionState()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    val todayTasks by taskRepository.observeTodayTasks(user.uid).collectAsStateWithLifecycle(emptyList())
+    val upcomingTasks by taskRepository.observeUpcomingTasks(user.uid).collectAsStateWithLifecycle(emptyList())
+    val completedTasks by taskRepository.observeCompletedTasks(user.uid).collectAsStateWithLifecycle(emptyList())
+    val allTasks by taskRepository.observeAllTasks(user.uid).collectAsStateWithLifecycle(emptyList())
+    val dailyStats by taskRepository.observeTodayStats(user.uid).collectAsStateWithLifecycle(DailyTaskStats())
+
+    // Ads: show one interstitial per N completed tasks (N and the on/off
+    // switch come from Remote Config; ads_enabled defaults to OFF, so
+    // nothing shows until it is deliberately enabled in the console).
+    val remoteValues by remoteConfig.configState.collectAsStateWithLifecycle()
+    // Ads: the interstitial unit ID comes from Remote Config. When the
+    // fetched ID changes, reload the preloaded ad with the new ID — once
+    // per ID, never on every recomposition. Starts at the test fallback,
+    // so the initial (default) value is a no-op; the preload stays owned
+    // by NudgyAds.initialize until a real ID arrives.
+    var appliedInterstitialUnitId by remember { mutableStateOf(NudgyAds.TEST_INTERSTITIAL_UNIT_ID) }
+    LaunchedEffect(remoteValues.adInterstitialUnitId) {
+        val fetchedId = remoteValues.adInterstitialUnitId
+        if (appliedInterstitialUnitId != fetchedId) {
+            appliedInterstitialUnitId = fetchedId
+            NudgyAds.loadInterstitial(context, fetchedId)
+        }
+    }
+    // Ads: rewarded ad for Chat — preloaded with the Remote Config unit
+    // ID, same once-per-ID pattern as the interstitial. The reward (+1
+    // chat turn) is granted only by the onUserEarnedReward callback in
+    // showRewarded, never on load or on show.
+    var appliedRewardedUnitId by remember { mutableStateOf(NudgyAds.TEST_REWARDED_UNIT_ID) }
+    LaunchedEffect(remoteValues.adRewardedUnitId) {
+        val fetchedId = remoteValues.adRewardedUnitId
+        if (appliedRewardedUnitId != fetchedId) {
+            appliedRewardedUnitId = fetchedId
+            NudgyAds.loadRewarded(context, fetchedId)
+        }
+    }
+    // Ads: free daily chat-turn cap (RC: chat_free_turns_per_day, default
+    // 5) + rewarded bonus turns (RC: ad_rewarded_max_turns_per_day,
+    // default 3). The cap gates ONLY Gemini calls (see handleUserChat) —
+    // local intent handling stays free and unblocked.
+    var chatCapState by remember {
+        mutableStateOf(
+            ChatTurnCap.snapshot(
+                context,
+                remoteValues.chatFreeTurnsPerDay,
+                remoteValues.adRewardedMaxTurnsPerDay
+            )
+        )
+    }
+    fun refreshChatCapState() {
+        chatCapState = ChatTurnCap.snapshot(
+            context,
+            remoteValues.chatFreeTurnsPerDay,
+            remoteValues.adRewardedMaxTurnsPerDay
+        )
+    }
+    // C3: cap-exhausted message built from the live RC allowance, never
+    // hardcoded. When no more rewarded turn can be earned today, say the
+    // day's answers are done instead of promising an ad that cannot be
+    // watched (the rewarded button is disabled then).
+    fun capExhaustedMessage(): String {
+        val free = remoteValues.chatFreeTurnsPerDay
+        return if (chatCapState.canEarnMoreRewarded) {
+            "That's all $free free answers for today. Watch one short ad and I'll answer 1 more question."
+        } else {
+            "That's all $free free answers for today, and today's bonus answers are used up too. Fresh free answers tomorrow."
+        }
+    }
+    LaunchedEffect(remoteValues.chatFreeTurnsPerDay, remoteValues.adRewardedMaxTurnsPerDay) {
+        refreshChatCapState()
+    }
+    val rewardedReady by NudgyAds.rewardedReady.collectAsStateWithLifecycle()
+    val rewardedLoadError by NudgyAds.rewardedLoadError.collectAsStateWithLifecycle()
+    // Ads: rewarded entry in Chat. The +1 turn is banked ONLY when the ad
+    // reports the reward (completed viewing); a closed or skipped ad
+    // grants nothing. The granted turn does not resend the pending
+    // prompt — the user sends their message again.
+    fun watchRewardedAdForChatTurn() {
+        val activity = context as? Activity ?: return
+        val shown = NudgyAds.showRewarded(activity) {
+            val granted = ChatTurnCap.grantRewardedTurn(
+                context,
+                remoteValues.chatFreeTurnsPerDay,
+                remoteValues.adRewardedMaxTurnsPerDay
+            )
+            refreshChatCapState()
+            if (!granted) {
+                Toast.makeText(
+                    context,
+                    "Today's rewarded turns are used up.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+        if (!shown) {
+            Toast.makeText(
+                context,
+                "The ad isn't ready yet — please try again in a moment.",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    // Ads: retry a failed rewarded load. The Chat button stays tappable
+    // while a load error is present, so a failed load never strands it.
+    fun retryRewardedAdLoad() {
+        NudgyAds.loadRewarded(context, remoteValues.adRewardedUnitId)
+    }
+    val adsPrefs = remember { context.getSharedPreferences("nudgy_ads", android.content.Context.MODE_PRIVATE) }
+    var lastCompletedCount by remember { mutableStateOf<Int?>(null) }
+    // C15: interstitial throttle (locked plan: max 1/session, 3–4 min gap,
+    // never first session). The per-session flag is in-memory, so a new
+    // process starts clean. isFirstSession is captured once, before the
+    // marker below is written — otherwise the first launch would mark
+    // itself as already seen.
+    var interstitialShownThisSession by remember { mutableStateOf(false) }
+    var isFirstSession by remember { mutableStateOf(!adsPrefs.getBoolean(KEY_ADS_SESSION_SEEN, false)) }
+    LaunchedEffect(Unit) {
+        adsPrefs.edit().putBoolean(KEY_ADS_SESSION_SEEN, true).apply()
+    }
+    LaunchedEffect(dailyStats.completed) {
+        val previous = lastCompletedCount
+        lastCompletedCount = dailyStats.completed
+        if (previous == null || dailyStats.completed <= previous) return@LaunchedEffect
+        if (!remoteValues.adsEnabled) return@LaunchedEffect
+        val sinceLastAd = adsPrefs.getInt("completions_since_ad", 0) + (dailyStats.completed - previous)
+        val gapElapsed = System.currentTimeMillis() -
+            adsPrefs.getLong(KEY_LAST_INTERSTITIAL_SHOWN_AT, 0L) >= INTERSTITIAL_MIN_GAP_MS
+        if (sinceLastAd >= remoteValues.adFrequencyTasks &&
+            gapElapsed && !interstitialShownThisSession && !isFirstSession
+        ) {
+            val shown = (context as? Activity)?.let { NudgyAds.showInterstitial(it) } == true
+            if (shown) {
+                // C15: the counter resets ONLY when an ad actually shows.
+                adsPrefs.edit()
+                    .putInt("completions_since_ad", 0)
+                    .putLong(KEY_LAST_INTERSTITIAL_SHOWN_AT, System.currentTimeMillis())
+                    .apply()
+                interstitialShownThisSession = true
+            } else {
+                adsPrefs.edit().putInt("completions_since_ad", sinceLastAd).apply()
+            }
+        } else {
+            adsPrefs.edit().putInt("completions_since_ad", sinceLastAd).apply()
+        }
+    }
+    val todayEvents by calendarRepository.observeEventsForDay(user.uid, System.currentTimeMillis()).collectAsStateWithLifecycle(emptyList())
+    val allEvents by calendarRepository.observeAllEvents(user.uid).collectAsStateWithLifecycle(emptyList())
+
+    // Group v1: joined groups + a groupId -> name map for origin badges.
+    val groups by groupRepository.observeGroups().collectAsStateWithLifecycle(emptyList())
+    val groupNames = groups.associate { it.groupId to it.name }
+
+    // Group writes go through Firestore first (GroupRepository); a failure
+    // (offline, not the creator, bad rules) must surface, not crash.
+    fun launchGroupWrite(block: suspend () -> Unit) {
+        scope.launch {
+            try {
+                block()
+            } catch (e: Exception) {
+                Toast.makeText(
+                    context,
+                    "Couldn't save that. Check your connection and try again.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+    val memories by memoryRepository.observeMemories(user.uid).collectAsStateWithLifecycle(emptyList())
+
+    val isListening by voiceAssistantManager.isListening.collectAsStateWithLifecycle()
+    val isSpeaking by voiceAssistantManager.isSpeaking.collectAsStateWithLifecycle()
+    val remoteConfigValues by remoteConfig.configState.collectAsStateWithLifecycle(RemoteConfigValues())
+
+    val chatMessages by chatRepository.observeMessages(user.uid).collectAsStateWithLifecycle(emptyList())
+
+    // Chat thinking indicator: same Bengali detection as
+    // ClientIntentPreFilter.isBengali — the phase text follows the
+    // prompt's language, like the replies do.
+    fun isBengaliPrompt(text: String): Boolean =
+        text.any { it in 'অ'..'হ' || it in 'া'..'ৌ' || it == 'ং' || it == 'ঃ' || it == 'ঁ' }
+
+    // Chat thinking indicator: wait out the minimum display time so the
+    // bubble is actually seen. No-op when the work already took longer
+    // (Gemini generation). Must run BEFORE the reply is posted — a delay
+    // after posting would leave the bubble up next to the answer.
+    suspend fun ensureMinThinkingTime(startedAtMillis: Long) {
+        val elapsed = SystemClock.uptimeMillis() - startedAtMillis
+        if (elapsed < MIN_THINKING_DISPLAY_MS) {
+            delay(MIN_THINKING_DISPLAY_MS - elapsed)
+        }
+    }
+
+    /**
+     * Chat entry point for typed text, suggestion taps, and mic input.
+     * [fromVoice] is true only when the prompt came from the mic: the
+     * reply is then spoken back, as before. Typed replies (PR #35) are
+     * never read aloud — they play a short notification sound instead.
+     */
+    fun handleUserChat(prompt: String, fromVoice: Boolean = false) {
+        // C1: re-entrancy guard — ignore a new prompt while one is in
+        // flight. ChatScreen disables send/pills/chips while isThinking
+        // too; this is the backstop for Home quick actions and any other
+        // caller, so two runs can never create duplicate tasks or
+        // double-spend turns.
+        if (isThinking) return
+        val userMsg = ChatMessage(UUID.randomUUID().toString(), true, prompt)
+        val thinkingStartedAtMillis = SystemClock.uptimeMillis()
+        thinkingText = if (isBengaliPrompt(prompt)) "ভাবছি…" else "Thinking…"
+        isThinking = true
+
+        scope.launch {
+            try {
+                // Chat guardrails (PR #35): FIRST, before the preFilter,
+                // before any cap is consumed, before any task or schedule
+                // is created — a refused message creates nothing anywhere
+                // and costs no Gemini turn. The user's own message is not
+                // stored either, so refused content never reaches the cloud.
+                when (val guard = ChatGuardrails.check(prompt)) {
+                    is ChatGuardrails.GuardResult.Refused -> {
+                        ensureMinThinkingTime(thinkingStartedAtMillis)
+                        chatRepository.addMessage(
+                            user.uid,
+                            ChatMessage(
+                                id = UUID.randomUUID().toString(),
+                                senderIsUser = false,
+                                text = guard.replyText
+                            )
+                        )
+                        if (fromVoice) voiceAssistantManager.speak(guard.replyText)
+                        else voiceAssistantManager.playReplySound()
+                        return@launch
+                    }
+                    is ChatGuardrails.GuardResult.Allowed -> Unit
+                }
+
+                chatRepository.addMessage(user.uid, userMsg)
+
+                val preFilterResult = preFilter.tryHandle(
+                    userId = user.uid,
+                    userPrompt = prompt,
+                    todayTasks = todayTasks,
+                    events = todayEvents
+                )
+
+                when (preFilterResult) {
+                    is PreFilterResult.Handled -> {
+                        preFilterResult.createdTask?.let { created ->
+                            analytics.logTaskCreated(created.title, created.priority.name, created.category.name, created.reminderSet)
+                        }
+                        // Thinking indicator: phase follows what was just
+                        // created — schedule, task, or (query /
+                        // clarification / anything else) still thinking.
+                        // Set before the minimum-display wait so the user
+                        // sees the creation phase, not the parsing one.
+                        val bn = isBengaliPrompt(prompt)
+                        thinkingText = when {
+                            preFilterResult.createdEvent != null -> if (bn) "শিডিউল করছি…" else "Scheduling…"
+                            preFilterResult.createdTask != null -> if (bn) "টাস্ক তৈরি করছি…" else "Creating task…"
+                            else -> if (bn) "ভাবছি…" else "Thinking…"
+                        }
+                        ensureMinThinkingTime(thinkingStartedAtMillis)
+                        val handledMsg = ChatMessage(
+                            id = UUID.randomUUID().toString(),
+                            senderIsUser = false,
+                            text = preFilterResult.responseText,
+                            actionType = preFilterResult.actionType,
+                            associatedTask = preFilterResult.createdTask,
+                            associatedEvent = preFilterResult.createdEvent,
+                            focusStartMillis = preFilterResult.focusStartMillis,
+                            focusEndMillis = preFilterResult.focusEndMillis,
+                            focusDurationMinutes = preFilterResult.focusDurationMinutes,
+                            quickSuggestions = preFilterResult.quickSuggestions
+                        )
+                        chatRepository.addMessage(user.uid, handledMsg)
+                        // Chat sound (PR #35): typed replies play a short
+                        // notification ting; only mic input is spoken back.
+                        if (fromVoice) voiceAssistantManager.speak(preFilterResult.responseText)
+                        else voiceAssistantManager.playReplySound()
+                        // Ads: 1 interstitial per N local-chat replies (N
+                        // from Remote Config, key
+                        // ad_interstitial_local_chat_frequency, default 5).
+                        // Only preFilter-handled (local) replies count —
+                        // Gemini replies never reach this branch. Same
+                        // rules as the task interstitial: ads_enabled kill
+                        // switch, shared C15 throttle (max 1/session,
+                        // 3-min gap, never first session — the session flag
+                        // and last-shown timestamp are shared, so a chat
+                        // ad and a task ad can never double-show), and the
+                        // counter resets ONLY when an ad actually shows.
+                        // Dormant while ads are OFF: nothing is counted.
+                        if (remoteValues.adsEnabled) {
+                            val sinceLastAd = adsPrefs.getInt("local_chats_since_ad", 0) + 1
+                            val gapElapsed = System.currentTimeMillis() -
+                                adsPrefs.getLong(KEY_LAST_INTERSTITIAL_SHOWN_AT, 0L) >= INTERSTITIAL_MIN_GAP_MS
+                            if (sinceLastAd >= remoteValues.adFrequencyLocalChats &&
+                                gapElapsed && !interstitialShownThisSession && !isFirstSession
+                            ) {
+                                val shown = (context as? Activity)?.let { NudgyAds.showInterstitial(it) } == true
+                                if (shown) {
+                                    adsPrefs.edit()
+                                        .putInt("local_chats_since_ad", 0)
+                                        .putLong(KEY_LAST_INTERSTITIAL_SHOWN_AT, System.currentTimeMillis())
+                                        .apply()
+                                    interstitialShownThisSession = true
+                                } else {
+                                    adsPrefs.edit().putInt("local_chats_since_ad", sinceLastAd).apply()
+                                }
+                            } else {
+                                adsPrefs.edit().putInt("local_chats_since_ad", sinceLastAd).apply()
+                            }
+                        }
+                    }
+                    is PreFilterResult.Unhandled -> {
+                        // Ads: the free daily cap gates Gemini turns only.
+                        // A local (preFilter-handled) reply above never
+                        // consumes a turn and is never blocked by the cap.
+                        val consumeResult = ChatTurnCap.tryConsumeTurn(
+                            context,
+                            remoteValues.chatFreeTurnsPerDay,
+                            remoteValues.adRewardedMaxTurnsPerDay
+                        )
+                        if (consumeResult == ChatTurnConsumeResult.CAPPED) {
+                            refreshChatCapState()
+                            chatRepository.addMessage(
+                                user.uid,
+                                ChatMessage(
+                                    id = UUID.randomUUID().toString(),
+                                    senderIsUser = false,
+                                    // C3: built from the live RC allowance.
+                                    text = capExhaustedMessage()
+                                )
+                            )
+                        } else {
+                            refreshChatCapState()
+                            // Central key: server-side daily counter for
+                            // signed-in users only. Guests skip it (owner
+                            // decision: guest cap stays local-only, no
+                            // anonymous auth). The transaction fails closed:
+                            // offline or any error means NO Gemini call.
+                            val serverResult = if (user.isGuest) {
+                                LlmUsageCounter.CounterResult.ALLOWED
+                            } else {
+                                LlmUsageCounter.tryConsumeServerTurn(
+                                    uid = user.uid,
+                                    bucket = if (consumeResult == ChatTurnConsumeResult.BONUS)
+                                        LlmUsageCounter.Bucket.BONUS
+                                    else
+                                        LlmUsageCounter.Bucket.FREE,
+                                    freeCapPerDay = remoteValues.chatFreeTurnsPerDay,
+                                    bonusCapPerDay = remoteValues.adRewardedMaxTurnsPerDay
+                                )
+                            }
+                            when (serverResult) {
+                                LlmUsageCounter.CounterResult.ALLOWED -> {
+                                    val history = chatMessages.map { Pair(it.text, it.senderIsUser) }
+                                    val responseText = geminiClient.generateNudgyResponse(
+                                        userMessage = prompt,
+                                        recentHistory = history,
+                                        userMemories = memories.map { it.content },
+                                        modelVersion = remoteConfigValues.geminiModelVersion
+                                    )
+                                    ensureMinThinkingTime(thinkingStartedAtMillis)
+                                    val geminiMsg = ChatMessage(
+                                        id = UUID.randomUUID().toString(),
+                                        senderIsUser = false,
+                                        text = responseText,
+                                        quickSuggestions = listOf("Plan my day", "Show today's tasks", "Find free time")
+                                    )
+                                    chatRepository.addMessage(user.uid, geminiMsg)
+                                    // Chat sound (PR #35): typed replies play a short
+                                    // notification ting; only mic input is spoken back.
+                                    if (fromVoice) voiceAssistantManager.speak(responseText)
+                                    else voiceAssistantManager.playReplySound()
+                                }
+                                LlmUsageCounter.CounterResult.CAPPED -> {
+                                    // Server counter is full while the local
+                                    // cap still had room (e.g. turns spent
+                                    // on another device). The local turn
+                                    // stays spent; refuse the call.
+                                    refreshChatCapState()
+                                    chatRepository.addMessage(
+                                        user.uid,
+                                        ChatMessage(
+                                            id = UUID.randomUUID().toString(),
+                                            senderIsUser = false,
+                                            // C3: no ad promise when no
+                                            // rewarded turn can be earned.
+                                            text = capExhaustedMessage()
+                                        )
+                                    )
+                                }
+                                LlmUsageCounter.CounterResult.ERROR -> {
+                                    // C2: the local turn was spent but no
+                                    // Gemini call happened (offline /
+                                    // transient error) — refund it, so a
+                                    // flaky connection cannot burn the
+                                    // day's allowance. No refund on CAPPED
+                                    // above: that is a deliberate trade-off.
+                                    ChatTurnCap.refundTurn(
+                                        context,
+                                        remoteValues.chatFreeTurnsPerDay,
+                                        remoteValues.adRewardedMaxTurnsPerDay
+                                    )
+                                    refreshChatCapState()
+                                    chatRepository.addMessage(
+                                        user.uid,
+                                        ChatMessage(
+                                            id = UUID.randomUUID().toString(),
+                                            senderIsUser = false,
+                                            text = "Sorry, I couldn't connect just now — please check your connection and try again."
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Error processing chat prompt", e)
+                val errorMsg = ChatMessage(
+                    id = UUID.randomUUID().toString(),
+                    senderIsUser = false,
+                    text = "Sorry, I had trouble processing that. Please try again."
+                )
+                chatRepository.addMessage(user.uid, errorMsg)
+            } finally {
+                isThinking = false
+            }
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = NudgyCanvas,
+            topBar = {
+                NudgyTopBar(
+                    userInitials = user.initials,
+                    isGuest = user.isGuest,
+                    hasNotifications = todayTasks.any { !it.isCompleted },
+                    onNotificationsClick = { showNotificationsSheet = true },
+                    onProfileClick = { showProfileSheet = true },
+                    onGuestBadgeClick = { showProfileSheet = true }
+                )
+            },
+            bottomBar = {
+                NudgyBottomBar(
+                    currentDestination = currentDestination,
+                    onNavigate = { destination ->
+                        currentDestination = destination
+                        analytics.logScreenViewed(destination.name.lowercase())
+                    }
+                )
+            }
+        ) { innerPadding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
+                // C10: non-intrusive warning, Home/Tasks only, and only
+                // when a reminder-bearing task exists — a denied
+                // notification permission must not masquerade as working
+                // reminders. The button opens the app's system
+                // notification settings; the state is re-checked on resume.
+                if (notificationsBlocked && !notificationBannerDismissed &&
+                    currentDestination in setOf(
+                        NudgyNavDestination.HOME,
+                        NudgyNavDestination.TASKS
+                    ) &&
+                    allTasks.any { it.reminderSet && !it.isCompleted }
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = NudgyCard,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(
+                                start = 14.dp,
+                                end = 4.dp,
+                                top = 8.dp,
+                                bottom = 8.dp
+                            ),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Notifications are off",
+                                    color = NudgyCharcoal,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Reminders won't appear until you turn notifications on.",
+                                    color = NudgyMuted,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            TextButton(onClick = { openNotificationSettings() }) {
+                                Text(text = "Settings", color = NudgyPrimary, fontSize = 13.sp)
+                            }
+                            TextButton(onClick = { notificationBannerDismissed = true }) {
+                                Text(text = "Dismiss", color = NudgyMuted, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    when (currentDestination) {
+                    NudgyNavDestination.HOME -> {
+                        HomeScreen(
+                            user = user,
+                            todayTasks = todayTasks,
+                            events = todayEvents,
+                            dailyStats = dailyStats,
+                            remoteConfigValues = remoteConfigValues,
+                            onToggleTask = { task ->
+                                scope.launch {
+                                    taskRepository.toggleTaskCompletion(task)
+                                    analytics.logTaskCompleted(task.id, dailyStats.completed + 1)
+                                }
+                            },
+                            onAddTaskClick = { showCreateTaskSheet = true },
+                            onTaskClick = { task -> taskToEdit = task },
+                            onViewAllTasksClick = { currentDestination = NudgyNavDestination.TASKS },
+                            groupNames = groupNames,
+                            onPlanMyDayClick = {
+                                analytics.logMorningBriefViewed()
+                                currentDestination = NudgyNavDestination.CHAT
+                                handleUserChat("Plan my day")
+                            },
+                            onCalendarClick = {
+                                analytics.logCalendarConnected()
+                                currentDestination = NudgyNavDestination.CALENDAR
+                            },
+                            onFreeTimeSuggestionClick = {
+                                currentDestination = NudgyNavDestination.CHAT
+                                handleUserChat("Find free time")
+                            },
+                            onPromoCardClick = { headline ->
+                                analytics.logPromoCardClicked(headline)
+                                currentDestination = NudgyNavDestination.CHAT
+                                handleUserChat("How can I share Nudgy and invite friends?")
+                            }
+                        )
+                    }
+
+                    NudgyNavDestination.CHAT -> {
+                        ChatScreen(
+                            user = user,
+                            messages = chatMessages,
+                            isListening = isListening,
+                            isSpeaking = isSpeaking,
+                            isThinking = isThinking,
+                            thinkingText = thinkingText,
+                            onSendMessage = { prompt -> handleUserChat(prompt) },
+                            onStartVoice = {
+                                analytics.logVoiceUsed("voice_input")
+                                voiceAssistantManager.startListening(
+                                    languageCode = "en-US",
+                                    onResult = { voiceText -> handleUserChat(voiceText, fromVoice = true) },
+                                    // C4: mic errors were silent — the
+                                    // listener's message (already built in
+                                    // VoiceAssistantManager, e.g. "No speech
+                                    // detected" / network error) now reaches
+                                    // the user as a chat message.
+                                    onError = { errorMsg ->
+                                        scope.launch {
+                                            chatRepository.addMessage(
+                                                user.uid,
+                                                ChatMessage(
+                                                    id = UUID.randomUUID().toString(),
+                                                    senderIsUser = false,
+                                                    text = errorMsg
+                                                )
+                                            )
+                                        }
+                                    }
+                                )
+                            },
+                            onStopVoice = { voiceAssistantManager.stopListening() },
+                            onTaskClick = { task -> taskToEdit = task },
+                            onBlockFocusTime = { start, end, title, messageId ->
+                                scope.launch {
+                                    calendarRepository.blockFocusTime(user.uid, start, end, title)
+                                    chatRepository.markFocusActionCompleted(messageId)
+                                    analytics.logFocusTimeBlocked(45)
+                                }
+                            },
+                            chatCapState = chatCapState,
+                            rewardedAdReady = rewardedReady,
+                            onWatchRewardedAd = { watchRewardedAdForChatTurn() },
+                            rewardedLoadError = rewardedLoadError,
+                            onRetryRewardedAd = { retryRewardedAdLoad() }
+                        )
+                    }
+
+                    NudgyNavDestination.TASKS -> {
+                        TasksScreen(
+                            todayTasks = todayTasks,
+                            upcomingTasks = upcomingTasks,
+                            completedTasks = completedTasks,
+                            dailyStats = dailyStats,
+                            onToggleTask = { task ->
+                                scope.launch {
+                                    taskRepository.toggleTaskCompletion(task)
+                                    analytics.logTaskCompleted(task.id, dailyStats.completed + 1)
+                                }
+                            },
+                            onAddTaskClick = { showCreateTaskSheet = true },
+                            onTaskClick = { task -> taskToEdit = task },
+                            groupNames = groupNames
+                        )
+                    }
+
+                    NudgyNavDestination.GROUPS -> {
+                        GroupsScreen(
+                            user = user,
+                            groups = groups,
+                            allTasks = allTasks,
+                            allEvents = allEvents,
+                            onCreateGroup = { name ->
+                                groupRepository.createGroup(user.uid, user.displayName, name)
+                            },
+                            onJoinGroup = { code ->
+                                groupRepository.joinGroup(user.uid, user.displayName, code)
+                            },
+                            onCreateGroupTask = { groupId, title, description, due, priority, category, reminderSet ->
+                                launchGroupWrite {
+                                    groupRepository.createGroupTask(
+                                        groupId, user.uid, title, description, due,
+                                        priority, category, reminderSet
+                                    )
+                                }
+                            },
+                            onCreateGroupSchedule = { groupId, title, start, end, location, type ->
+                                launchGroupWrite {
+                                    groupRepository.createGroupSchedule(
+                                        groupId, user.uid, title, start, end, location, type
+                                    )
+                                }
+                            },
+                            onUpdateGroupTask = { groupId, task ->
+                                launchGroupWrite {
+                                    groupRepository.updateGroupTask(groupId, task)
+                                }
+                            },
+                            onDeleteGroupItem = { groupId, itemId, isTask ->
+                                launchGroupWrite {
+                                    groupRepository.deleteGroupItem(groupId, user.uid, itemId, isTask)
+                                }
+                            },
+                            onDeleteGroup = { groupId ->
+                                scope.launch {
+                                    when (val result = groupRepository.deleteGroup(user.uid, groupId)) {
+                                        is GroupResult.Err -> Toast.makeText(
+                                            context, result.message, Toast.LENGTH_LONG
+                                        ).show()
+                                        is GroupResult.Ok -> Unit
+                                    }
+                                }
+                            },
+                            onLeaveGroup = { groupId ->
+                                scope.launch {
+                                    when (val result = groupRepository.leaveGroup(user.uid, groupId)) {
+                                        is GroupResult.Err -> Toast.makeText(
+                                            context, result.message, Toast.LENGTH_LONG
+                                        ).show()
+                                        is GroupResult.Ok -> Unit
+                                    }
+                                }
+                            },
+                            onObserveMembers = { groupId ->
+                                groupRepository.observeGroupMembers(groupId)
+                            },
+                            onRefreshMembers = { groupId ->
+                                groupRepository.refreshGroupMembers(groupId)
+                            },
+                            onToggleTask = { task ->
+                                scope.launch {
+                                    taskRepository.toggleTaskCompletion(task)
+                                    analytics.logTaskCompleted(task.id, dailyStats.completed + 1)
+                                }
+                            },
+                            prefillJoinCode = groupJoinPrefill,
+                            onPrefillJoinCodeConsumed = { groupJoinPrefill = null },
+                            onSignInClick = { showProfileSheet = true }
+                        )
+                    }
+
+                    NudgyNavDestination.CALENDAR -> {
+                        CalendarScreen(
+                            events = allEvents,
+                            tasks = allTasks,
+                            isCalendarConnected = isCalendarConnected,
+                            onConnectGoogleCalendar = {
+                                calendarPermissionLauncher.launch(
+                                    arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
+                                )
+                            },
+                            onSyncNow = {
+                                scope.launch {
+                                    calendarRepository.syncGoogleCalendar(user.uid, taskRepository)
+                                }
+                            },
+                            onBlockFocusTime = { start, end, title ->
+                                scope.launch {
+                                    calendarRepository.blockFocusTime(user.uid, start, end, title)
+                                    analytics.logFocusTimeBlocked(45)
+                                }
+                            },
+                            onAddEvent = { title, start, end, loc, type ->
+                                scope.launch {
+                                    val conflict = calendarRepository.checkConflict(user.uid, start, end)
+                                    if (conflict.hasConflict) {
+                                        Toast.makeText(
+                                            context,
+                                            "Heads up: this overlaps with '${conflict.conflictingEvent?.title}'",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                    calendarRepository.addEvent(user.uid, title, start, end, loc, type)
+                                }
+                            },
+                            onDeleteEvent = { eventId ->
+                                scope.launch {
+                                    calendarRepository.deleteEvent(eventId, user.uid)
+                                }
+                            },
+                            onSelectDay = { dayMillis ->
+                                selectedCalendarDayMillis = dayMillis
+                            },
+                            groupNames = groupNames
+                        )
+                    }
+                }
+                }
+
+                // Ads: anchored adaptive banner, bottom of the tab content.
+                // One RC unit ID reused on all four tabs; never on Chat (no
+                // banner over the chat input), and never when ads are off
+                // or consent does not allow ads — no empty gap then. The
+                // slot reserves real layout space, so the banner never
+                // floats over content or the bottom navigation bar.
+                if (remoteValues.adsEnabled &&
+                    currentDestination in BANNER_DESTINATIONS &&
+                    NudgyAds.canRequestAds(context)
+                ) {
+                    NudgyBannerAd(unitId = remoteValues.adBannerUnitId)
+                }
+            }
+        }
+
+        if (showFloatingBubbleDialog) {
+            val pendingTask = todayTasks.firstOrNull { !it.isCompleted }
+            NudgyFloatingBubbleDialog(
+                reminderTitle = pendingTask?.title ?: "No pending tasks right now",
+                onDoneClick = {
+                    showFloatingBubbleDialog = false
+                    analytics.logNudgeInteracted("done")
+                    pendingTask?.let {
+                        scope.launch { taskRepository.toggleTaskCompletion(it) }
+                    }
+                },
+                onSnoozeClick = {
+                    showFloatingBubbleDialog = false
+                    analytics.logNudgeInteracted("snooze_30m")
+                    pendingTask?.let {
+                        // C8: persist the snooze in Room exactly like the
+                        // notification-action path — an alarm-only snooze
+                        // dies on reboot / edit / complete.
+                        scope.launch {
+                            taskRepository.snoozeTask(
+                                it.id,
+                                System.currentTimeMillis() + 30 * 60 * 1000L
+                            )
+                        }
+                    }
+                },
+                onDismiss = { showFloatingBubbleDialog = false }
+            )
+        }
+
+        if (showNotificationsSheet) {
+            val pendingAlertTasks = todayTasks.filter { !it.isCompleted }
+            NotificationsSheet(
+                pendingTasks = pendingAlertTasks,
+                onToggleTask = { task ->
+                    scope.launch {
+                        taskRepository.toggleTaskCompletion(task)
+                        analytics.logTaskCompleted(task.id, dailyStats.completed + 1)
+                    }
+                },
+                onSnoozeTask = { task ->
+                    // C8: persist the snooze in Room exactly like the
+                    // notification-action path (see floating bubble above).
+                    scope.launch {
+                        taskRepository.snoozeTask(
+                            task.id,
+                            System.currentTimeMillis() + 30 * 60 * 1000L
+                        )
+                    }
+                },
+                onDismiss = { showNotificationsSheet = false }
+            )
+        }
+
+        if (showProfileSheet) {
+            YourNudgySheet(
+                user = user,
+                authManager = authManager,
+                scope = scope,
+                memories = memories,
+                onAddMemory = { content ->
+                    scope.launch {
+                        memoryRepository.addMemory(user.uid, content)
+                    }
+                },
+                onDeleteMemory = { memoryId ->
+                    scope.launch {
+                        memoryRepository.deleteMemory(user.uid, memoryId)
+                    }
+                },
+                onDismiss = { showProfileSheet = false },
+                onNavigateCalendar = { currentDestination = NudgyNavDestination.CALENDAR },
+                themeMode = themeMode,
+                onThemeModeChange = onThemeModeChange
+            )
+        }
+
+        if (showCreateTaskSheet) {
+            CreateTaskSheet(
+                onDismiss = { showCreateTaskSheet = false },
+                onSaveTask = { title, description, dueEpochMillis, priority, category, reminderSet ->
+                    scope.launch {
+                        val task = taskRepository.createTask(
+                            userId = user.uid,
+                            title = title,
+                            description = description,
+                            dueEpochMillis = dueEpochMillis,
+                            priority = priority,
+                            category = category,
+                            reminderSet = reminderSet
+                        )
+                        // Tasks live in the Tasks list only — no calendar event is
+                        // created for a task (keeps Tasks and Calendar separate).
+                        analytics.logTaskCreated(title, priority.name, category.name, reminderSet)
+                    }
+                }
+            )
+        }
+
+        taskToEdit?.let { task ->
+            // Group v1 routing: a group row tapped from Home / Tasks / Chat
+            // opens the READ-ONLY detail — never EditTaskSheet. Only the
+            // creator edits/deletes, and only from the Groups tab detail view
+            // (GroupsScreen routes those through GroupRepository). This keeps
+            // exactly one edit path for shared items.
+            if (task.groupId != null) {
+                GroupTaskDetailSheet(
+                    task = task,
+                    groupName = groupNames[task.groupId] ?: "Group",
+                    onDismiss = { taskToEdit = null },
+                    onToggleComplete = { toggledTask ->
+                        scope.launch {
+                            taskRepository.toggleTaskCompletion(toggledTask)
+                        }
+                    }
+                )
+            } else {
+                EditTaskSheet(
+                    task = task,
+                    onDismiss = { taskToEdit = null },
+                    onUpdateTask = { updated ->
+                        scope.launch {
+                            taskRepository.updateTask(updated)
+                        }
+                    },
+                    onDeleteTask = { taskId ->
+                        scope.launch {
+                            taskRepository.deleteTask(user.uid, taskId)
+                        }
+                    },
+                    onToggleComplete = { toggledTask ->
+                        scope.launch {
+                            taskRepository.toggleTaskCompletion(toggledTask)
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
