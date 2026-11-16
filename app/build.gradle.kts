@@ -1,8 +1,8 @@
-
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.google.devtools.ksp)
+  alias(libs.plugins.hilt.android)
   alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
   alias(libs.plugins.firebase.crashlytics)
@@ -105,6 +105,8 @@ dependencies {
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
   implementation(libs.androidx.navigation.compose)
+  implementation(libs.hilt.android)
+  implementation(libs.androidx.hilt.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
   implementation(libs.androidx.work.workmanager.ktx)
@@ -145,5 +147,6 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
+  "ksp"(libs.hilt.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }
