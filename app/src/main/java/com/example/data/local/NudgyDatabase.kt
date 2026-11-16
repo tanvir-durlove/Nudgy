@@ -1,4 +1,3 @@
-package com.example.data.local
 
 import android.content.Context
 import androidx.room.Database
@@ -85,6 +84,16 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
     }
 }
 
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Sprint 0 (scratch rebuild v2): NO schema change yet.
+        // The version bump to 7 marks the rebuild baseline: every
+        // tester install moves 6 -> 7 with their data intact.
+        // Sprint 1 entity changes MUST go in a new MIGRATION_7_8 -
+        // never edit this migration after a v7 build ships.
+    }
+}
+
 @Database(
     entities = [
         TaskEntity::class,
@@ -95,7 +104,7 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
         GroupEntity::class,
         GroupMemberEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -119,7 +128,7 @@ abstract class NudgyDatabase : RoomDatabase() {
                     NudgyDatabase::class.java,
                     "nudgy_local_db"
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     // Public-launch policy (revisited from the pre-launch
                     // note): destructive fallback is RETIRED from v5.
                     // Every distributed install is v4 (1.0.2 was the first
