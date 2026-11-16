@@ -76,12 +76,12 @@ fun NudgyNavHost(
 ) {
     NavHost(
         navController = navController,
-        startDestination = NudgyRoute.startDestination.route,
+        startDestination = TODAY_GRAPH_ROUTE,
         modifier = modifier
     ) {
         navigation(
             startDestination = NudgyRoute.Today.route,
-            route = "today_graph"
+            route = TODAY_GRAPH_ROUTE
         ) {
             composable(NudgyRoute.Today.route) {
                 TodayScreen(onPlanClick = { navController.navigate(NudgyRoute.Plan.route) })

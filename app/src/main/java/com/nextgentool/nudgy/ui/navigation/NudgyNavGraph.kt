@@ -41,3 +41,6 @@ sealed class NudgyRoute(val route: String) {
 
 /** App Links deep link for group join (manifest already declares it). */
 const val GROUP_JOIN_DEEP_LINK = "https://tanvir-durlove.github.io/nudgy/join"
+
+/** Route of the nested Today graph (Today + Plan). The NavHost starts here. */
+const val TODAY_GRAPH_ROUTE = "today_graph"
