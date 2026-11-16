@@ -6,7 +6,9 @@
   Contrast: teal on cream 5.0:1, teal on white 5.5:1.
   Coral on cream is only 2.5:1 - NEVER use coral for text or for icons
   that carry meaning on their own. Coral is for the mark + small accents only.
-  App UI font comes from Figma - do NOT guess it here.
+  Font (locked 2026-11-15 night): Material default - Roboto / system sans-serif.
+  No Figma font needed. Compose Typography uses the default font family;
+  no custom font files in this rebuild.
 -->
 <resources>
     <color name="nudgy_teal">#0F766E</color>
