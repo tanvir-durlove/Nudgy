@@ -2,9 +2,9 @@ name: Build Nudgy Android APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, scratch/rebuild-v2, sprint0/** ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, scratch/rebuild-v2, sprint0/** ]
   workflow_dispatch:
     inputs:
       create_release:
