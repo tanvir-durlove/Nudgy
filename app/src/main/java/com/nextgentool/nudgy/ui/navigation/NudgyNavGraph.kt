@@ -30,9 +30,14 @@ sealed class NudgyRoute(val route: String) {
     data object Plan : NudgyRoute("today/plan")
 
     companion object {
-        val startDestination: NudgyRoute = Today
+        // get(), NOT an eager val: the data objects' class init re-enters
+        // this companion's constructor while their INSTANCE fields are still
+        // null, so an eager listOf(Today, ...) captures a null element and
+        // fromRoute() NPEs on the first frame (Crashlytics 2026-11-16,
+        // NudgyRoute.getRoute:22). A get() evaluates after init completes.
+        val startDestination: NudgyRoute get() = Today
 
-        val all: List<NudgyRoute> = listOf(Today, Calendar, Chat, Groups, Settings)
+        val all: List<NudgyRoute> get() = listOf(Today, Calendar, Chat, Groups, Settings)
 
         fun fromRoute(route: String?): NudgyRoute =
             all.firstOrNull { it.route == route } ?: Today
