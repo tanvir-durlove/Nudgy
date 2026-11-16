@@ -2,9 +2,9 @@ name: Build Nudgy Android APK
 
 on:
   push:
-    branches: [ main, master, scratch/rebuild-v2, sprint0/** ]
+    branches: [ main, master, scratch/rebuild-v2, sprint0/**, sprint1/** ]
   pull_request:
-    branches: [ main, master, scratch/rebuild-v2, sprint0/** ]
+    branches: [ main, master, scratch/rebuild-v2, sprint0/**, sprint1/** ]
   workflow_dispatch:
     inputs:
       create_release:
@@ -12,6 +12,10 @@ on:
         required: false
         type: boolean
         default: true
+
+        concurrency:
+          group: ${{ github.workflow }}-${{ github.ref }}
+          cancel-in-progress: true
 
 permissions:
   contents: write
