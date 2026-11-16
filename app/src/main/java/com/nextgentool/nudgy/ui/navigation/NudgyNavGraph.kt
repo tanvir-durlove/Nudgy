@@ -2,20 +2,22 @@ package com.nextgentool.nudgy.ui.navigation
 
 /**
  * Sprint 0 — navigation routes for the scratch rebuild (v2).
+ * Wired into MainActivity in Sprint 1-0 (NudgyApp() is the root).
  *
  * String routes held in a sealed class (one source of truth for every
  * navigation call). Full @Serializable type-safe routes would need the
  * kotlinx-serialization plugin, which this build does not have yet —
- * that upgrade, if wanted, is a Sprint 1 decision, not a Sprint 0 one.
+ * that upgrade, if wanted, is a later decision, not a Sprint 1 one.
  *
  * The 5 destinations are the locked design (2026-11-15): Today |
  * Calendar | centre Quick Chat | Groups | Settings. Board lives inside
  * Today (List / Board toggle) and Stats lives behind the progress ring
  * + Settings — neither is a destination.
  *
- * NOT wired into MainActivity yet: the old state-based navigation
- * (currentDestination + when branches) still runs the app. Sprint 1
- * swaps the root to NudgyApp() screen by screen.
+ * Plan is NOT a destination: it is the nested route "today/plan"
+ * inside the Today graph (Sprint 1 spec §5). It stays out of `all`, so
+ * fromRoute("today/plan") falls back to Today and the bottom nav keeps
+ * Today highlighted while Plan is open.
  */
 sealed class NudgyRoute(val route: String) {
     data object Today : NudgyRoute("today")
@@ -23,6 +25,9 @@ sealed class NudgyRoute(val route: String) {
     data object Chat : NudgyRoute("chat")
     data object Groups : NudgyRoute("groups")
     data object Settings : NudgyRoute("settings")
+
+    /** Nested route inside the Today graph — not a bottom destination. */
+    data object Plan : NudgyRoute("today/plan")
 
     companion object {
         val startDestination: NudgyRoute = Today

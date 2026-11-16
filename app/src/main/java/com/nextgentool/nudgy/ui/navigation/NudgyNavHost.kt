@@ -29,35 +29,43 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.navigation
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navDeepLink
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.ui.screens.CalendarShell
 import com.nextgentool.nudgy.ui.screens.ChatShell
 import com.nextgentool.nudgy.ui.screens.GroupsShell
+import com.nextgentool.nudgy.ui.screens.PlanScreen
 import com.nextgentool.nudgy.ui.screens.SettingsShell
-import com.nextgentool.nudgy.ui.screens.TodayShell
+import com.nextgentool.nudgy.ui.screens.TodayScreen
+import com.nextgentool.nudgy.ui.theme.NudgyTheme
 
 /**
  * Sprint 0 — NavHost + bottom navigation for the scratch rebuild (v2).
- *
- * NOT the app root yet: MainActivity still runs the old state-based
- * navigation. Sprint 1 swaps the root to NudgyApp() screen by screen.
- * This file compiles and is ready to be the root — nothing here touches
- * the old screens.
+ * Sprint 1-0 made this the app root: MainActivity only calls
+ * NudgyApp(). NudgyApp() also owns the theme (NudgyTheme, system
+ * dark/light) so MainActivity stays a one-line root.
  *
  * Bottom nav (locked): Today | Calendar | centre Quick Chat (+) |
  * Groups | Settings. The centre button IS the chat: first a compact
  * Quick Chat sheet, expanding to full-screen chat as the conversation
- * grows (Sprint 3). Here it navigates to the chat destination.
+ * grows (Sprint 3). Here it navigates to the chat destination, which
+ * keeps its shell until Sprint 3.
+ *
+ * Today is a nested graph ("today_graph"): TodayScreen + the Plan
+ * route ("today/plan", skeleton until S1-2). Back from Plan returns
+ * to Today.
  */
 @Composable
 fun NudgyApp() {
     val navController = rememberNavController()
-    Scaffold(
-        bottomBar = { NudgyBottomNav(navController) }
-    ) { innerPadding ->
-        NudgyNavHost(navController, Modifier.padding(innerPadding))
+    NudgyTheme {
+        Scaffold(
+            bottomBar = { NudgyBottomNav(navController) }
+        ) { innerPadding ->
+            NudgyNavHost(navController, Modifier.padding(innerPadding))
+        }
     }
 }
 
@@ -71,7 +79,15 @@ fun NudgyNavHost(
         startDestination = NudgyRoute.startDestination.route,
         modifier = modifier
     ) {
-        composable(NudgyRoute.Today.route) { TodayShell() }
+        navigation(
+            startDestination = NudgyRoute.Today.route,
+            route = "today_graph"
+        ) {
+            composable(NudgyRoute.Today.route) {
+                TodayScreen(onPlanClick = { navController.navigate(NudgyRoute.Plan.route) })
+            }
+            composable(NudgyRoute.Plan.route) { PlanScreen() }
+        }
         composable(NudgyRoute.Calendar.route) { CalendarShell() }
         composable(NudgyRoute.Chat.route) { ChatShell() }
         composable(

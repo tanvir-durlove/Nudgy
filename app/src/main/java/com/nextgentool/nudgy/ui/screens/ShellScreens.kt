@@ -81,12 +81,6 @@ fun NudgySkeletonRow() {
 }
 
 @Composable
-fun TodayShell() = ShellScaffold(
-    title = "Today",
-    note = "Sprint 1 fills this in: due tasks, meetings, carry-over — one timeline."
-)
-
-@Composable
 fun CalendarShell() = ShellScaffold(
     title = "Calendar",
     note = "Sprint 2 fills this in: Google / Outlook sync, time blocking, drag to slot."
@@ -95,7 +89,7 @@ fun CalendarShell() = ShellScaffold(
 @Composable
 fun ChatShell() = ShellScaffold(
     title = "Chat",
-    note = "Sprint 3 fills this in: Quick Chat sheet expanding to full chat. Confirmation card before anything is saved; ask instead of guessing."
+    note = "Sprint 3-এ আসছে: Quick Chat sheet expanding to full chat. Confirmation card before anything is saved; ask instead of guessing. Nothing is saved from this shell."
 )
 
 @Composable
