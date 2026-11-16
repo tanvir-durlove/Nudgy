@@ -1,8 +1,8 @@
-package com.example
 
 import android.app.Application
 import android.util.Log
 import com.example.analytics.NudgyRemoteConfig
+import dagger.hilt.android.HiltAndroidApp
 import com.google.firebase.Firebase
 import com.google.firebase.appcheck.appCheck
 import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
@@ -22,6 +22,7 @@ import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderF
  * mode) until the device test proves attestation passes — installing
  * the provider alone changes nothing server-side.
  */
+@HiltAndroidApp
 class NudgyApplication : Application() {
 
     lateinit var remoteConfig: NudgyRemoteConfig
