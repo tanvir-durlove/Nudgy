@@ -3,8 +3,9 @@ package com.nextgentool.nudgy.domain.model
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskStatus
-import com.squareup.moshi.JsonClass
-import com.squareup.moshi.Moshi
+import com.squareup.moshi.JsonReader
+import com.squareup.moshi.JsonWriter
+import okio.Buffer
 
 /**
  * Sprint 1-1 — a saved Tasks filter + search setup (Feature 2).
@@ -29,8 +30,21 @@ import com.squareup.moshi.Moshi
  * Text matching (title / description / tag name) is applied by the
  * ViewModel — it owns the tag-name map this class does not have — while
  * [matches] covers the structured dimensions.
+ *
+ * JSON is written and read by hand with Moshi's streaming API
+ * ([JsonWriter]/[JsonReader]) — deliberately NOT with a Moshi adapter.
+ * A reflective adapter (`Moshi.Builder().build().adapter(...)`) breaks
+ * under R8, and so does a `@JsonClass(generateAdapter = true)` adapter:
+ * Moshi finds the generated adapter by reflection (Class.forName), R8
+ * sees no static reference and strips it as dead code (the generated
+ * SavedViewFilterJsonAdapter was absent from the ci-345 mapping.txt),
+ * Moshi then falls back to the reflective ClassJsonAdapter, and its
+ * EnumJsonAdapter does Class.getField("LOW") on the obfuscated enum —
+ * which crashed the app at launch on ci-345 (SavedViewFilter.<clinit>).
+ * The streaming API uses no reflection, so R8 can never break it, and
+ * the stored format is byte-identical to what the Moshi adapter wrote
+ * (same keys, same order, explicit nulls, enum names).
  */
-@JsonClass(generateAdapter = true)
 data class SavedViewFilter(
     val projectId: String? = null,
     val tagIds: List<String> = emptyList(),
@@ -54,13 +68,53 @@ data class SavedViewFilter(
         projectId == null && tagIds.isEmpty() && priority == null &&
             status == null && !groupOnly && text.isBlank()
 
-    fun toJson(): String = ADAPTER.toJson(this)
+    /** Manual JSON — same format the Moshi adapter wrote (see class KDoc). */
+    fun toJson(): String {
+        val buffer = Buffer()
+        val writer = JsonWriter.of(buffer)
+        writer.beginObject()
+        writer.name("projectId")
+        if (projectId == null) writer.nullValue() else writer.value(projectId)
+        writer.name("tagIds")
+        writer.beginArray()
+        tagIds.forEach { writer.value(it) }
+        writer.endArray()
+        writer.name("priority")
+        if (priority == null) writer.nullValue() else writer.value(priority.name)
+        writer.name("status")
+        if (status == null) writer.nullValue() else writer.value(status.name)
+        writer.name("groupOnly")
+        writer.value(groupOnly)
+        writer.name("text")
+        writer.value(text)
+        writer.endObject()
+        writer.close()
+        return buffer.readUtf8()
+    }
 
     companion object {
-        private val ADAPTER = Moshi.Builder().build().adapter(SavedViewFilter::class.java)
-
         fun fromJson(json: String): SavedViewFilter = try {
-            ADAPTER.fromJson(json) ?: SavedViewFilter()
+            val reader = JsonReader.of(Buffer().writeUtf8(json))
+            reader.beginObject()
+            var projectId: String? = null
+            var tagIds: List<String> = emptyList()
+            var priority: Priority? = null
+            var status: TaskStatus? = null
+            var groupOnly: Boolean = false
+            var text: String = ""
+            while (reader.hasNext()) {
+                when (reader.nextName()) {
+                    "projectId" -> projectId = reader.nextNullableString()
+                    "tagIds" -> tagIds = reader.nextStringList()
+                    "priority" -> priority = reader.nextNullableEnum { Priority.valueOf(it) }
+                    "status" -> status = reader.nextNullableEnum { TaskStatus.valueOf(it) }
+                    "groupOnly" -> groupOnly = reader.nextNullableBoolean() ?: false
+                    "text" -> text = reader.nextNullableString() ?: ""
+                    else -> reader.skipValue()
+                }
+            }
+            reader.endObject()
+            SavedViewFilter(projectId, tagIds, priority, status, groupOnly, text)
         } catch (e: Exception) {
             SavedViewFilter()
         }
@@ -68,3 +122,43 @@ data class SavedViewFilter(
         fun empty(): SavedViewFilter = SavedViewFilter()
     }
 }
+
+/** Null JSON value -> null; anything else must be a string. */
+private fun JsonReader.nextNullableString(): String? =
+    if (peek() == JsonReader.Token.NULL) {
+        nextNull()
+        null
+    } else {
+        nextString()
+    }
+
+/** Null JSON value -> null; anything else must be a boolean. */
+private fun JsonReader.nextNullableBoolean(): Boolean? =
+    if (peek() == JsonReader.Token.NULL) {
+        nextNull()
+        null
+    } else {
+        nextBoolean()
+    }
+
+/** Null JSON value -> empty list; otherwise an array of strings. */
+private fun JsonReader.nextStringList(): List<String> =
+    if (peek() == JsonReader.Token.NULL) {
+        nextNull()
+        emptyList()
+    } else {
+        val list = mutableListOf<String>()
+        beginArray()
+        while (hasNext()) list += nextString()
+        endArray()
+        list
+    }
+
+/** Unknown enum name degrades to null for that field only. */
+private fun <E : Enum<E>> JsonReader.nextNullableEnum(valueOf: (String) -> E): E? =
+    if (peek() == JsonReader.Token.NULL) {
+        nextNull()
+        null
+    } else {
+        runCatching { valueOf(nextString()) }.getOrNull()
+    }
