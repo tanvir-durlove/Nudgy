@@ -124,6 +124,11 @@ class TaskRepository @Inject constructor(
         taskDao.getTaskById(taskId)
     }
 
+    /** One-shot read of every task (Plan uses it to find previous picks). */
+    suspend fun getAllTasksOnce(userId: String): List<TaskEntity> = withContext(Dispatchers.IO) {
+        taskDao.getAllTasksOnce(userId)
+    }
+
     // ------------------------------------------------------------- tasks CRUD
 
     suspend fun createTask(

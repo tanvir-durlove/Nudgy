@@ -90,7 +90,9 @@ fun NudgyNavHost(
                     onAllTasksClick = { navController.navigate(NudgyRoute.Tasks.route) }
                 )
             }
-            composable(NudgyRoute.Plan.route) { PlanScreen() }
+            composable(NudgyRoute.Plan.route) {
+                PlanScreen(onBackClick = { navController.popBackStack() })
+            }
         }
         // Sprint 1-1 — Tasks list. NOT a bottom destination: no tab is
         // highlighted while it is open (see NudgyRoute.all).

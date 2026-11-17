@@ -1,0 +1,230 @@
+package com.nextgentool.nudgy.ui.screens
+
+import android.content.Context
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
+import com.nextgentool.nudgy.data.local.NudgyDatabase
+import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.domain.todayDateString
+import com.nextgentool.nudgy.domain.usecase.CarryOverUseCase
+import com.nextgentool.nudgy.domain.usecase.PlanDayUseCase
+import com.nextgentool.nudgy.ui.viewmodel.PlanViewModel
+import com.nextgentool.nudgy.ui.viewmodel.startOfTodayMillis
+import java.util.Calendar
+import kotlinx.coroutines.runBlocking
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+/**
+ * Sprint 1-2 — Plan My Day (Feature 14, Q1 + Q2 + Q7 + Q8). Renders
+ * Plan with a MANUALLY-constructed PlanViewModel (real in-memory Room
+ * repository, no Hilt) and pins the acceptance criteria: the auto
+ * draft is carry-over first within the 8h estimate budget, "Start my
+ * day" stamps plannedDate + plannedStart (and moves carried-over tasks
+ * to today), and doing Plan a second time shows the previous picks.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [36])
+class PlanScreenTest {
+
+    @get:Rule
+    val composeRule = createComposeRule()
+
+    private lateinit var db: NudgyDatabase
+    private lateinit var repository: TaskRepository
+    private lateinit var viewModel: PlanViewModel
+
+    private fun at(dayOffset: Int, hour: Int, minute: Int = 0): Long =
+        Calendar.getInstance().apply {
+            add(Calendar.DAY_OF_MONTH, dayOffset)
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, minute)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+    private fun createTask(title: String, due: Long, estimatedMinutes: Int? = null) =
+        runBlocking {
+            repository.createTask(
+                userId = repository.currentUserId(),
+                title = title,
+                dueEpochMillis = due,
+                estimatedMinutes = estimatedMinutes
+            )
+        }
+
+    @Before
+    fun setUp() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        db = Room.inMemoryDatabaseBuilder(context, NudgyDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        repository = TaskRepository(context, db)
+        viewModel = PlanViewModel(
+            repository = repository,
+            planDayUseCase = PlanDayUseCase(),
+            carryOverUseCase = CarryOverUseCase()
+        )
+    }
+
+    @After
+    fun tearDown() {
+        db.close()
+    }
+
+    private fun setPlanContent(onBackClick: () -> Unit = {}) {
+        composeRule.setContent {
+            PlanScreen(onBackClick = onBackClick, viewModel = viewModel)
+        }
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Today's plan")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    private fun topOf(text: String): Float =
+        composeRule.onNodeWithText(text).fetchSemanticsNode().boundsInRoot.top
+
+    private fun seedPlanData() {
+        // Carry-over (120 min) + today 60 min + today 500 min (over the
+        // 8h budget once the first two are picked) + no-estimate task.
+        createTask("Old report", at(-1, 14), estimatedMinutes = 120)
+        createTask("Dentist", at(0, 15), estimatedMinutes = 60)
+        createTask("Big project", at(0, 10), estimatedMinutes = 500)
+        createTask("No-est task", startOfTodayMillis(), estimatedMinutes = null)
+    }
+
+    @Test
+    fun `draft puts carry-over first and respects the 8h budget`() {
+        seedPlanData()
+        setPlanContent()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Old report")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        // Carry-over first, then today-due in due order.
+        assertTrue(topOf("Old report") < topOf("Dentist"))
+        assertTrue(topOf("Dentist") < topOf("No-est task"))
+        // 120 + 60 = 180 min picked; the 500-min task no longer fits.
+        composeRule.onNodeWithText("3h 0m of 8h planned").assertIsDisplayed()
+        composeRule.onNodeWithText("Big project").performScrollTo().assertIsDisplayed()
+        // The over-budget task is present (in "Not planned"), not hidden.
+        composeRule.onNodeWithText("Not planned").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun `Start my day stamps the plan and navigates back`() {
+        seedPlanData()
+        var backCalled = false
+        setPlanContent(onBackClick = { backCalled = true })
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Old report")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("plan_start_button").performScrollTo().performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) { backCalled }
+        val tasks = runBlocking {
+            repository.getAllTasksOnce(repository.currentUserId())
+        }
+        val today = todayDateString()
+        val oldReport = tasks.first { it.title == "Old report" }
+        val dentist = tasks.first { it.title == "Dentist" }
+        val bigProject = tasks.first { it.title == "Big project" }
+        val noEst = tasks.first { it.title == "No-est task" }
+        // Picked tasks are planned for today.
+        assertEquals(today, oldReport.plannedDate)
+        assertEquals(today, dentist.plannedDate)
+        assertEquals(today, noEst.plannedDate)
+        // The carried-over task moved: due is today, origin recorded.
+        assertTrue(
+            oldReport.dueDateEpochMillis in startOfTodayMillis() until
+                startOfTodayMillis() + 24 * 60 * 60 * 1000L
+        )
+        assertEquals(
+            java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+                .format(at(-1, 14)),
+            oldReport.carriedOverFromDate
+        )
+        // The dentist keeps its due time as its planned start.
+        assertEquals(at(0, 15), dentist.plannedStartEpochMillis)
+        // The unpicked task is not planned.
+        assertNull(bigProject.plannedDate)
+        assertNull(bigProject.plannedStartEpochMillis)
+    }
+
+    @Test
+    fun `second Plan shows the previous picks`() {
+        seedPlanData()
+        setPlanContent()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Old report")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        // Pick the over-budget task by hand, then start the day. A fresh
+        // draft would never pick it (500 min does not fit the 8h budget
+        // after the first two), so the second Plan proves the previous
+        // picks are remembered — not re-derived from the budget.
+        composeRule.onNodeWithTag("plan_row_Big project").performScrollTo().performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("11h 20m of 8h planned")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("plan_start_button").performScrollTo().performClick()
+        // Wait for the apply to land: the Big project now has a plan.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            runBlocking {
+                repository.getAllTasksOnce(repository.currentUserId())
+                    .first { it.title == "Big project" }.plannedDate != null
+            }
+        }
+        // A fresh ViewModel on the same repository: the previous picks
+        // are seeded as picked again — the 500-min task stays picked
+        // even though the budget is blown.
+        val secondViewModel = PlanViewModel(
+            repository = repository,
+            planDayUseCase = PlanDayUseCase(),
+            carryOverUseCase = CarryOverUseCase()
+        )
+        composeRule.setContent {
+            PlanScreen(onBackClick = {}, viewModel = secondViewModel)
+        }
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("11h 20m of 8h planned")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("11h 20m of 8h planned").assertIsDisplayed()
+        composeRule.onNodeWithText("Big project").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun `move down reorders the plan`() {
+        seedPlanData()
+        setPlanContent()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Old report")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        assertTrue(topOf("Old report") < topOf("Dentist"))
+        composeRule.onNodeWithContentDescription("Move Old report down")
+            .performScrollTo().performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            topOf("Dentist") < topOf("Old report")
+        }
+        assertTrue(topOf("Dentist") < topOf("Old report"))
+    }
+}
