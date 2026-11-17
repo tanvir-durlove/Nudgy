@@ -126,7 +126,7 @@ data class SavedViewFilter(
 /** Null JSON value -> null; anything else must be a string. */
 private fun JsonReader.nextNullableString(): String? =
     if (peek() == JsonReader.Token.NULL) {
-        nextNull()
+        skipValue()
         null
     } else {
         nextString()
@@ -135,7 +135,7 @@ private fun JsonReader.nextNullableString(): String? =
 /** Null JSON value -> null; anything else must be a boolean. */
 private fun JsonReader.nextNullableBoolean(): Boolean? =
     if (peek() == JsonReader.Token.NULL) {
-        nextNull()
+        skipValue()
         null
     } else {
         nextBoolean()
@@ -144,7 +144,7 @@ private fun JsonReader.nextNullableBoolean(): Boolean? =
 /** Null JSON value -> empty list; otherwise an array of strings. */
 private fun JsonReader.nextStringList(): List<String> =
     if (peek() == JsonReader.Token.NULL) {
-        nextNull()
+        skipValue()
         emptyList()
     } else {
         val list = mutableListOf<String>()
@@ -157,7 +157,7 @@ private fun JsonReader.nextStringList(): List<String> =
 /** Unknown enum name degrades to null for that field only. */
 private fun <E : Enum<E>> JsonReader.nextNullableEnum(valueOf: (String) -> E): E? =
     if (peek() == JsonReader.Token.NULL) {
-        nextNull()
+        skipValue()
         null
     } else {
         runCatching { valueOf(nextString()) }.getOrNull()
