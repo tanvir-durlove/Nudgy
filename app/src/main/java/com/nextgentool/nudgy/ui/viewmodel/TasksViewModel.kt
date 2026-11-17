@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.Calendar
 import javax.inject.Inject
 
 /** One row in the Tasks list: the task plus everything its row shows. */
@@ -58,6 +59,34 @@ data class TasksUiState(
     /** Double-tap guard: a create is in flight. */
     val isCreating: Boolean = false
 )
+
+/**
+ * Start of today (00:00) in local time.
+ *
+ * UI-FIX 2026-11-16 (product decision, recorded): a task created from
+ * Today's quick-add is due TODAY — it gets this instant, so it shows in
+ * My Day / Timeline immediately instead of vanishing into "No date".
+ * The Tasks-screen quick-add keeps the no-date option (due = 0).
+ */
+fun startOfTodayMillis(): Long = Calendar.getInstance().apply {
+    set(Calendar.HOUR_OF_DAY, 0)
+    set(Calendar.MINUTE, 0)
+    set(Calendar.SECOND, 0)
+    set(Calendar.MILLISECOND, 0)
+}.timeInMillis
+
+/** Start of tomorrow (00:00) in local time. */
+fun startOfTomorrowMillis(): Long = Calendar.getInstance().apply {
+    add(Calendar.DAY_OF_MONTH, 1)
+    set(Calendar.HOUR_OF_DAY, 0)
+    set(Calendar.MINUTE, 0)
+    set(Calendar.SECOND, 0)
+    set(Calendar.MILLISECOND, 0)
+}.timeInMillis
+
+/** True when the due instant falls on today's local date. */
+fun isDueToday(dueEpochMillis: Long): Boolean =
+    dueEpochMillis in startOfTodayMillis() until startOfTomorrowMillis()
 
 /**
  * Sprint 1-1 — Tasks screen ViewModel (Features 1–2).
@@ -207,12 +236,26 @@ class TasksViewModel @Inject constructor(
 
     // ------------------------------------------------------------ quick add
 
+    /** Tasks-screen quick-add: no due date (lands in "No date"). */
     fun createTask(title: String) {
+        createTaskWithDue(title, TaskRepository.NO_DUE_DATE)
+    }
+
+    /**
+     * Today quick-add (UI-FIX 2026-11-16): due TODAY at 00:00 local, so
+     * the task appears in My Day / Timeline right away. The confirmation
+     * card's "Set time" refines it to a real time.
+     */
+    fun createTaskForToday(title: String) {
+        createTaskWithDue(title, startOfTodayMillis())
+    }
+
+    private fun createTaskWithDue(title: String, dueEpochMillis: Long) {
         if (isCreatingFlow.value) return // double-tap guard
         viewModelScope.launch {
             isCreatingFlow.value = true
             try {
-                val created = createTaskUseCase(title)
+                val created = createTaskUseCase(title, dueEpochMillis = dueEpochMillis)
                 lastCreatedTaskIdFlow.value = created?.id
             } finally {
                 isCreatingFlow.value = false

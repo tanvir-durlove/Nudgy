@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -44,15 +45,19 @@ import java.util.Locale
 /**
  * Sprint 1-1 — quick task capture (Feature 1).
  *
- * A big "Add task" field: title + Enter/✓ creates the task (no due date
- * → "No date", it lands in the list's No-date group, never in Today).
- * An empty title never saves — the button is disabled, and the UseCase
- * rejects blanks as a backstop. While a create is in flight the button
- * stays disabled (double-tap guard).
+ * A big "Add task" field: title + Enter/✓ creates AND SAVES the task
+ * immediately — the confirmation card says "Saved:" and has a Done
+ * button, so it never looks like an unsaved draft. An empty title
+ * never saves — the button is disabled, and the UseCase rejects blanks
+ * as a backstop. While a create is in flight the button stays disabled
+ * (double-tap guard).
  *
- * After creation, the row under the field offers due date/time and
- * priority for the just-created task — inline, no sheet (Feature 1).
- * The date defaults to 09:00 local; the time button refines it.
+ * The due date is the caller's decision: the Tasks screen passes no due
+ * date (→ "No date", lands in the list's No-date group, never in
+ * Today); Today passes due-today (UI-FIX 2026-11-16). After creation,
+ * the card under the field offers due date/time and priority for the
+ * just-created task — inline, no sheet (Feature 1). Picking a date
+ * defaults to 09:00 local; the time button refines it.
  */
 @Composable
 fun QuickAddTask(
@@ -97,7 +102,9 @@ fun QuickAddTask(
                 }
             },
             shape = NudgyTokens.cardRadius,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("quick_add_field")
         )
 
         if (lastCreatedTask != null) {
@@ -113,7 +120,7 @@ fun QuickAddTask(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = "Added: ${lastCreatedTask.title}",
+                            text = "Saved: ${lastCreatedTask.title}",
                             style = MaterialTheme.typography.bodyMedium,
                             color = colorResource(R.color.nudgy_ink),
                             modifier = Modifier.weight(1f)
@@ -162,6 +169,16 @@ fun QuickAddTask(
                                     selectedLabelColor = colorResource(R.color.nudgy_cream)
                                 )
                             )
+                        }
+                    }
+                    // Explicit Done: the card is a saved task, not a draft —
+                    // Done dismisses it (same as the X, but unmistakable).
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = onDismissLastCreated) {
+                            Text("Done", color = colorResource(R.color.nudgy_teal))
                         }
                     }
                 }
