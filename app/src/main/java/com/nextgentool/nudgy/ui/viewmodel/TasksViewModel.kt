@@ -3,6 +3,7 @@ package com.nextgentool.nudgy.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nextgentool.nudgy.data.local.entity.ProjectEntity
+import com.nextgentool.nudgy.data.local.entity.TaskTagCrossRef
 import com.nextgentool.nudgy.data.local.entity.SavedViewEntity
 import com.nextgentool.nudgy.data.local.entity.TagEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
@@ -91,19 +92,51 @@ class TasksViewModel @Inject constructor(
     private val lastCreatedTaskIdFlow = MutableStateFlow<String?>(null)
     private val isCreatingFlow = MutableStateFlow(false)
 
+    /**
+     * The 10 streams arrive in two 5-flow combines: a single 10-flow
+     * combine does not resolve under this Kotlin version (the compiler
+     * picks the vararg overload and the lambda parameters lose their
+     * types — CI compileReleaseKotlin, 2026-11-16). Two 5-flow combines
+     * plus one 2-flow combine resolve cleanly.
+     */
+    private data class TasksData(
+        val allTasks: List<TaskEntity>,
+        val tags: List<TagEntity>,
+        val crossRefs: List<TaskTagCrossRef>,
+        val projects: List<ProjectEntity>,
+        val savedViews: List<SavedViewEntity>
+    )
+
+    private data class TasksUi(
+        val filter: SavedViewFilter,
+        val activeViewId: String?,
+        val selectedTaskId: String?,
+        val lastCreatedTaskId: String?,
+        val isCreating: Boolean
+    )
+
     val uiState: StateFlow<TasksUiState> = combine(
-        repository.observeAllTasks(userId),
-        repository.observeTags(userId),
-        repository.observeAllTaskTags(),
-        repository.observeProjects(userId),
-        repository.observeSavedViews(userId),
-        filterFlow,
-        activeViewIdFlow,
-        selectedTaskIdFlow,
-        lastCreatedTaskIdFlow,
-        isCreatingFlow
-    ) { allTasks, tags, crossRefs, projects, savedViews,
-        filter, activeViewId, selectedTaskId, lastCreatedTaskId, isCreating ->
+        combine(
+            repository.observeAllTasks(userId),
+            repository.observeTags(userId),
+            repository.observeAllTaskTags(),
+            repository.observeProjects(userId),
+            repository.observeSavedViews(userId)
+        ) { allTasks, tags, crossRefs, projects, savedViews ->
+            TasksData(allTasks, tags, crossRefs, projects, savedViews)
+        },
+        combine(
+            filterFlow,
+            activeViewIdFlow,
+            selectedTaskIdFlow,
+            lastCreatedTaskIdFlow,
+            isCreatingFlow
+        ) { filter, activeViewId, selectedTaskId, lastCreatedTaskId, isCreating ->
+            TasksUi(filter, activeViewId, selectedTaskId, lastCreatedTaskId, isCreating)
+        }
+    ) { data, ui ->
+        val (allTasks, tags, crossRefs, projects, savedViews) = data
+        val (filter, activeViewId, selectedTaskId, lastCreatedTaskId, isCreating) = ui
         val tagsById = tags.associateBy { it.id }
         val tagIdsByTask = crossRefs.groupBy({ it.taskId }, { it.tagId })
             .mapValues { it.value.toSet() }
