@@ -182,7 +182,10 @@ class TodayScreenUiFixTest {
             composeRule.onAllNodesWithText("Nothing planned for today yet")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("Nothing planned for today yet").assertIsDisplayed()
+        // Below the fold on Robolectric's short viewport (hero + nudge
+        // + quick-add + All tasks + tabs sit above it) — scroll first;
+        // on a real phone it is on first paint.
+        composeRule.onNodeWithText("Nothing planned for today yet").performScrollTo().assertIsDisplayed()
         assertTrue(
             composeRule.onAllNodesWithText("Timeline")
                 .fetchSemanticsNodes().isEmpty()

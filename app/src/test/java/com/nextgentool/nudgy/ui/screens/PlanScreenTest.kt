@@ -1,6 +1,7 @@
 package com.nextgentool.nudgy.ui.screens
 
 import android.content.Context
+import android.os.Looper
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -29,6 +30,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 
 /**
@@ -101,6 +103,30 @@ class PlanScreenTest {
     private fun topOf(text: String): Float =
         composeRule.onNodeWithText(text).fetchSemanticsNode().boundsInRoot.top
 
+    /**
+     * Pump the (paused, in Robolectric) main looper until [condition]
+     * holds or the timeout hits. viewModelScope work (startMyDay's Room
+     * writes) resumes on Dispatchers.Main after its IO hops — and a
+     * waitUntil whose condition never touches the Compose tree does not
+     * pump the looper, so the coroutine stalls until the timeout (CI
+     * #44183041137: the DB-polling waitUntils timed out while the
+     * tree-polling ones passed). Idling the looper between short sleeps
+     * drives it to completion.
+     */
+    private fun pumpMainLooperUntil(
+        timeoutMillis: Long = 10_000,
+        condition: () -> Boolean
+    ) {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        while (System.currentTimeMillis() < deadline) {
+            Shadows.shadowOf(Looper.getMainLooper()).idle()
+            if (condition()) return
+            Thread.sleep(50)
+        }
+        Shadows.shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(condition())
+    }
+
     private fun seedPlanData() {
         // Carry-over (120 min) + today 60 min + today 500 min (over the
         // 8h budget once the first two are picked) + no-estimate task.
@@ -138,7 +164,7 @@ class PlanScreenTest {
                 .fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithTag("plan_start_button").performScrollTo().performClick()
-        composeRule.waitUntil(timeoutMillis = 10_000) { backCalled }
+        pumpMainLooperUntil { backCalled }
         val tasks = runBlocking {
             repository.getAllTasksOnce(repository.currentUserId())
         }
@@ -187,7 +213,9 @@ class PlanScreenTest {
         }
         composeRule.onNodeWithTag("plan_start_button").performScrollTo().performClick()
         // Wait for the apply to land: the Big project now has a plan.
-        composeRule.waitUntil(timeoutMillis = 10_000) {
+        // (Pump the main looper explicitly — see pumpMainLooperUntil:
+        // a DB-polling waitUntil does not drive viewModelScope work.)
+        pumpMainLooperUntil {
             runBlocking {
                 repository.getAllTasksOnce(repository.currentUserId())
                     .first { it.title == "Big project" }.plannedDate != null

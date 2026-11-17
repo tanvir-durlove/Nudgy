@@ -354,7 +354,11 @@ fun TodayScreen(
                         uiState.untimedTodayItems.forEach { item ->
                             TodayTaskRow(
                                 item = item,
-                                timeLabel = "Anytime",
+                                // "Today", not "Anytime": the group header
+                                // already says Anytime (S1-1 showed
+                                // "Today" here; repeating the header text
+                                // on every row is redundant).
+                                timeLabel = "Today",
                                 onToggle = { todayViewModel.toggleTask(item.task) }
                             )
                         }
@@ -400,7 +404,9 @@ fun TodayScreen(
                             uiState.noDateItems.forEach { item ->
                                 TodayTaskRow(
                                     item = item,
-                                    timeLabel = "No date",
+                                    // "No due date", not "No date": the
+                                    // section header already says No date.
+                                    timeLabel = "No due date",
                                     onToggle = { todayViewModel.toggleTask(item.task) }
                                 )
                             }

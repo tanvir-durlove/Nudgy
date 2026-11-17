@@ -12,7 +12,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -40,9 +39,9 @@ data class PlanUiState(
 /**
  * Sprint 1-2 — Plan My Day (Feature 14, spec §6).
  *
- * The draft is seeded ONCE from the first repository emission (auto
- * draft: carry-over first, then today-due, 8h estimate cap — Q1) and
- * the user's picks + order live in local flows after that, so a later
+ * The draft is seeded from the repository (auto draft: carry-over
+ * first, then today-due, 8h estimate cap — Q1) and re-seeded from
+ * every emission until the user touches the plan — after that a later
  * database emission never clobbers an in-progress plan. Doing Plan a
  * second time shows the previous picks: they are seeded as picked
  * (plannedDate = today).
@@ -74,13 +73,25 @@ class PlanViewModel @Inject constructor(
 
     private val appliedFlow = MutableStateFlow(false)
 
+    /**
+     * Set the moment the user picks, unpicks, reorders or starts the
+     * day: from then on the plan is theirs and later database emissions
+     * never rewrite it. Before that the draft is re-seeded from every
+     * emission, so it always reflects the current task list — seeding
+     * once from the very first emission could freeze a partial snapshot
+     * (the first query can land before a just-created task is visible)
+     * and leave tasks out of the draft entirely.
+     */
+    private var userInteracted = false
+
     init {
         viewModelScope.launch {
-            val tasks = repository.observeAllTasks(userId).first()
-            if (orderFlow.value == null) {
-                val (order, picked) = seed(tasks)
-                orderFlow.value = order
-                pickedFlow.value = picked
+            repository.observeAllTasks(userId).collect { tasks ->
+                if (!userInteracted) {
+                    val (order, picked) = seed(tasks)
+                    orderFlow.value = order
+                    pickedFlow.value = picked
+                }
             }
         }
     }
@@ -151,6 +162,7 @@ class PlanViewModel @Inject constructor(
     /** Pick / unpick a candidate. Order is untouched — the row just moves sections. */
     fun togglePick(taskId: String) {
         val picked = pickedFlow.value ?: return
+        userInteracted = true
         pickedFlow.value = if (taskId in picked) picked - taskId else picked + taskId
     }
 
@@ -158,6 +170,7 @@ class PlanViewModel @Inject constructor(
     fun movePicked(taskId: String, delta: Int) {
         val order = orderFlow.value ?: return
         val picked = pickedFlow.value ?: return
+        userInteracted = true
         val pickedOrdered = order.filter { it in picked }
         val index = pickedOrdered.indexOf(taskId)
         val target = index + delta
@@ -177,6 +190,7 @@ class PlanViewModel @Inject constructor(
      * (plannedDate / plannedStart cleared, due untouched).
      */
     fun startMyDay() {
+        userInteracted = true
         viewModelScope.launch {
             val state = uiState.value
             if (state.isLoading || state.pickedRows.isEmpty()) return@launch

@@ -2,6 +2,7 @@ package com.nextgentool.nudgy.domain.usecase
 
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.domain.startOfDayMillis
 import java.util.Calendar
 import javax.inject.Inject
 
@@ -35,13 +36,15 @@ class PlanDayUseCase @Inject constructor() {
     }
 
     /**
-     * Auto draft: carry-over first (due order), then today-due (due-time
-     * order), then previously-picked tasks that are neither. A task whose
-     * estimate still fits the 8h budget is picked; a task without an
-     * estimate is always picked (it consumes no budget); a task past the
-     * budget starts unpicked — the user can still pick it by hand.
-     * Previous picks stay picked even if the budget has moved since.
-     * Callers must filter out completed tasks before calling.
+     * Auto draft: carry-over first (due order), then today-due with a
+     * real time (due-time order), then tasks with no time set last;
+     * previously-picked tasks that are neither carry-over nor today-due
+     * join in due order. A task whose estimate still fits the 8h budget
+     * is picked; a task without an estimate is always picked (it
+     * consumes no budget); a task past the budget starts unpicked — the
+     * user can still pick it by hand. Previous picks stay picked even
+     * if the budget has moved since. Callers must filter out completed
+     * tasks before calling.
      */
     fun buildDraft(
         candidates: List<TaskEntity>,
@@ -49,8 +52,13 @@ class PlanDayUseCase @Inject constructor() {
         previouslyPickedIds: Set<String>,
         maxEstimateMinutes: Int = MAX_ESTIMATE_MINUTES_PER_DAY
     ): PlanDraft {
+        // A timeless task has no time to order by — listing it first
+        // would put it ahead of the 9 AM task. Timed first, timeless
+        // last: the Timeline treats it the same way (its "Anytime"
+        // group comes after the timed entries).
         val ordered = candidates.sortedWith(
             compareBy<TaskEntity> { if (it.id in carryOverIds) 0 else 1 }
+                .thenBy { if (hasNoTime(it)) 1 else 0 }
                 .thenBy { it.dueDateEpochMillis }
         )
         var budget = 0
@@ -114,6 +122,15 @@ class PlanDayUseCase @Inject constructor() {
         }
         return result
     }
+
+    /**
+     * True when the task has no time to plan around: no due date, or
+     * due at local midnight (the "no time picked" default — the
+     * quick-add stamps 00:00 when the user picks a day but no time).
+     */
+    private fun hasNoTime(task: TaskEntity): Boolean =
+        task.dueDateEpochMillis == TaskRepository.NO_DUE_DATE ||
+            task.dueDateEpochMillis == startOfDayMillis(task.dueDateEpochMillis)
 
     private fun roundUpToQuarterHour(now: Long): Long {
         val cal = Calendar.getInstance().apply { timeInMillis = now }
