@@ -145,6 +145,15 @@ class TodayScreenUiFixTest {
     @Test
     fun `empty day shows words not blank boxes and Timeline stays hidden`() {
         setTodayContent()
+        // Wait for the load to finish: the empty-day text only replaces
+        // the loading skeleton after the first Flow emission, and the
+        // "Add task" wait in setTodayContent does not cover that (the
+        // field renders while loading). Without this wait the test is a
+        // coin flip on emission timing (CI #363).
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("No tasks yet — add one above")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithText("No tasks yet — add one above").assertIsDisplayed()
         assertTrue(
             composeRule.onAllNodesWithText("Timeline")
