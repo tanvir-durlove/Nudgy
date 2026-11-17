@@ -180,6 +180,17 @@ class PlanScreenTest {
                 listOf("Old report", "Dentist", "No-est task") &&
                 state.unpickedRows.map { it.task.title } == listOf("Big project")
         }
+        // Wait for the COMPOSITION to catch up with the ViewModel: the
+        // pump proves the state, but the tree can lag one emission
+        // behind it, and asserting pixel tops on a stale tree throws
+        // (row missing) or compares the wrong rows. Poll the order
+        // itself; a missing node counts as "not yet", not a failure.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            runCatching {
+                topOf("Old report") < topOf("Dentist") &&
+                    topOf("Dentist") < topOf("No-est task")
+            }.getOrDefault(false)
+        }
         // Carry-over first, then today-due in due order.
         assertTrue(topOf("Old report") < topOf("Dentist"))
         assertTrue(topOf("Dentist") < topOf("No-est task"))

@@ -239,8 +239,11 @@ class TodayScreenS12Test {
     @Test
     fun `ring shows 0 percent on an empty day without crashing`() {
         setTodayContent()
+        // "0%" is in the hero from the first composition (loading shows
+        // 0% too), so it cannot prove the load finished — wait for the
+        // empty-day text itself before asserting it is displayed.
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("0%")
+            composeRule.onAllNodesWithText("Nothing planned for today yet")
                 .fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText("0%").assertIsDisplayed()
