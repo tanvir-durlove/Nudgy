@@ -174,6 +174,10 @@ class TodayScreenUiFixTest {
                 .fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText("Timeline").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Dentist").performScrollTo().assertIsDisplayed()
+        // A timed today-task appears in BOTH My Day and Timeline, so the
+        // title exists twice — assert the count, then scroll to each.
+        composeRule.onAllNodesWithText("Dentist").assertCountEquals(2)
+        composeRule.onAllNodesWithText("Dentist")[0].performScrollTo().assertIsDisplayed()
+        composeRule.onAllNodesWithText("Dentist")[1].performScrollTo().assertIsDisplayed()
     }
 }
