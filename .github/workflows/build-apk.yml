@@ -96,19 +96,19 @@ jobs:
         run: |
           ./gradlew testDebugUnitTest --no-daemon --stacktrace
           
-# No reflective Moshi adapters: a Moshi adapter found by reflection
-# breaks under R8 (ci-345 launch crash — the generated adapter was
-# stripped and Moshi fell back to ClassJsonAdapter, whose
-# EnumJsonAdapter does Class.getField on obfuscated enum names).
-# SavedViewFilter uses manual JSON; any new reflective adapter
-# call fails CI. NOTE: the grep excludes KDoc/comment lines
-# (SavedViewFilter's KDoc mentions the call by name).
-- name: Forbid reflective Moshi adapters
-run: |
-if grep -rn "Moshi.Builder().build().adapter" app/src/main/java | grep -vE ':\s*\*'; then
-echo "::error::Reflective Moshi adapter found — use manual JSON (see SavedViewFilter) or a kept generated adapter."
-exit 1
-fi
+            # No reflective Moshi adapters: a Moshi adapter found by reflection
+      # breaks under R8 (ci-345 launch crash — the generated adapter was
+      # stripped and Moshi fell back to ClassJsonAdapter, whose
+      # EnumJsonAdapter does Class.getField on obfuscated enum names).
+      # SavedViewFilter uses manual JSON; any new reflective adapter
+      # call fails CI. NOTE: the grep excludes KDoc/comment lines
+      # (SavedViewFilter's KDoc mentions the call by name).
+      - name: Forbid reflective Moshi adapters
+        run: |
+          if grep -rn "Moshi.Builder().build().adapter" app/src/main/java | grep -vE ':\s*\*'; then
+            echo "::error::Reflective Moshi adapter found — use manual JSON (see SavedViewFilter) or a kept generated adapter."
+            exit 1
+          fi
 
       - name: Prepare & Verify Artifacts
         run: |
