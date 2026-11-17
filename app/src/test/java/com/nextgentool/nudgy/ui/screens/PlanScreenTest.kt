@@ -169,6 +169,17 @@ class PlanScreenTest {
         // waitForFullDraft): asserting order while rows are still
         // streaming in is a coin flip.
         waitForFullDraft()
+        // Prove the ViewModel's order itself before asserting the
+        // rendered order: the tree can only prove the rows exist, and a
+        // half-streamed draft can show all four rows with the wrong
+        // membership (No-est contributes 0 to the budget, so the budget
+        // line cannot prove it is picked).
+        pumpMainLooperUntil {
+            val state = viewModel.uiState.value
+            state.pickedRows.map { it.task.title } ==
+                listOf("Old report", "Dentist", "No-est task") &&
+                state.unpickedRows.map { it.task.title } == listOf("Big project")
+        }
         // Carry-over first, then today-due in due order.
         assertTrue(topOf("Old report") < topOf("Dentist"))
         assertTrue(topOf("Dentist") < topOf("No-est task"))
