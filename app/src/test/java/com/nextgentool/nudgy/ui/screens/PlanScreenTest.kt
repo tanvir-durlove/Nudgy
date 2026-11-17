@@ -5,14 +5,17 @@ import android.os.Looper
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodes
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
@@ -107,6 +110,21 @@ class PlanScreenTest {
         composeRule.onNodeWithText(text).fetchSemanticsNode().boundsInRoot.top
 
     /**
+     * Index of the first text node containing [title] in the semantics
+     * tree's traversal order, which follows layout order. -1 if no such
+     * node exists yet. (Merged nodes can concatenate a row's title and
+     * detail into one text, so this matches by containment, not equality.)
+     */
+    private fun traversalIndex(title: String): Int {
+        val textNodes = SemanticsMatcher("node with text") { node ->
+            node.config.contains(SemanticsProperties.Text)
+        }
+        val texts = composeRule.onAllNodes(textNodes).fetchSemanticsNodes()
+            .map { it.config.getOrNull(SemanticsProperties.Text)?.text.orEmpty() }
+        return texts.indexOfFirst { it.contains(title) }
+    }
+
+    /**
      * Pump the (paused, in Robolectric) main looper until [condition]
      * holds or the timeout hits. viewModelScope work (startMyDay's Room
      * writes) resumes on Dispatchers.Main after its IO hops — and a
@@ -194,15 +212,23 @@ class PlanScreenTest {
                 composeRule.onAllNodesWithText("No-est task")
                     .fetchSemanticsNodes().size == 1
         }
+        // The rendered order, read from the semantics tree's traversal
+        // order (layout order) instead of pixel tops: boundsInRoot kept
+        // reporting the no-estimate row at-or-above the Dentist row in
+        // CI (run 44198121044: the existence wait passed — one node
+        // each — yet the Dentist < No-est top comparison timed out for
+        // 10s), while the ViewModel order is proven correct and the
+        // move-down test proves topOf tracks order changes. Traversal
+        // order follows the picked Column's child order directly, so it
+        // pins the same behaviour without the flaky measurement.
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            runCatching {
-                topOf("Old report") < topOf("Dentist") &&
-                    topOf("Dentist") < topOf("No-est task")
-            }.getOrDefault(false)
+            traversalIndex("Old report") >= 0 &&
+                traversalIndex("Dentist") >= 0 &&
+                traversalIndex("No-est task") >= 0
         }
         // Carry-over first, then today-due in due order.
-        assertTrue(topOf("Old report") < topOf("Dentist"))
-        assertTrue(topOf("Dentist") < topOf("No-est task"))
+        assertTrue(traversalIndex("Old report") < traversalIndex("Dentist"))
+        assertTrue(traversalIndex("Dentist") < traversalIndex("No-est task"))
         // 120 + 60 = 180 min picked; the 500-min task no longer fits.
         composeRule.onNodeWithText("3h 0m of 8h planned").assertIsDisplayed()
         composeRule.onNodeWithText("Big project").performScrollTo().assertIsDisplayed()
