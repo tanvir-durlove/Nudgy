@@ -168,6 +168,9 @@ class PlanViewModelTest {
         // The unpicked task is not planned.
         assertNull(bigProject.plannedDate)
         assertNull(bigProject.plannedStartEpochMillis)
-        assertTrue(viewModel.uiState.value.planApplied)
+        // planApplied propagates a beat after the Room writes (it flows
+        // through the combine on Main), so pump for it instead of
+        // asserting it synchronously.
+        pumpUntil { viewModel.uiState.value.planApplied }
     }
 }

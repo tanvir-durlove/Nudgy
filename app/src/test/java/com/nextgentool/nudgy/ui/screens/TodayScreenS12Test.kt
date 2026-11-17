@@ -215,8 +215,9 @@ class TodayScreenS12Test {
         composeRule.onNodeWithText("No date").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("No-date task").performScrollTo().assertIsDisplayed()
         // Rule B: unpicked today-due tasks are ALSO listed in Upcoming
-        // under "Today" — they never vanish from the app.
-        composeRule.onNodeWithText("Today").performScrollTo().assertIsDisplayed()
+        // under "Today" — they never vanish from the app. "Today" is
+        // two nodes (the Today tab + the day-group header), so count.
+        composeRule.onAllNodesWithText("Today").assertCountEquals(2)
         composeRule.onNodeWithText("Today task").performScrollTo().assertIsDisplayed()
     }
 

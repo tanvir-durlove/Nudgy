@@ -2,6 +2,9 @@ package com.nextgentool.nudgy.ui.screens
 
 import android.content.Context
 import android.os.Looper
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -144,6 +147,14 @@ class PlanScreenTest {
             composeRule.onAllNodesWithText("Old report")
                 .fetchSemanticsNodes().isNotEmpty()
         }
+        // Wait for the FULL draft, not just the first task: the draft
+        // re-seeds per emission, and asserting order while rows are
+        // still streaming in is a coin flip. The budget line proves all
+        // four tasks are picked/unpicked as expected (180 min).
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("3h 0m of 8h planned")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         // Carry-over first, then today-due in due order.
         assertTrue(topOf("Old report") < topOf("Dentist"))
         assertTrue(topOf("Dentist") < topOf("No-est task"))
@@ -163,8 +174,19 @@ class PlanScreenTest {
             composeRule.onAllNodesWithText("Old report")
                 .fetchSemanticsNodes().isNotEmpty()
         }
+        // Full draft first (see the draft test): starting the day on a
+        // half-streamed draft would stamp only the tasks seen so far.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("3h 0m of 8h planned")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithTag("plan_start_button").performScrollTo().performClick()
-        pumpMainLooperUntil { backCalled }
+        // Drive the Main looper (Room writes + appliedFlow), then let
+        // Compose settle (recomposition + the LaunchedEffect that fires
+        // onBackClick) before asserting the navigation happened.
+        pumpMainLooperUntil { viewModel.uiState.value.planApplied }
+        composeRule.waitForIdle()
+        assertTrue(backCalled)
         val tasks = runBlocking {
             repository.getAllTasksOnce(repository.currentUserId())
         }
@@ -197,9 +219,19 @@ class PlanScreenTest {
     @Test
     fun `second Plan shows the previous picks`() {
         seedPlanData()
-        setPlanContent()
+        // One setContent per test (the rule throws on a second call):
+        // the ViewModel is swapped through state instead.
+        var currentViewModel by mutableStateOf(viewModel)
+        composeRule.setContent {
+            PlanScreen(onBackClick = {}, viewModel = currentViewModel)
+        }
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("Old report")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        // Full draft first (see the draft test).
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("3h 0m of 8h planned")
                 .fetchSemanticsNodes().isNotEmpty()
         }
         // Pick the over-budget task by hand, then start the day. A fresh
@@ -229,9 +261,11 @@ class PlanScreenTest {
             planDayUseCase = PlanDayUseCase(),
             carryOverUseCase = CarryOverUseCase()
         )
-        composeRule.setContent {
-            PlanScreen(onBackClick = {}, viewModel = secondViewModel)
-        }
+        composeRule.runOnIdle { currentViewModel = secondViewModel }
+        // Let the swap's recomposition settle (the new ViewModel starts
+        // in loading) so the wait below cannot pass on the first
+        // ViewModel's still-composed "11h 20m" line.
+        composeRule.waitForIdle()
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("11h 20m of 8h planned")
                 .fetchSemanticsNodes().isNotEmpty()
@@ -246,6 +280,11 @@ class PlanScreenTest {
         setPlanContent()
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("Old report")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        // Full draft first (see the draft test).
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("3h 0m of 8h planned")
                 .fetchSemanticsNodes().isNotEmpty()
         }
         assertTrue(topOf("Old report") < topOf("Dentist"))
