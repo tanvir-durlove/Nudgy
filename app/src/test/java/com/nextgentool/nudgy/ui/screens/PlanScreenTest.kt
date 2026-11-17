@@ -183,8 +183,17 @@ class PlanScreenTest {
         // Wait for the COMPOSITION to catch up with the ViewModel: the
         // pump proves the state, but the tree can lag one emission
         // behind it, and asserting pixel tops on a stale tree throws
-        // (row missing) or compares the wrong rows. Poll the order
-        // itself; a missing node counts as "not yet", not a failure.
+        // (row missing) or compares the wrong rows. Two stages, so a
+        // failure names the stage: first each row exists exactly once,
+        // then the rendered order matches the plan order.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Old report")
+                .fetchSemanticsNodes().size == 1 &&
+                composeRule.onAllNodesWithText("Dentist")
+                    .fetchSemanticsNodes().size == 1 &&
+                composeRule.onAllNodesWithText("No-est task")
+                    .fetchSemanticsNodes().size == 1
+        }
         composeRule.waitUntil(timeoutMillis = 10_000) {
             runCatching {
                 topOf("Old report") < topOf("Dentist") &&
