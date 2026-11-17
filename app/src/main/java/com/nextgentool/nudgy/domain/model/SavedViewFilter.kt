@@ -43,7 +43,10 @@ import okio.Buffer
  * which crashed the app at launch on ci-345 (SavedViewFilter.<clinit>).
  * The streaming API uses no reflection, so R8 can never break it, and
  * the stored format is byte-identical to what the Moshi adapter wrote
- * (same keys, same order, explicit nulls, enum names).
+ * (same keys, same order, null fields omitted, enum names).
+ * (Moshi's default is to omit nulls — JsonWriter.serializeNulls is
+ * false unless opted in — and the old adapter did the same, so the
+ * bytes match; fromJson accepts both omitted keys and explicit nulls.)
  */
 data class SavedViewFilter(
     val projectId: String? = null,

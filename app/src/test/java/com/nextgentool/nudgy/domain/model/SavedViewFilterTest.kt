@@ -17,7 +17,7 @@ class SavedViewFilterTest {
     @Test
     fun `empty filter serializes exactly like the old Moshi adapter`() {
         assertEquals(
-            """{"projectId":null,"tagIds":[],"priority":null,"status":null,"groupOnly":false,"text":""}""",
+            """{"tagIds":[],"groupOnly":false,"text":""}""",
             SavedViewFilter().toJson()
         )
     }
