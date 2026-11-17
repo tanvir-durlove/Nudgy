@@ -38,6 +38,7 @@ import com.nextgentool.nudgy.ui.screens.ChatShell
 import com.nextgentool.nudgy.ui.screens.GroupsShell
 import com.nextgentool.nudgy.ui.screens.PlanScreen
 import com.nextgentool.nudgy.ui.screens.SettingsShell
+import com.nextgentool.nudgy.ui.screens.TasksScreen
 import com.nextgentool.nudgy.ui.screens.TodayScreen
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
 
@@ -84,9 +85,17 @@ fun NudgyNavHost(
             route = TODAY_GRAPH_ROUTE
         ) {
             composable(NudgyRoute.Today.route) {
-                TodayScreen(onPlanClick = { navController.navigate(NudgyRoute.Plan.route) })
+                TodayScreen(
+                    onPlanClick = { navController.navigate(NudgyRoute.Plan.route) },
+                    onAllTasksClick = { navController.navigate(NudgyRoute.Tasks.route) }
+                )
             }
             composable(NudgyRoute.Plan.route) { PlanScreen() }
+        }
+        // Sprint 1-1 — Tasks list. NOT a bottom destination: no tab is
+        // highlighted while it is open (see NudgyRoute.all).
+        composable(NudgyRoute.Tasks.route) {
+            TasksScreen(onBackClick = { navController.popBackStack() })
         }
         composable(NudgyRoute.Calendar.route) { CalendarShell() }
         composable(NudgyRoute.Chat.route) { ChatShell() }

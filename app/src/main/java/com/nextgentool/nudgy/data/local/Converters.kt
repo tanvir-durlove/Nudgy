@@ -2,6 +2,7 @@ package com.nextgentool.nudgy.data.local
 
 import androidx.room.TypeConverter
 import com.nextgentool.nudgy.data.model.Priority
+import com.nextgentool.nudgy.data.model.TaskStatus
 import com.nextgentool.nudgy.data.model.TaskCategory
 
 class Converters {
@@ -23,5 +24,15 @@ class Converters {
         TaskCategory.valueOf(value)
     } catch (e: Exception) {
         TaskCategory.WORK
+    }
+
+    @TypeConverter
+    fun fromTaskStatus(status: TaskStatus): String = status.name
+
+    @TypeConverter
+    fun toTaskStatus(value: String): TaskStatus = try {
+        TaskStatus.valueOf(value)
+    } catch (e: Exception) {
+        TaskStatus.TODO
     }
 }

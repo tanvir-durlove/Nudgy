@@ -14,360 +14,609 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.nextgentool.nudgy.data.local.entity.TaskEntity
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.nextgentool.nudgy.R
+import com.nextgentool.nudgy.data.local.entity.ProjectEntity
+import com.nextgentool.nudgy.data.local.entity.TagEntity
 import com.nextgentool.nudgy.data.model.Priority
-import com.nextgentool.nudgy.data.repository.DailyTaskStats
-import com.nextgentool.nudgy.ui.components.NudgyCheckbox
-import com.nextgentool.nudgy.ui.components.NudgyInsightCard
-import com.nextgentool.nudgy.ui.components.NudgyPillTabs
-import com.nextgentool.nudgy.ui.components.NudgyProgressBar
-import com.nextgentool.nudgy.ui.theme.NudgyAccent
-import com.nextgentool.nudgy.ui.theme.NudgyCard
-import com.nextgentool.nudgy.ui.theme.NudgyCardBorder
-import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
-import com.nextgentool.nudgy.ui.theme.NudgyMuted
-import com.nextgentool.nudgy.ui.theme.NudgyPeach
-import com.nextgentool.nudgy.ui.theme.NudgyPrimary
+import com.nextgentool.nudgy.data.model.TaskStatus
+import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.domain.model.SavedViewFilter
+import com.nextgentool.nudgy.ui.components.QuickAddTask
+import com.nextgentool.nudgy.ui.components.TaskDetailSheet
+import com.nextgentool.nudgy.ui.components.colorFromHex
+import com.nextgentool.nudgy.ui.theme.NudgyTokens
+import com.nextgentool.nudgy.ui.viewmodel.TaskListItem
+import com.nextgentool.nudgy.ui.viewmodel.TasksViewModel
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Locale
 
+/**
+ * Sprint 1-1 — Tasks screen (Features 1–2), rewritten for the rebuild.
+ *
+ * Top: QuickAddTask (title + Enter creates, no due → "No date") with the
+ * inline due/priority row for the just-created task. Below: search
+ * (title / description / tag name), saved views, filter chips
+ * (project / tag / priority / status / group), then the list — active
+ * tasks by due date (no-date last), completed tasks under their own
+ * heading. Group rows carry a badge and are read-only (no edit/delete
+ * here — Sprint 5); their checkbox still toggles completion locally,
+ * as in v1.
+ *
+ * Reached from Today ("All tasks") — it is a plain "tasks" route, NOT a
+ * bottom-nav destination, so no tab is highlighted while it is open.
+ * Content arrives behind skeleton rows while the first Flow emission
+ * loads (no abrupt pop-in).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TasksScreen(
-    todayTasks: List<TaskEntity>,
-    upcomingTasks: List<TaskEntity>,
-    completedTasks: List<TaskEntity>,
-    dailyStats: DailyTaskStats,
-    onToggleTask: (TaskEntity) -> Unit,
-    onAddTaskClick: () -> Unit,
-    onTaskClick: (TaskEntity) -> Unit = {},
-    groupNames: Map<String, String> = emptyMap(),
-    modifier: Modifier = Modifier
+    viewModel: TasksViewModel = hiltViewModel(),
+    onBackClick: () -> Unit = {}
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) }
-    val timeFormatter = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
+    val uiState by viewModel.uiState.collectAsState()
+    var showSaveViewDialog by remember { mutableStateOf(false) }
+    var saveViewName by remember { mutableStateOf("") }
 
-    val displayedTasks = when (selectedTab) {
-        0 -> todayTasks
-        1 -> upcomingTasks
-        else -> completedTasks
-    }
-
-    val tabTitle = when (selectedTab) {
-        0 -> "TODAY · ${todayTasks.size}"
-        1 -> "UPCOMING · ${upcomingTasks.size}"
-        else -> "COMPLETED · ${completedTasks.size}"
-    }
-
-    LazyColumn(
-        modifier = modifier
+    Column(
+        modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 20.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .background(colorResource(R.color.nudgy_background))
     ) {
-        // Header with '+' FAB
-        item(key = "tasks_header") {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "STAY ON TRACK",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = NudgyAccent
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "My tasks",
-                        style = MaterialTheme.typography.displayMedium,
-                        color = NudgyCharcoal
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.inverseSurface)
-                        .clickable { onAddTaskClick() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Add task",
-                        tint = MaterialTheme.colorScheme.inverseOnSurface,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
+        // Top bar (back — Tasks is not a bottom destination).
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            IconButton(onClick = onBackClick) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = colorResource(R.color.nudgy_ink)
+                )
             }
-        }
-
-        // Segmented Filter Tabs
-        item(key = "tasks_tabs") {
-            NudgyPillTabs(
-                tabs = listOf(
-                    "Today (${todayTasks.size})",
-                    "Upcoming (${upcomingTasks.size})",
-                    "Completed (${completedTasks.size})"
-                ),
-                selectedIndex = selectedTab,
-                onTabSelected = { selectedTab = it }
+            Text(
+                text = "My tasks",
+                style = MaterialTheme.typography.titleLarge,
+                color = colorResource(R.color.nudgy_ink)
             )
+            Spacer(modifier = Modifier.weight(1f))
+            Text(
+                text = "${uiState.totalCount}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colorResource(R.color.nudgy_muted)
+            )
+            Spacer(modifier = Modifier.width(16.dp))
         }
 
-        // Progress Card Banner (Coral background matching Figma Screen 3)
-        item(key = "tasks_progress_card") {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(22.dp),
-                color = NudgyPrimary
+        if (uiState.isLoading) {
+            Column(
+                modifier = Modifier.padding(NudgyTokens.screenPadding),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Bottom
+                NudgySkeletonRow()
+                NudgySkeletonRow()
+                NudgySkeletonRow()
+            }
+            return@Column
+        }
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = NudgyTokens.screenPadding),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Quick add.
+            item(key = "quick_add") {
+                val lastCreated = uiState.items
+                    .firstOrNull { it.task.id == uiState.lastCreatedTaskId }
+                QuickAddTask(
+                    onCreate = { viewModel.createTask(it) },
+                    isCreating = uiState.isCreating,
+                    lastCreatedTask = lastCreated?.task,
+                    onLastCreatedDue = { viewModel.setLastCreatedDue(it) },
+                    onLastCreatedPriority = { viewModel.setLastCreatedPriority(it) },
+                    onDismissLastCreated = { viewModel.clearLastCreated() }
+                )
+            }
+
+            // Search (title / description / tag name — Tasks only, not global).
+            item(key = "search") {
+                OutlinedTextField(
+                    value = uiState.filter.text,
+                    onValueChange = { viewModel.setSearchText(it) },
+                    placeholder = { Text("Search tasks", color = colorResource(R.color.nudgy_muted)) },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Filled.Search,
+                            contentDescription = null,
+                            tint = colorResource(R.color.nudgy_muted)
+                        )
+                    },
+                    singleLine = true,
+                    shape = NudgyTokens.cardRadius,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            // Saved views.
+            item(key = "saved_views") {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.weight(1f)
                     ) {
-                        if (dailyStats.total == 0) {
-                            Text(
-                                text = "All clear!",
-                                fontSize = 32.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Text(
-                                text = "No tasks scheduled today",
-                                fontSize = 13.sp,
-                                color = Color.White.copy(alpha = 0.9f),
-                                modifier = Modifier.padding(bottom = 6.dp)
-                            )
-                        } else {
-                            Text(
-                                text = "${dailyStats.completed}/${dailyStats.total}",
-                                fontSize = 36.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Text(
-                                text = if (dailyStats.completed == dailyStats.total) "all done today! 🎉" else "tasks complete",
-                                fontSize = 13.sp,
-                                color = Color.White.copy(alpha = 0.9f),
-                                modifier = Modifier.padding(bottom = 6.dp)
+                        items(uiState.savedViews, key = { it.id }) { view ->
+                            val active = uiState.activeViewId == view.id
+                            FilterChip(
+                                selected = active,
+                                onClick = { viewModel.applySavedView(view) },
+                                label = { Text(view.name) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = colorResource(R.color.nudgy_teal),
+                                    selectedLabelColor = colorResource(R.color.nudgy_cream)
+                                )
                             )
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    NudgyProgressBar(
-                        progress = if (dailyStats.total == 0) 1.0f else dailyStats.percentage,
-                        height = 7.dp,
-                        trackColor = Color.White.copy(alpha = 0.35f),
-                        progressColor = Color.White
-                    )
+                    if (uiState.activeViewId != null) {
+                        TextButton(onClick = {
+                            uiState.activeViewId?.let { viewModel.deleteSavedView(it) }
+                        }) {
+                            Text("Delete", color = colorResource(R.color.nudgy_muted))
+                        }
+                    }
+                    TextButton(
+                        onClick = { showSaveViewDialog = true },
+                        enabled = !uiState.filter.isEmpty()
+                    ) {
+                        Text("Save view", color = colorResource(R.color.nudgy_teal))
+                    }
                 }
             }
-        }
 
-        // Section Title
-        item(key = "tasks_section_title") {
-            Text(
-                text = tabTitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = NudgyCharcoal.copy(alpha = 0.6f),
-                modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+            // Filter chips.
+            item(key = "filters") {
+                FilterChipRow(
+                    filter = uiState.filter,
+                    tags = uiState.tags,
+                    projects = uiState.projects,
+                    onFilterChange = { viewModel.setFilter(it) }
+                )
+            }
+
+            // Task list.
+            val activeItems = uiState.items.filter { !it.task.isCompleted }
+            val doneItems = uiState.items.filter { it.task.isCompleted }
+            if (uiState.items.isEmpty()) {
+                item(key = "empty_state") {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = NudgyTokens.cardRadius,
+                        color = MaterialTheme.colorScheme.surface,
+                        shadowElevation = NudgyTokens.cardElevation
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = if (uiState.filter.isEmpty()) {
+                                    "No tasks yet"
+                                } else {
+                                    "No tasks match this filter"
+                                },
+                                style = MaterialTheme.typography.titleMedium,
+                                color = colorResource(R.color.nudgy_ink)
+                            )
+                            Text(
+                                text = if (uiState.filter.isEmpty()) {
+                                    "Add your first task above."
+                                } else {
+                                    "Try a different filter or search."
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colorResource(R.color.nudgy_muted)
+                            )
+                            if (!uiState.filter.isEmpty()) {
+                                TextButton(onClick = { viewModel.clearFilter() }) {
+                                    Text("Clear filter", color = colorResource(R.color.nudgy_teal))
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                items(activeItems, key = { it.task.id }) { item ->
+                    TaskRow(
+                        item = item,
+                        onToggle = { viewModel.toggleTask(item.task) },
+                        onClick = { viewModel.selectTask(item.task.id) }
+                    )
+                }
+                if (doneItems.isNotEmpty()) {
+                    item(key = "completed_header") {
+                        Text(
+                            text = "Completed (${doneItems.size})",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = colorResource(R.color.nudgy_muted),
+                            modifier = Modifier.padding(top = 8.dp, start = 4.dp)
+                        )
+                    }
+                    items(doneItems, key = { it.task.id }) { item ->
+                        TaskRow(
+                            item = item,
+                            onToggle = { viewModel.toggleTask(item.task) },
+                            onClick = { viewModel.selectTask(item.task.id) }
+                        )
+                    }
+                }
+            }
+
+            item(key = "bottom_spacer") { Spacer(modifier = Modifier.height(84.dp)) }
+        }
+    }
+
+    // Detail sheet.
+    uiState.selectedDetail?.let { detail ->
+        TaskDetailSheet(
+            detail = detail,
+            allTags = uiState.tags,
+            allProjects = uiState.projects,
+            onUpdateTask = { viewModel.updateSelectedTask(it) },
+            onDeleteTask = { viewModel.deleteTask(it) },
+            onSetTags = { taskId, tagIds -> viewModel.setTaskTags(taskId, tagIds) },
+            onCreateTag = { name, color -> viewModel.createTag(name, color) },
+            onDeleteTag = { viewModel.deleteTag(it) },
+            onRenameTag = { tag, name -> viewModel.renameTag(tag, name) },
+            onCreateProject = { name, color -> viewModel.createProject(name, color) },
+            onDeleteProject = { viewModel.deleteProject(it) },
+            onRenameProject = { project, name -> viewModel.renameProject(project, name) },
+            onAddSubtask = { parentId, title -> viewModel.addSubtask(parentId, title) },
+            onToggleSubtask = { viewModel.toggleSubtask(it) },
+            onDeleteSubtask = { viewModel.deleteSubtask(it) },
+            onDismiss = { viewModel.dismissDetail() }
+        )
+    }
+
+    // Save-view dialog.
+    if (showSaveViewDialog) {
+        AlertDialog(
+            onDismissRequest = { showSaveViewDialog = false },
+            title = { Text("Save this view") },
+            text = {
+                OutlinedTextField(
+                    value = saveViewName,
+                    onValueChange = { saveViewName = it },
+                    placeholder = { Text("View name") },
+                    singleLine = true,
+                    shape = NudgyTokens.cardRadius,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (saveViewName.isNotBlank()) {
+                            viewModel.saveCurrentView(saveViewName)
+                            saveViewName = ""
+                            showSaveViewDialog = false
+                        }
+                    },
+                    enabled = saveViewName.isNotBlank()
+                ) { Text("Save", color = colorResource(R.color.nudgy_teal)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSaveViewDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun FilterChipRow(
+    filter: SavedViewFilter,
+    tags: List<TagEntity>,
+    projects: List<ProjectEntity>,
+    onFilterChange: (SavedViewFilter) -> Unit
+) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        item(key = "chip_all") {
+            FilterChip(
+                selected = filter.isEmpty(),
+                onClick = { onFilterChange(SavedViewFilter.empty()) },
+                label = { Text("All") },
+                colors = filterChipColors()
             )
         }
+        projects.forEach { project ->
+            item(key = "chip_project_${project.id}") {
+                val selected = filter.projectId == project.id
+                FilterChip(
+                    selected = selected,
+                    onClick = {
+                        onFilterChange(
+                            filter.copy(projectId = if (selected) null else project.id)
+                        )
+                    },
+                    label = { Text(project.name) },
+                    leadingIcon = {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(colorFromHex(project.color))
+                        )
+                    },
+                    colors = filterChipColors()
+                )
+            }
+        }
+        tags.forEach { tag ->
+            item(key = "chip_tag_${tag.id}") {
+                val selected = tag.id in filter.tagIds
+                FilterChip(
+                    selected = selected,
+                    onClick = {
+                        onFilterChange(
+                            filter.copy(tagIds = if (selected) emptyList() else listOf(tag.id))
+                        )
+                    },
+                    label = { Text(tag.name) },
+                    leadingIcon = {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(colorFromHex(tag.color))
+                        )
+                    },
+                    colors = filterChipColors()
+                )
+            }
+        }
+        Priority.entries.forEach { priority ->
+            item(key = "chip_priority_${priority.name}") {
+                val selected = filter.priority == priority
+                FilterChip(
+                    selected = selected,
+                    onClick = {
+                        onFilterChange(
+                            filter.copy(priority = if (selected) null else priority)
+                        )
+                    },
+                    label = { Text(priority.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                    colors = filterChipColors()
+                )
+            }
+        }
+        TaskStatus.entries.forEach { status ->
+            item(key = "chip_status_${status.name}") {
+                val selected = filter.status == status
+                FilterChip(
+                    selected = selected,
+                    onClick = {
+                        onFilterChange(
+                            filter.copy(status = if (selected) null else status)
+                        )
+                    },
+                    label = {
+                        Text(
+                            when (status) {
+                                TaskStatus.TODO -> "To do"
+                                TaskStatus.IN_PROGRESS -> "In progress"
+                                TaskStatus.DONE -> "Done"
+                            }
+                        )
+                    },
+                    colors = filterChipColors()
+                )
+            }
+        }
+        item(key = "chip_group") {
+            FilterChip(
+                selected = filter.groupOnly,
+                onClick = { onFilterChange(filter.copy(groupOnly = !filter.groupOnly)) },
+                label = { Text("Group") },
+                colors = filterChipColors()
+            )
+        }
+    }
+}
 
-        // Performant Lazy Task Items
-        if (displayedTasks.isEmpty()) {
-            item(key = "tasks_empty_state") {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    color = NudgyCard,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
+@Composable
+private fun filterChipColors() = FilterChipDefaults.filterChipColors(
+    selectedContainerColor = colorResource(R.color.nudgy_teal),
+    selectedLabelColor = colorResource(R.color.nudgy_cream)
+)
+
+/** Priority marker: a dot only — coral for High, teal for Medium, muted for Low. Never text. */
+@Composable
+private fun priorityDotColor(priority: Priority) = when (priority) {
+    Priority.HIGH -> colorResource(R.color.nudgy_coral)
+    Priority.MEDIUM -> colorResource(R.color.nudgy_teal)
+    Priority.LOW -> colorResource(R.color.nudgy_muted)
+}
+
+@Composable
+private fun TaskRow(
+    item: TaskListItem,
+    onToggle: () -> Unit,
+    onClick: () -> Unit
+) {
+    val task = item.task
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = NudgyTokens.cardRadius,
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = NudgyTokens.cardElevation
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Checkbox(
+                checked = task.isCompleted,
+                onCheckedChange = { onToggle() },
+                colors = CheckboxDefaults.colors(
+                    checkedColor = colorResource(R.color.nudgy_teal)
+                )
+            )
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(priorityDotColor(task.priority))
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = task.title,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        textDecoration = if (task.isCompleted) {
+                            TextDecoration.LineThrough
+                        } else {
+                            TextDecoration.None
+                        }
+                    ),
+                    color = if (task.isCompleted) {
+                        colorResource(R.color.nudgy_muted)
+                    } else {
+                        colorResource(R.color.nudgy_ink)
+                    }
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Checklist,
-                            contentDescription = null,
-                            tint = NudgyPrimary.copy(alpha = 0.7f),
-                            modifier = Modifier.size(36.dp)
-                        )
+                    Text(
+                        text = formatDueLabel(task.dueDateEpochMillis, task.isCompleted),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colorResource(R.color.nudgy_muted)
+                    )
+                    if (item.project != null) {
                         Text(
-                            text = when (selectedTab) {
-                                0 -> "No tasks due today"
-                                1 -> "No upcoming tasks scheduled"
-                                else -> "No completed tasks yet"
-                            },
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                            color = NudgyCharcoal
+                            text = "· ${item.project.name}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colorResource(R.color.nudgy_muted)
                         )
+                    }
+                    if (item.subtaskTotal > 0) {
                         Text(
-                            text = when (selectedTab) {
-                                0 -> "Enjoy your free time or tap + above to schedule a task."
-                                1 -> "Plan ahead by tapping + above to add future priorities."
-                                else -> "Completed tasks will show up here as you check them off."
-                            },
-                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-                            color = NudgyMuted,
-                            textAlign = TextAlign.Center
+                            text = "· ${item.subtaskDone}/${item.subtaskTotal}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colorResource(R.color.nudgy_muted)
                         )
-
-                        if (selectedTab == 0 && upcomingTasks.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedButton(
-                                onClick = { selectedTab = 1 },
-                                shape = RoundedCornerShape(100.dp)
+                    }
+                }
+                if (item.tags.isNotEmpty() || task.groupId != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        item.tags.forEach { tag ->
+                            Box(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(colorFromHex(tag.color).copy(alpha = 0.14f))
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
                             ) {
                                 Text(
-                                    text = "View Upcoming (${upcomingTasks.size})",
-                                    fontSize = 12.sp,
-                                    color = NudgyAccent,
-                                    fontWeight = FontWeight.SemiBold
+                                    text = tag.name,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = colorResource(R.color.nudgy_ink)
+                                )
+                            }
+                        }
+                        if (task.groupId != null) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(
+                                        colorResource(R.color.nudgy_teal).copy(alpha = 0.12f)
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Group",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = colorResource(R.color.nudgy_teal)
                                 )
                             }
                         }
                     }
                 }
             }
-        } else {
-            items(
-                items = displayedTasks,
-                key = { it.id }
-            ) { task ->
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    color = NudgyCard,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp)
-                    ) {
-                        NudgyCheckbox(
-                            checked = task.isCompleted,
-                            onCheckedChange = { onToggleTask(task) }
-                        )
-
-                        // Icon container with checklist glyph
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (task.isCompleted) Color(0xFFF1F0FD) else NudgyPeach),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Checklist,
-                                contentDescription = null,
-                                tint = if (task.isCompleted) Color(0xFF7A68E6) else NudgyPrimary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable { onTaskClick(task) }
-                        ) {
-                            Text(
-                                text = task.title,
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None
-                                ),
-                                color = if (task.isCompleted) NudgyMuted else NudgyCharcoal
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            val categoryLabel = task.category.name.lowercase().replaceFirstChar { it.uppercase() }
-                            Text(
-                                text = if (task.priority == Priority.HIGH) "High priority · $categoryLabel" else if (task.reminderSet) "Reminder set · $categoryLabel" else categoryLabel,
-                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
-                                color = NudgyMuted
-                            )
-                            // Group v1: origin badge — a group task must be
-                            // visibly distinct from a personal task.
-                            if (task.groupId != null) {
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(100.dp))
-                                        .background(NudgyPrimary.copy(alpha = 0.12f))
-                                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = groupNames[task.groupId] ?: "Group",
-                                        style = MaterialTheme.typography.bodyMedium.copy(
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        ),
-                                        color = NudgyAccent
-                                    )
-                                }
-                            }
-                        }
-
-                        Text(
-                            text = timeFormatter.format(task.dueDateEpochMillis),
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontSize = 12.sp,
-                                color = NudgyMuted
-                            )
-                        )
-                    }
-                }
-            }
-        }
-
-        // Streak & Motivation Card
-        item(key = "tasks_insight_card") {
-            NudgyInsightCard(
-                title = "Build a good rhythm",
-                subtitle = "Small steps count. Keep your daily streak going."
-            )
-        }
-
-        // Generous bottom spacer
-        item(key = "tasks_bottom_spacer") {
-            Spacer(modifier = Modifier.height(84.dp))
         }
     }
 }
+
+private fun formatDueLabel(dueMillis: Long, isCompleted: Boolean): String {
+    if (dueMillis == TaskRepository.NO_DUE_DATE) return "No date"
+    val timeFmt = SimpleDateFormat("h:mm a", Locale.getDefault())
+    val dateFmt = SimpleDateFormat("EEE, MMM d", Locale.getDefault())
+    val now = Calendar.getInstance()
+    val due = Calendar.getInstance().apply { timeInMillis = dueMillis }
+    val sameDay = now.get(Calendar.YEAR) == due.get(Calendar.YEAR) &&
+        now.get(Calendar.DAY_OF_YEAR) == due.get(Calendar.DAY_OF_YEAR)
+    val tomorrow = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) }
+    val isTomorrow = tomorrow.get(Calendar.YEAR) == due.get(Calendar.YEAR) &&
+        tomorrow.get(Calendar.DAY_OF_YEAR) == due.get(Calendar.DAY_OF_YEAR)
+    val overdue = !isCompleted && dueMillis < startOfTodayMillis()
+    val prefix = if (overdue) "Overdue · " else ""
+    return when {
+        sameDay -> "${prefix}Today, ${timeFmt.format(dueMillis)}"
+        isTomorrow -> "${prefix}Tomorrow, ${timeFmt.format(dueMillis)}"
+        else -> "${prefix}${dateFmt.format(dueMillis)}, ${timeFmt.format(dueMillis)}"
+    }
+}
+
+private fun startOfTodayMillis(): Long =
+    Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis

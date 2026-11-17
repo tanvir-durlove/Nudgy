@@ -68,17 +68,17 @@ interface TaskDao {
     @Update
     suspend fun updateTask(task: TaskEntity)
 
-    @Query("UPDATE tasks SET isCompleted = :isCompleted, completedAtEpochMillis = :completedAt, isSyncedToCloud = 0, updatedAtEpochMillis = :now WHERE id = :id")
+    @Query("UPDATE tasks SET isCompleted = :isCompleted, status = CASE WHEN :isCompleted THEN 'DONE' ELSE 'TODO' END, completedAtEpochMillis = :completedAt, isSyncedToCloud = 0, updatedAtEpochMillis = :now WHERE id = :id")
     suspend fun setTaskCompletion(id: String, isCompleted: Boolean, completedAt: Long?, now: Long)
 
-    @Query("UPDATE tasks SET isCompleted = :isCompleted, completedAtEpochMillis = :completedAt, isSyncedToCloud = 0, updatedAtEpochMillis = :now WHERE id = :id AND userId = :userId")
+    @Query("UPDATE tasks SET isCompleted = :isCompleted, status = CASE WHEN :isCompleted THEN 'DONE' ELSE 'TODO' END, completedAtEpochMillis = :completedAt, isSyncedToCloud = 0, updatedAtEpochMillis = :now WHERE id = :id AND userId = :userId")
     suspend fun setTaskCompletionForUser(userId: String, id: String, isCompleted: Boolean, completedAt: Long?, now: Long)
 
     // Group rows only: completion is local-only, so it must NOT mark the row
     // dirty — otherwise the personal sync would upload a group task as a
     // personal cloud copy. Group rows are inserted with isSyncedToCloud = 1
     // and must stay that way.
-    @Query("UPDATE tasks SET isCompleted = :isCompleted, completedAtEpochMillis = :completedAt, updatedAtEpochMillis = :now WHERE id = :id AND userId = :userId")
+    @Query("UPDATE tasks SET isCompleted = :isCompleted, status = CASE WHEN :isCompleted THEN 'DONE' ELSE 'TODO' END, completedAtEpochMillis = :completedAt, updatedAtEpochMillis = :now WHERE id = :id AND userId = :userId")
     suspend fun setTaskCompletionLocal(userId: String, id: String, isCompleted: Boolean, completedAt: Long?, now: Long)
 
     @Query("UPDATE tasks SET isSyncedToCloud = 1 WHERE id = :id")
@@ -124,6 +124,41 @@ interface TaskDao {
 
     @Query("UPDATE tasks SET userId = :toUserId, isSyncedToCloud = 0 WHERE userId = :fromUserId")
     suspend fun reassignUser(fromUserId: String, toUserId: String)
+
+    // ---- Sprint 1-1 (MIGRATION_7_8) ----
+
+    @Query("SELECT * FROM tasks WHERE id = :id LIMIT 1")
+    fun getTaskByIdFlow(id: String): Flow<TaskEntity?>
+
+    /** Top-level tasks only — subtasks (parentTaskId != null) live inside the detail sheet. */
+    @Query("SELECT * FROM tasks WHERE userId = :userId AND parentTaskId IS NULL ORDER BY dueDateEpochMillis ASC")
+    fun getTopLevelTasksFlow(userId: String): Flow<List<TaskEntity>>
+
+    /** Subtasks of one parent, creation order. ONE level only. */
+    @Query("SELECT * FROM tasks WHERE parentTaskId = :parentId ORDER BY createdAtEpochMillis ASC")
+    fun getSubtasksFlow(parentId: String): Flow<List<TaskEntity>>
+
+    @Query("SELECT COUNT(*) FROM tasks WHERE parentTaskId = :parentId")
+    suspend fun getSubtaskCount(parentId: String): Int
+
+    @Query("SELECT COUNT(*) FROM tasks WHERE parentTaskId = :parentId AND isCompleted = 1")
+    suspend fun getSubtaskCompletedCount(parentId: String): Int
+
+    /**
+     * The single write path for completion + status (repository toggle and
+     * Board drag, S1-4): sets both together so DONE ⇔ isCompleted = true
+     * can never drift. Personal rows are dirty-marked; group rows use the
+     * Local variant below (never dirty-marked, never synced).
+     */
+    @Query("UPDATE tasks SET status = :status, isCompleted = :isCompleted, completedAtEpochMillis = :completedAt, isSyncedToCloud = 0, updatedAtEpochMillis = :now WHERE id = :id AND userId = :userId")
+    suspend fun setTaskStatusAndCompletionForUser(userId: String, id: String, status: String, isCompleted: Boolean, completedAt: Long?, now: Long)
+
+    @Query("UPDATE tasks SET status = :status, isCompleted = :isCompleted, completedAtEpochMillis = :completedAt, updatedAtEpochMillis = :now WHERE id = :id AND userId = :userId")
+    suspend fun setTaskStatusAndCompletionLocal(userId: String, id: String, status: String, isCompleted: Boolean, completedAt: Long?, now: Long)
+
+    /** Deleting a project orphans its tasks (projectId -> NULL); tasks are never deleted. */
+    @Query("UPDATE tasks SET projectId = NULL, updatedAtEpochMillis = :now WHERE projectId = :projectId")
+    suspend fun clearProjectFromTasks(projectId: String, now: Long)
 }
 
 @Dao

@@ -26,6 +26,9 @@ sealed class NudgyRoute(val route: String) {
     data object Groups : NudgyRoute("groups")
     data object Settings : NudgyRoute("settings")
 
+    /** Tasks list — NOT a bottom destination (reached from Today). */
+    data object Tasks : NudgyRoute("tasks")
+
     /** Nested route inside the Today graph — not a bottom destination. */
     data object Plan : NudgyRoute("today/plan")
 
@@ -37,7 +40,9 @@ sealed class NudgyRoute(val route: String) {
         // NudgyRoute.getRoute:22). A get() evaluates after init completes.
         val startDestination: NudgyRoute get() = Today
 
-        val all: List<NudgyRoute> get() = listOf(Today, Calendar, Chat, Groups, Settings)
+        // Tasks is in `all` (so fromRoute("tasks") resolves and no bottom
+        // tab is highlighted there) but NOT in bottomNavEntries — it has no tab.
+        val all: List<NudgyRoute> get() = listOf(Today, Calendar, Chat, Groups, Settings, Tasks)
 
         fun fromRoute(route: String?): NudgyRoute =
             all.firstOrNull { it.route == route } ?: Today

@@ -1,8 +1,10 @@
 package com.nextgentool.nudgy.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.nextgentool.nudgy.data.model.Priority
+import com.nextgentool.nudgy.data.model.TaskStatus
 import com.nextgentool.nudgy.data.model.TaskCategory
 import java.util.UUID
 
@@ -26,7 +28,30 @@ data class TaskEntity(
     // Group feature (v5): null for personal tasks. A non-null groupId marks
     // a group row — it is local-only for completion/sync purposes and must
     // never be uploaded via the personal sync path (see TaskRepository).
-    val groupId: String? = null
+    val groupId: String? = null,
+    // Sprint 1-1 (MIGRATION_7_8, spec §4). status is NOT NULL with a SQL
+    // DEFAULT 'TODO' so the migrated column matches Room's expected schema
+    // (migration backfills isCompleted = 1 -> 'DONE'). DONE ⇔ isCompleted.
+    @ColumnInfo(defaultValue = "'TODO'")
+    val status: TaskStatus = TaskStatus.TODO,
+    /** Start time when the task is slotted into a Plan (null = not planned). */
+    val plannedStartEpochMillis: Long? = null,
+    /** Date (yyyy-MM-dd) whose Plan picked this task; null = in no Plan. */
+    val plannedDate: String? = null,
+    /** Estimated minutes (Feature 18, S1-5 UI); null = no estimate (Q8). */
+    val estimatedMinutes: Int? = null,
+    /** Actual minutes spent, entered by hand (Feature 18); null = not logged. */
+    val actualMinutes: Int? = null,
+    /** Subtask's parent task id; null = top-level task. ONE level only. */
+    val parentTaskId: String? = null,
+    /** Project/list id (Feature 2); null = no project. */
+    val projectId: String? = null,
+    /** Date (yyyy-MM-dd) the task was carried over from (Feature 16). */
+    val carriedOverFromDate: String? = null,
+    /** Template this task was created from (Feature 13); null = not from a template. */
+    val templateId: String? = null,
+    /** Repeat the reminder every N minutes until completed; null = once (Feature 6). */
+    val reminderRepeatMinutes: Int? = null
 )
 
 @Entity(tableName = "calendar_events")
