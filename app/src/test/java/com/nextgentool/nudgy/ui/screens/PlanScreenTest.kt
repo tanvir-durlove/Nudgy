@@ -130,6 +130,24 @@ class PlanScreenTest {
         assertTrue(condition())
     }
 
+    /**
+     * Wait until the draft has FULLY settled: the budget line AND the
+     * No-est task's row are both present. The budget alone is not
+     * enough — No-est carries no estimate, so it contributes 0 to the
+     * budget and the line can appear before its row streams in. The
+     * draft re-seeds per emission; starting the day or asserting order
+     * on a half-streamed draft stamps / checks only the tasks seen so
+     * far.
+     */
+    private fun waitForFullDraft() {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("3h 0m of 8h planned")
+                .fetchSemanticsNodes().isNotEmpty() &&
+                composeRule.onAllNodesWithText("No-est task")
+                    .fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
     private fun seedPlanData() {
         // Carry-over (120 min) + today 60 min + today 500 min (over the
         // 8h budget once the first two are picked) + no-estimate task.
@@ -147,14 +165,10 @@ class PlanScreenTest {
             composeRule.onAllNodesWithText("Old report")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        // Wait for the FULL draft, not just the first task: the draft
-        // re-seeds per emission, and asserting order while rows are
-        // still streaming in is a coin flip. The budget line proves all
-        // four tasks are picked/unpicked as expected (180 min).
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("3h 0m of 8h planned")
-                .fetchSemanticsNodes().isNotEmpty()
-        }
+        // Wait for the FULL draft, not just the first task (see
+        // waitForFullDraft): asserting order while rows are still
+        // streaming in is a coin flip.
+        waitForFullDraft()
         // Carry-over first, then today-due in due order.
         assertTrue(topOf("Old report") < topOf("Dentist"))
         assertTrue(topOf("Dentist") < topOf("No-est task"))
@@ -174,12 +188,9 @@ class PlanScreenTest {
             composeRule.onAllNodesWithText("Old report")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        // Full draft first (see the draft test): starting the day on a
+        // Full draft first (see waitForFullDraft): starting the day on a
         // half-streamed draft would stamp only the tasks seen so far.
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("3h 0m of 8h planned")
-                .fetchSemanticsNodes().isNotEmpty()
-        }
+        waitForFullDraft()
         composeRule.onNodeWithTag("plan_start_button").performScrollTo().performClick()
         // Drive the Main looper (Room writes + appliedFlow), then let
         // Compose settle (recomposition + the LaunchedEffect that fires
@@ -229,11 +240,8 @@ class PlanScreenTest {
             composeRule.onAllNodesWithText("Old report")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        // Full draft first (see the draft test).
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("3h 0m of 8h planned")
-                .fetchSemanticsNodes().isNotEmpty()
-        }
+        // Full draft first (see waitForFullDraft).
+        waitForFullDraft()
         // Pick the over-budget task by hand, then start the day. A fresh
         // draft would never pick it (500 min does not fit the 8h budget
         // after the first two), so the second Plan proves the previous
@@ -282,11 +290,8 @@ class PlanScreenTest {
             composeRule.onAllNodesWithText("Old report")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        // Full draft first (see the draft test).
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("3h 0m of 8h planned")
-                .fetchSemanticsNodes().isNotEmpty()
-        }
+        // Full draft first (see waitForFullDraft).
+        waitForFullDraft()
         assertTrue(topOf("Old report") < topOf("Dentist"))
         composeRule.onNodeWithContentDescription("Move Old report down")
             .performScrollTo().performClick()

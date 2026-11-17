@@ -137,12 +137,11 @@ class PlanViewModelTest {
         pumpUntil { !viewModel.uiState.value.isLoading }
         viewModel.startMyDay()
         val today = todayDateString()
-        pumpUntil {
-            runBlocking {
-                repository.getAllTasksOnce(repository.currentUserId())
-                    .first { it.title == "Dentist" }.plannedDate == today
-            }
-        }
+        // Wait for planApplied, not for a single task: the stamp loop
+        // writes in picked order (Old, Dentist, No-est), so waiting for
+        // the Dentist alone can return while No-est is still unstamped
+        // and the read below would see a half-finished plan.
+        pumpUntil { viewModel.uiState.value.planApplied }
         val tasks = runBlocking {
             repository.getAllTasksOnce(repository.currentUserId())
         }
@@ -168,9 +167,5 @@ class PlanViewModelTest {
         // The unpicked task is not planned.
         assertNull(bigProject.plannedDate)
         assertNull(bigProject.plannedStartEpochMillis)
-        // planApplied propagates a beat after the Room writes (it flows
-        // through the combine on Main), so pump for it instead of
-        // asserting it synchronously.
-        pumpUntil { viewModel.uiState.value.planApplied }
     }
 }
