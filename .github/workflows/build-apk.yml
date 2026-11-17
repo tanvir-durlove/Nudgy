@@ -91,9 +91,15 @@ jobs:
         run: |
           ./gradlew assembleDebug bundleDebug --no-daemon --stacktrace
 
+      # Unit tests (incl. Room migration tests) are a merge gate — a failure must fail the job.
+      - name: Run unit tests
+        run: |
+          ./gradlew testDebugUnitTest --no-daemon --stacktrace
+
       - name: Prepare & Verify Artifacts
         run: |
           mkdir -p build-artifacts
+          
           # Copy APK
           # When the release keystore is configured, the release APK must exist;
           # never copy a debug APK into a release-named slot.
