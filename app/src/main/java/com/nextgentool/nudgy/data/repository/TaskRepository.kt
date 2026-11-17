@@ -1,30 +1,25 @@
 package com.nextgentool.nudgy.data.repository
 
 import android.content.Context
-import android.util.Log
-import com.nextgentool.nudgy.R
+import com.nextgentool.nudgy.auth.AuthManager
 import com.nextgentool.nudgy.data.local.NudgyDatabase
+import com.nextgentool.nudgy.data.local.entity.ProjectEntity
+import com.nextgentool.nudgy.data.local.entity.SavedViewEntity
+import com.nextgentool.nudgy.data.local.entity.TagEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
+import com.nextgentool.nudgy.data.model.TaskStatus
 import com.nextgentool.nudgy.reminders.ReminderManager
-import com.google.firebase.firestore.DocumentChange
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.ListenerRegistration
-import com.google.firebase.firestore.SetOptions
-import kotlinx.coroutines.CoroutineScope
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Calendar
 import java.util.UUID
+import javax.inject.Inject
+import javax.inject.Singleton
 
 data class DailyTaskStats(
     val total: Int = 0,
@@ -33,90 +28,68 @@ data class DailyTaskStats(
     val percentage: Float = 0f
 )
 
-class TaskRepository(
-    private val context: Context,
+/**
+ * Sprint 1-1 — rewritten Tasks data layer (spec §3, §6 Features 1–2).
+ *
+ * Room is the single source of truth: the UI only ever sees Flows from
+ * here (or a UseCase on top of it) and never touches a DAO directly.
+ *
+ * The single write path: every completion/status change goes through
+ * [toggleTaskCompletion] / [setTaskStatus], which write `status` and
+ * `isCompleted` together — DONE ⇔ isCompleted = true can never drift.
+ * (The DAO's setTaskCompletion* SQLs carry the same rule for the
+ * ReminderReceiver's direct calls.)
+ *
+ * "No date": [NO_DUE_DATE] (0L) means a task has no due date (Feature 1).
+ * The v7 schema has no nullable due column, so a sentinel is used
+ * instead of a table rebuild. Tasks with due = 0 never appear in Today
+ * (S1-2 must exclude them from the day query) and group under "No date"
+ * in Upcoming / the Tasks list. 0 is 1970-01-01 — never a real due date.
+ *
+ * Cloud sync: deliberately NOT in this rewrite. The old repository's
+ * Firestore listener + upload + pending-delete machinery is not running
+ * in the rebuild (nothing calls startCloudSync since the old MainActivity
+ * went away in S1-0), and Sprint 1 is local-first. It will be re-attached
+ * from git history (TaskRepository before this rewrite) when sync returns
+ * — the local rules it depended on are preserved: group rows are
+ * local-only (never dirty-marked, never uploaded) and their completion
+ * is Room-local. Local data is unaffected by the removal.
+ *
+ * Constructor shape is frozen: ReminderReceiver builds
+ * TaskRepository(context) directly, and ClientIntentPreFilterTest builds
+ * TaskRepository(context, db). Both must keep compiling.
+ */
+@Singleton
+class TaskRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val database: NudgyDatabase = NudgyDatabase.getInstance(context)
 ) {
     private val taskDao = database.taskDao()
-    private val reminderManager = com.nextgentool.nudgy.reminders.ReminderManager(context)
-    private val repoScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private var snapshotListener: ListenerRegistration? = null
+    private val tagDao = database.tagDao()
+    private val projectDao = database.projectDao()
+    private val savedViewDao = database.savedViewDao()
+    private val reminderManager = ReminderManager(context)
 
     companion object {
-        private const val KEY_PENDING_TASK_DELETES = "pending_task_deletes"
-        /** Per-item bound for a pending-delete retry (see drainPendingTaskDeletes). */
-        private const val PENDING_DELETE_TIMEOUT_MS = 10_000L
+        /** dueDateEpochMillis value meaning "no due date" (Feature 1). */
+        const val NO_DUE_DATE: Long = 0L
     }
 
-    // ---------------------------------------------------------------- C13 pending deletes
-    //
-    // A local delete records the id here in the SAME step; the entry is
-    // removed only when the Firestore delete actually succeeds.
-    // startCloudSync drains this store BEFORE attaching the listener, and
-    // the listener skips ids still pending, so an offline/failed cloud
-    // delete can never resurrect the task on the next sync. SharedPreferences
-    // (no Room schema change): ids are UUIDs, stored as "userId/taskId".
-    private fun pendingDeletesPrefs() =
-        context.getSharedPreferences("nudgy_pending_deletes", Context.MODE_PRIVATE)
+    /** The user whose data this repository serves (guest when signed out). */
+    fun currentUserId(): String =
+        AuthManager.getActiveUserId(context).ifBlank { AuthManager.GUEST_USER_ID }
 
-    private fun recordPendingTaskDelete(userId: String, taskId: String) {
-        val prefs = pendingDeletesPrefs()
-        val updated = prefs.getStringSet(KEY_PENDING_TASK_DELETES, emptySet())
-            ?.toMutableSet() ?: mutableSetOf()
-        // commit() (synchronous): the record must be durable before the
-        // fire-and-forget cloud attempt that follows it.
-        if (updated.add("$userId/$taskId")) {
-            prefs.edit().putStringSet(KEY_PENDING_TASK_DELETES, updated).commit()
-        }
-    }
-
-    private fun removePendingTaskDelete(userId: String, taskId: String) {
-        val prefs = pendingDeletesPrefs()
-        val updated = prefs.getStringSet(KEY_PENDING_TASK_DELETES, emptySet())
-            ?.toMutableSet() ?: return
-        if (updated.remove("$userId/$taskId")) {
-            prefs.edit().putStringSet(KEY_PENDING_TASK_DELETES, updated).apply()
-        }
-    }
-
-    private fun pendingTaskDeleteIds(userId: String): Set<String> {
-        val prefix = "$userId/"
-        return pendingDeletesPrefs().getStringSet(KEY_PENDING_TASK_DELETES, emptySet())
-            .orEmpty().filter { it.startsWith(prefix) }
-            .map { it.removePrefix(prefix) }.toSet()
-    }
-
-    /** Retry every pending delete for this user. Bounded per item: an offline
-     *  delete().await() would otherwise suspend until connectivity returns
-     *  and stall the sync that follows. A timed-out/failed entry stays
-     *  pending for the next drain; the listener guard keeps the task from
-     *  resurrecting in the meantime. Deleting a doc that is already gone
-     *  succeeds, so a retry after a half-finished drain is harmless. */
-    private suspend fun drainPendingTaskDeletes(userId: String) {
-        if (userId == com.nextgentool.nudgy.auth.AuthManager.GUEST_USER_ID) return
-        val dbId = context.getString(R.string.firestore_database_id)
-        val firestore = FirebaseFirestore.getInstance(dbId)
-        for (taskId in pendingTaskDeleteIds(userId)) {
-            val deleted = withTimeoutOrNull(PENDING_DELETE_TIMEOUT_MS) {
-                try {
-                    firestore.collection("users").document(userId).collection("tasks")
-                        .document(taskId).delete().await()
-                    true
-                } catch (e: Exception) {
-                    Log.w("TaskRepository", "Pending task delete failed for $taskId: ${e.message}")
-                    false
-                }
-            } ?: false
-            if (deleted) {
-                removePendingTaskDelete(userId, taskId)
-            } else {
-                Log.w("TaskRepository", "Pending task delete still outstanding for $taskId; will retry on next sync")
-            }
-        }
-    }
+    // ------------------------------------------------------------------ reads
 
     fun observeAllTasks(userId: String): Flow<List<TaskEntity>> =
         taskDao.getAllTasksFlow(userId)
+
+    /** Top-level tasks (subtasks excluded — they live in the detail sheet). */
+    fun observeTopLevelTasks(userId: String): Flow<List<TaskEntity>> =
+        taskDao.getTopLevelTasksFlow(userId)
+
+    fun observeTask(taskId: String): Flow<TaskEntity?> =
+        taskDao.getTaskByIdFlow(taskId)
 
     fun observeTodayTasks(userId: String): Flow<List<TaskEntity>> {
         val (startOfDay, endOfDay) = getTodayBounds()
@@ -147,6 +120,12 @@ class TaskRepository(
         }
     }
 
+    suspend fun getTaskById(taskId: String): TaskEntity? = withContext(Dispatchers.IO) {
+        taskDao.getTaskById(taskId)
+    }
+
+    // ------------------------------------------------------------- tasks CRUD
+
     suspend fun createTask(
         userId: String,
         title: String,
@@ -158,7 +137,11 @@ class TaskRepository(
         recurrenceRule: String? = null,
         // An explicit reminder time ("remind me at 3 PM"). Null = the
         // 2h-before-due lead (ReminderManager.dueReminderTriggerMillis).
-        reminderEpochMillis: Long? = null
+        reminderEpochMillis: Long? = null,
+        parentTaskId: String? = null,
+        projectId: String? = null,
+        templateId: String? = null,
+        estimatedMinutes: Int? = null
     ): TaskEntity = withContext(Dispatchers.IO) {
         val task = TaskEntity(
             id = UUID.randomUUID().toString(),
@@ -169,8 +152,9 @@ class TaskRepository(
             priority = priority,
             category = category,
             isCompleted = false,
-            reminderSet = reminderSet,
-            reminderEpochMillis = if (reminderSet) {
+            status = TaskStatus.TODO,
+            reminderSet = reminderSet && dueEpochMillis != NO_DUE_DATE,
+            reminderEpochMillis = if (reminderSet && dueEpochMillis != NO_DUE_DATE) {
                 reminderEpochMillis ?: ReminderManager.dueReminderTriggerMillis(null, dueEpochMillis)
             } else {
                 null
@@ -178,7 +162,11 @@ class TaskRepository(
             recurrenceRule = recurrenceRule,
             isSyncedToCloud = false,
             createdAtEpochMillis = System.currentTimeMillis(),
-            updatedAtEpochMillis = System.currentTimeMillis()
+            updatedAtEpochMillis = System.currentTimeMillis(),
+            parentTaskId = parentTaskId,
+            projectId = projectId,
+            templateId = templateId,
+            estimatedMinutes = estimatedMinutes
         )
         taskDao.insertTask(task)
         if (task.reminderSet) {
@@ -187,55 +175,33 @@ class TaskRepository(
                 reminderManager.scheduleReminder(task.id, task.title, trigger)
             }
         }
-        syncDirtyTasksToCloud(userId)
         task
     }
 
-    suspend fun toggleTaskCompletion(task: TaskEntity) = withContext(Dispatchers.IO) {
-        val newStatus = !task.isCompleted
-        val completedAt = if (newStatus) System.currentTimeMillis() else null
-        // Group v1: member completion is Room-local ONLY. Group rows must never
-        // be dirty-marked or synced — otherwise a member's completion becomes
-        // a personal cloud copy of a shared item.
-        if (task.groupId != null) {
-            taskDao.setTaskCompletionLocal(
-                userId = task.userId,
-                id = task.id,
-                isCompleted = newStatus,
-                completedAt = completedAt,
-                now = System.currentTimeMillis()
-            )
-        } else {
-            taskDao.setTaskCompletionForUser(
-                userId = task.userId,
-                id = task.id,
-                isCompleted = newStatus,
-                completedAt = completedAt,
-                now = System.currentTimeMillis()
-            )
-        }
-        if (newStatus) {
-            reminderManager.cancelReminder(task.id)
-        } else if (task.reminderSet) {
-            val trigger = ReminderManager.dueReminderTriggerMillis(task.reminderEpochMillis, task.dueDateEpochMillis)
-            if (trigger > System.currentTimeMillis()) {
-                reminderManager.scheduleReminder(task.id, task.title, trigger)
+    /**
+     * A subtask is a plain task row with parentTaskId set. ONE level only:
+     * creating a subtask under a subtask is rejected — the detail sheet
+     * never offers it, and this is the backstop.
+     */
+    suspend fun createSubtask(parentId: String, title: String): TaskEntity =
+        withContext(Dispatchers.IO) {
+            val parent = taskDao.getTaskById(parentId)
+                ?: throw IllegalArgumentException("Parent task $parentId not found")
+            require(parent.parentTaskId == null) {
+                "Subtasks have no subtasks (parent $parentId is itself a subtask)"
             }
+            createTask(
+                userId = parent.userId,
+                title = title,
+                dueEpochMillis = NO_DUE_DATE,
+                parentTaskId = parentId
+            )
         }
-        if (task.groupId == null) {
-            syncDirtyTasksToCloud(task.userId)
-        }
-    }
-
-    suspend fun getTaskById(taskId: String): TaskEntity? = withContext(Dispatchers.IO) {
-        taskDao.getTaskById(taskId)
-    }
 
     suspend fun updateTask(task: TaskEntity) = withContext(Dispatchers.IO) {
-        // Group v1: group rows are edited through GroupRepository (cloud write
-        // to the shared group item). This path is a defensive local-only update
-        // that must NOT dirty-mark the row — a dirty group row would be
-        // uploaded as a personal cloud copy by syncDirtyTasksToCloud.
+        // Group v1: group rows are edited through GroupRepository (cloud
+        // write to the shared group item). This path is a defensive
+        // local-only update — it must NOT dirty-mark the row.
         //
         // Keep the stored reminder time in sync with the (possibly new) due
         // time. An explicitly passed reminder time is respected; otherwise
@@ -248,31 +214,29 @@ class TaskRepository(
             existing.reminderEpochMillis != null &&
             existing.reminderEpochMillis == existing.dueDateEpochMillis
         val resolvedReminder: Long? = when {
-            !task.reminderSet || task.isCompleted -> null
+            !task.reminderSet || task.isCompleted || task.dueDateEpochMillis == NO_DUE_DATE -> null
             passedReminderChanged -> task.reminderEpochMillis
             explicitAtDue -> task.dueDateEpochMillis
-            // C9: a stored reminder that is neither "at due" nor the 2h
-            // lead is an explicit custom time — keep it verbatim instead
-            // of silently replacing it with the lead. (EditTaskSheet only
-            // passes such a value through when the due time is unchanged,
-            // or when the due time changed and the stored time is custom.)
             existing?.reminderEpochMillis != null &&
                 existing.reminderEpochMillis != existing.dueDateEpochMillis - ReminderManager.REMINDER_LEAD_MILLIS -> existing.reminderEpochMillis
             else -> ReminderManager.dueReminderTriggerMillis(null, task.dueDateEpochMillis)
         }
-        val resolved = task.copy(reminderEpochMillis = resolvedReminder)
-        if (task.groupId != null) {
-            taskDao.updateTask(
-                resolved.copy(updatedAtEpochMillis = System.currentTimeMillis())
-            )
-        } else {
-            taskDao.updateTask(
-                resolved.copy(
-                    updatedAtEpochMillis = System.currentTimeMillis(),
-                    isSyncedToCloud = false
-                )
-            )
+        // The invariant: status and isCompleted are derived from each
+        // other, never written independently.
+        val resolvedIsCompleted = task.status == TaskStatus.DONE
+        val resolvedCompletedAt = when {
+            resolvedIsCompleted && task.completedAtEpochMillis == null -> System.currentTimeMillis()
+            resolvedIsCompleted -> task.completedAtEpochMillis
+            else -> null
         }
+        val resolved = task.copy(
+            reminderEpochMillis = resolvedReminder,
+            isCompleted = resolvedIsCompleted,
+            completedAtEpochMillis = resolvedCompletedAt,
+            updatedAtEpochMillis = System.currentTimeMillis(),
+            isSyncedToCloud = if (task.groupId != null) task.isSyncedToCloud else false
+        )
+        taskDao.updateTask(resolved)
         if (resolvedReminder != null) {
             if (resolvedReminder > System.currentTimeMillis()) {
                 reminderManager.scheduleReminder(task.id, task.title, resolvedReminder)
@@ -282,20 +246,78 @@ class TaskRepository(
         } else {
             reminderManager.cancelReminder(task.id)
         }
-        if (task.groupId == null) {
-            syncDirtyTasksToCloud(task.userId)
+    }
+
+    /** Flip completion — and the status with it (DONE ⇔ isCompleted). */
+    suspend fun toggleTaskCompletion(task: TaskEntity) = withContext(Dispatchers.IO) {
+        val newCompleted = !task.isCompleted
+        val newStatus = if (newCompleted) TaskStatus.DONE else TaskStatus.TODO
+        val completedAt = if (newCompleted) System.currentTimeMillis() else null
+        val now = System.currentTimeMillis()
+        // Group v1: member completion is Room-local ONLY.
+        if (task.groupId != null) {
+            taskDao.setTaskStatusAndCompletionLocal(
+                userId = task.userId,
+                id = task.id,
+                status = newStatus.name,
+                isCompleted = newCompleted,
+                completedAt = completedAt,
+                now = now
+            )
+        } else {
+            taskDao.setTaskStatusAndCompletionForUser(
+                userId = task.userId,
+                id = task.id,
+                status = newStatus.name,
+                isCompleted = newCompleted,
+                completedAt = completedAt,
+                now = now
+            )
         }
+        if (newCompleted) {
+            reminderManager.cancelReminder(task.id)
+        } else if (task.reminderSet) {
+            val trigger = ReminderManager.dueReminderTriggerMillis(task.reminderEpochMillis, task.dueDateEpochMillis)
+            if (trigger > System.currentTimeMillis()) {
+                reminderManager.scheduleReminder(task.id, task.title, trigger)
+            }
+        }
+    }
+
+    /** Set the Board/status column directly (S1-4 drag); completion follows. */
+    suspend fun setTaskStatus(task: TaskEntity, status: TaskStatus) = withContext(Dispatchers.IO) {
+        val completed = status == TaskStatus.DONE
+        val completedAt = if (completed) System.currentTimeMillis() else null
+        val now = System.currentTimeMillis()
+        if (task.groupId != null) {
+            taskDao.setTaskStatusAndCompletionLocal(
+                userId = task.userId,
+                id = task.id,
+                status = status.name,
+                isCompleted = completed,
+                completedAt = completedAt,
+                now = now
+            )
+        } else {
+            taskDao.setTaskStatusAndCompletionForUser(
+                userId = task.userId,
+                id = task.id,
+                status = status.name,
+                isCompleted = completed,
+                completedAt = completedAt,
+                now = now
+            )
+        }
+        if (completed) reminderManager.cancelReminder(task.id)
     }
 
     suspend fun deleteTask(userId: String, taskId: String) = withContext(Dispatchers.IO) {
         reminderManager.cancelReminder(taskId)
         // Group v1: group rows are deleted from the shared group item by the
         // creator (GroupRepository). A member-side delete is local-only.
-        val task = taskDao.getTaskById(taskId)
+        // Either way the row goes; task_tags / attachments rows follow via
+        // the FK cascades.
         taskDao.deleteTaskByIdForUser(userId, taskId)
-        if (task?.groupId == null) {
-            deleteTaskFromFirestore(userId, taskId)
-        }
     }
 
     suspend fun deleteTask(taskId: String) = withContext(Dispatchers.IO) {
@@ -303,9 +325,6 @@ class TaskRepository(
         val task = taskDao.getTaskById(taskId)
         if (task != null) {
             taskDao.deleteTaskByIdForUser(task.userId, taskId)
-            if (task.groupId == null) {
-                deleteTaskFromFirestore(task.userId, taskId)
-            }
         } else {
             taskDao.deleteTaskById(taskId)
         }
@@ -313,8 +332,8 @@ class TaskRepository(
 
     suspend fun snoozeTask(taskId: String, snoozeEpochMillis: Long) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        // Group v1: snoozing a group task is a local-only change (same rule as
-        // completion) — never dirty-mark a group row.
+        // Group v1: snoozing a group task is a local-only change (same rule
+        // as completion) — never dirty-mark a group row.
         val existing = taskDao.getTaskById(taskId)
         if (existing?.groupId != null) {
             taskDao.snoozeTaskLocal(
@@ -334,159 +353,106 @@ class TaskRepository(
         val task = taskDao.getTaskById(taskId)
         if (task != null) {
             reminderManager.scheduleReminder(task.id, task.title, snoozeEpochMillis)
-            if (task.groupId == null) {
-                syncDirtyTasksToCloud(task.userId)
-            }
-        }
-    }
-
-    private fun deleteTaskFromFirestore(userId: String, taskId: String) {
-        // Guests have no Firebase Auth identity — cloud calls would only
-        // fail with permission-denied; local persistence is unaffected.
-        if (userId == com.nextgentool.nudgy.auth.AuthManager.GUEST_USER_ID) return
-        // C13: record the pending delete in the same step as the local
-        // delete (this runs synchronously on the caller's IO thread,
-        // before the fire-and-forget attempt below). Removed only when
-        // the cloud delete actually succeeds.
-        recordPendingTaskDelete(userId, taskId)
-        repoScope.launch {
-            try {
-                val dbId = context.getString(R.string.firestore_database_id)
-                val firestore = FirebaseFirestore.getInstance(dbId)
-                firestore.collection("users").document(userId).collection("tasks").document(taskId).delete().await()
-                removePendingTaskDelete(userId, taskId)
-            } catch (e: Exception) {
-                Log.w("TaskRepository", "Failed to delete task from cloud: ${e.message}")
-            }
         }
     }
 
     suspend fun clearCompletedTasks(userId: String) = withContext(Dispatchers.IO) {
         // Group v1: completed group rows are NOT cleared here — the shared
         // group item still exists, so a listener/poll tick would resurrect
-        // them. Only personal completed tasks are purged (local + cloud).
-        val completed = taskDao.getCompletedTasksOnce(userId)
-            .filter { it.groupId == null }
-        if (completed.isNotEmpty() && userId != com.nextgentool.nudgy.auth.AuthManager.GUEST_USER_ID) {
-            // C13: record every id BEFORE the local purge, so a failed
-            // cloud purge cannot resurrect them on the next sync. Entries
-            // are removed per item as their cloud delete succeeds; any
-            // id left behind is retried by the drain in startCloudSync.
-            completed.forEach { recordPendingTaskDelete(userId, it.id) }
-            repoScope.launch {
-                try {
-                    val dbId = context.getString(R.string.firestore_database_id)
-                    val firestore = FirebaseFirestore.getInstance(dbId)
-                    val tasksColl = firestore.collection("users").document(userId).collection("tasks")
-                    for (task in completed) {
-                        tasksColl.document(task.id).delete().await()
-                        removePendingTaskDelete(userId, task.id)
-                    }
-                } catch (e: Exception) {
-                    Log.w("TaskRepository", "Cloud completed tasks purge warning: ${e.message}")
-                }
-            }
-        }
+        // them. Only personal completed tasks are purged.
         taskDao.deleteCompletedPersonalTasks(userId)
     }
 
-    fun startCloudSync(userId: String) {
-        if (userId == com.nextgentool.nudgy.auth.AuthManager.GUEST_USER_ID) return
-        snapshotListener?.remove()
-        // C13: drain pending deletes BEFORE the listener attaches, so its
-        // initial snapshot cannot resurrect a task whose cloud delete
-        // failed. The drain is time-bounded; the listener additionally
-        // skips any id still pending (see below), so a timed-out drain
-        // still cannot resurrect.
-        repoScope.launch {
-            drainPendingTaskDeletes(userId)
-            attachTasksListener(userId)
-        }
+    // ---------------------------------------------------------------- subtasks
+
+    fun observeSubtasks(parentId: String): Flow<List<TaskEntity>> =
+        taskDao.getSubtasksFlow(parentId)
+
+    /** (completed, total) for the parent row's progress label, e.g. 2/5. */
+    suspend fun subtaskProgress(parentId: String): Pair<Int, Int> = withContext(Dispatchers.IO) {
+        val total = taskDao.getSubtaskCount(parentId)
+        val done = taskDao.getSubtaskCompletedCount(parentId)
+        done to total
     }
 
-    private fun attachTasksListener(userId: String) {
-        try {
-            val dbId = context.getString(R.string.firestore_database_id)
-            val firestore = FirebaseFirestore.getInstance(dbId)
-            snapshotListener = firestore.collection("users")
-                .document(userId)
-                .collection("tasks")
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        Log.w("TaskRepository", "Tasks cloud sync listener error: ${error.message}")
-                        return@addSnapshotListener
-                    }
-                    if (snapshot != null) {
-                        repoScope.launch {
-                            for (dc in snapshot.documentChanges) {
-                                when (dc.type) {
-                                    DocumentChange.Type.ADDED, DocumentChange.Type.MODIFIED -> {
-                                        val doc = dc.document
-                                        // C13: a task whose cloud delete is still
-                                        // pending must never be re-inserted by
-                                        // the initial snapshot (or any later one).
-                                        if (doc.id in pendingTaskDeleteIds(userId)) continue
-                                        val localTask = taskDao.getTaskById(doc.id)
-                                        if (localTask != null && !localTask.isSyncedToCloud) {
-                                            // Local changes take precedence until uploaded
-                                            continue
-                                        }
-                                        val title = doc.getString("title") ?: continue
-                                        val dueDate = doc.getLong("dueDateEpochMillis") ?: System.currentTimeMillis()
-                                        val priorityStr = doc.getString("priority") ?: Priority.MEDIUM.name
-                                        val categoryStr = doc.getString("category") ?: TaskCategory.WORK.name
-                                        val isCompleted = doc.getBoolean("isCompleted") ?: false
-                                        val completedAt = doc.getLong("completedAtEpochMillis")
-                                        val reminderSet = doc.getBoolean("reminderSet") ?: false
-                                        val reminderEpoch = doc.getLong("reminderEpochMillis")
-                                        val description = doc.getString("description")
-                                        val recurrence = doc.getString("recurrenceRule")
-
-                                        val priority = try { Priority.valueOf(priorityStr) } catch (e: Exception) { Priority.MEDIUM }
-                                        val category = try { TaskCategory.valueOf(categoryStr) } catch (e: Exception) { TaskCategory.WORK }
-
-                                        val entity = TaskEntity(
-                                            id = doc.id,
-                                            userId = userId,
-                                            title = title,
-                                            description = description,
-                                            dueDateEpochMillis = dueDate,
-                                            priority = priority,
-                                            category = category,
-                                            isCompleted = isCompleted,
-                                            completedAtEpochMillis = completedAt,
-                                            reminderSet = reminderSet,
-                                            reminderEpochMillis = reminderEpoch,
-                                            recurrenceRule = recurrence,
-                                            isSyncedToCloud = true,
-                                            // Group v1: never let a personal-collection
-                                            // upsert strip a group row's origin.
-                                            groupId = localTask?.groupId
-                                        )
-                                        taskDao.insertTask(entity)
-                                    }
-                                    DocumentChange.Type.REMOVED -> {
-                                        // Group v1: a personal-doc delete must never
-                                        // remove a group row that happens to share
-                                        // the id (defensive; ids are UUIDs).
-                                        val localRow = taskDao.getTaskById(dc.document.id)
-                                        if (localRow?.groupId == null) {
-                                            taskDao.deleteTaskByIdForUser(userId, dc.document.id)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-        } catch (e: Exception) {
-            Log.w("TaskRepository", "Could not start tasks cloud sync: ${e.message}")
-        }
+    suspend fun toggleSubtask(subtask: TaskEntity) {
+        // A subtask completes on its own — the parent never auto-completes
+        // its subtasks, and completing the parent never completes them.
+        toggleTaskCompletion(subtask)
     }
 
-    fun stopCloudSync() {
-        snapshotListener?.remove()
-        snapshotListener = null
+    suspend fun deleteSubtask(subtaskId: String) {
+        deleteTask(subtaskId)
+    }
+
+    // -------------------------------------------------------------------- tags
+
+    fun observeTags(userId: String): Flow<List<TagEntity>> =
+        tagDao.getTagsFlow(userId)
+
+    fun observeTagsForTask(taskId: String): Flow<List<TagEntity>> =
+        tagDao.getTagsForTaskFlow(taskId)
+
+    /** Every task↔tag link — the ViewModel joins tags to tasks in memory. */
+    fun observeAllTaskTags(): Flow<List<com.nextgentool.nudgy.data.local.entity.TaskTagCrossRef>> =
+        tagDao.getAllCrossRefsFlow()
+
+    suspend fun createTag(userId: String, name: String, color: String): TagEntity =
+        withContext(Dispatchers.IO) {
+            val tag = TagEntity(userId = userId, name = name.trim(), color = color)
+            tagDao.insertTag(tag)
+            tag
+        }
+
+    suspend fun updateTag(tag: TagEntity) = withContext(Dispatchers.IO) {
+        tagDao.updateTag(tag)
+    }
+
+    suspend fun deleteTag(userId: String, tagId: String) = withContext(Dispatchers.IO) {
+        // The tag goes; its tasks stay (the task_tags links cascade).
+        tagDao.deleteTagById(userId, tagId)
+    }
+
+    suspend fun setTaskTags(taskId: String, tagIds: List<String>) = withContext(Dispatchers.IO) {
+        tagDao.setTagsForTask(taskId, tagIds)
+    }
+
+    // ---------------------------------------------------------------- projects
+
+    fun observeProjects(userId: String): Flow<List<ProjectEntity>> =
+        projectDao.getProjectsFlow(userId)
+
+    suspend fun createProject(userId: String, name: String, color: String): ProjectEntity =
+        withContext(Dispatchers.IO) {
+            val project = ProjectEntity(userId = userId, name = name.trim(), color = color)
+            projectDao.insertProject(project)
+            project
+        }
+
+    suspend fun updateProject(project: ProjectEntity) = withContext(Dispatchers.IO) {
+        projectDao.updateProject(project)
+    }
+
+    suspend fun deleteProject(userId: String, projectId: String) = withContext(Dispatchers.IO) {
+        // The project goes; its tasks move to "no project" — never deleted.
+        taskDao.clearProjectFromTasks(projectId, System.currentTimeMillis())
+        projectDao.deleteProjectById(userId, projectId)
+    }
+
+    // -------------------------------------------------------------- saved views
+
+    fun observeSavedViews(userId: String): Flow<List<SavedViewEntity>> =
+        savedViewDao.getSavedViewsFlow(userId)
+
+    suspend fun saveView(userId: String, name: String, filterJson: String): SavedViewEntity =
+        withContext(Dispatchers.IO) {
+            val view = SavedViewEntity(userId = userId, name = name.trim(), filterJson = filterJson)
+            savedViewDao.insertSavedView(view)
+            view
+        }
+
+    suspend fun deleteSavedView(userId: String, viewId: String) = withContext(Dispatchers.IO) {
+        savedViewDao.deleteSavedViewById(userId, viewId)
     }
 
     /**
@@ -495,60 +461,6 @@ class TaskRepository(
      */
     suspend fun checkAndSeedInitialData(userId: String) = withContext(Dispatchers.IO) {
         // Production: New users start with a clean slate; no fake tasks or unwanted alarms.
-    }
-
-    /**
-     * Debounced Cloud Sync to Firestore (Minimizes server writes)
-     */
-    fun syncDirtyTasksToCloud(userId: String, scope: CoroutineScope = repoScope) {
-        if (userId == com.nextgentool.nudgy.auth.AuthManager.GUEST_USER_ID) return
-        scope.launch(Dispatchers.IO) {
-            try {
-                // Group v1 (belt-and-braces): group rows are stored with
-                // isSyncedToCloud = true, but never upload one even if a
-                // future code path dirty-marks it by mistake.
-                val unsynced = taskDao.getUnsyncedTasks(userId)
-                    .filter { it.groupId == null }
-                if (unsynced.isEmpty()) return@launch
-
-                val dbId = context.getString(R.string.firestore_database_id)
-                val firestore = FirebaseFirestore.getInstance(dbId)
-                val tasksCollection = firestore.collection("users").document(userId).collection("tasks")
-
-                for (task in unsynced) {
-                    val payload = hashMapOf<String, Any>(
-                        "id" to task.id,
-                        "userId" to task.userId,
-                        "title" to task.title,
-                        "dueDateEpochMillis" to task.dueDateEpochMillis,
-                        "priority" to task.priority.name,
-                        "category" to task.category.name,
-                        "isCompleted" to task.isCompleted,
-                        "reminderSet" to task.reminderSet,
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                    if (task.description != null) payload["description"] = task.description
-                    // A null completedAt/reminder MUST delete the field: set()
-                    // with merge() keeps a field an omitted key never touches,
-                    // so an un-complete (completedAt = null) left the OLD
-                    // timestamp in the cloud doc and the listener restored it
-                    // locally — the task behaved "as if completed once
-                    // before". The listener already reads a missing field as
-                    // null, so deleting ends the resurrection. Deleting a
-                    // field that was never there is a no-op.
-                    if (task.completedAtEpochMillis != null) payload["completedAtEpochMillis"] = task.completedAtEpochMillis
-                    else payload["completedAtEpochMillis"] = FieldValue.delete()
-                    if (task.reminderEpochMillis != null) payload["reminderEpochMillis"] = task.reminderEpochMillis
-                    else payload["reminderEpochMillis"] = FieldValue.delete()
-                    if (task.recurrenceRule != null) payload["recurrenceRule"] = task.recurrenceRule
-
-                    tasksCollection.document(task.id).set(payload, SetOptions.merge()).await()
-                    taskDao.markTaskSynced(task.id)
-                }
-            } catch (e: Exception) {
-                Log.w("TaskRepository", "Background cloud sync deferred: ${e.message}")
-            }
-        }
     }
 
     private fun getTodayBounds(): Pair<Long, Long> {

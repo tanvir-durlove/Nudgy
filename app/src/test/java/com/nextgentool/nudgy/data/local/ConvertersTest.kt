@@ -1,6 +1,7 @@
 package com.nextgentool.nudgy.data.local
 
 import com.nextgentool.nudgy.data.model.Priority
+import com.nextgentool.nudgy.data.model.TaskStatus
 import com.nextgentool.nudgy.data.model.TaskCategory
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -36,6 +37,20 @@ class ConvertersTest {
         for (category in TaskCategory.values()) {
             assertEquals(category, converters.toCategory(converters.fromCategory(category)))
         }
+    }
+
+    @Test
+    fun `task status round-trips through string form`() {
+        for (status in TaskStatus.values()) {
+            assertEquals(status, converters.toTaskStatus(converters.fromTaskStatus(status)))
+        }
+    }
+
+    @Test
+    fun `unknown status string falls back to TODO`() {
+        assertEquals(TaskStatus.TODO, converters.toTaskStatus("ARCHIVED"))
+        assertEquals(TaskStatus.TODO, converters.toTaskStatus(""))
+        assertEquals(TaskStatus.TODO, converters.toTaskStatus("done"))
     }
 
     @Test

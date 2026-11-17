@@ -13,14 +13,25 @@ import com.nextgentool.nudgy.data.local.dao.DailyBriefDao
 import com.nextgentool.nudgy.data.local.dao.GroupDao
 import com.nextgentool.nudgy.data.local.dao.GroupMemberDao
 import com.nextgentool.nudgy.data.local.dao.MemoryDao
+import com.nextgentool.nudgy.data.local.dao.ProjectDao
+import com.nextgentool.nudgy.data.local.dao.SavedViewDao
+import com.nextgentool.nudgy.data.local.dao.TagDao
+import com.nextgentool.nudgy.data.local.dao.TaskAttachmentDao
 import com.nextgentool.nudgy.data.local.dao.TaskDao
+import com.nextgentool.nudgy.data.local.dao.TaskTemplateDao
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.ChatMessageEntity
 import com.nextgentool.nudgy.data.local.entity.DailyBriefEntity
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.GroupMemberEntity
 import com.nextgentool.nudgy.data.local.entity.NudgyMemoryEntity
+import com.nextgentool.nudgy.data.local.entity.ProjectEntity
+import com.nextgentool.nudgy.data.local.entity.SavedViewEntity
+import com.nextgentool.nudgy.data.local.entity.TagEntity
+import com.nextgentool.nudgy.data.local.entity.TaskAttachmentEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
+import com.nextgentool.nudgy.data.local.entity.TaskTagCrossRef
+import com.nextgentool.nudgy.data.local.entity.TaskTemplateEntity
 
 val MIGRATION_3_4 = object : Migration(3, 4) {
     override fun migrate(db: SupportSQLiteDatabase) {
@@ -95,6 +106,94 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
     }
 }
 
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Sprint 1-1 (spec §4): the whole Sprint 1 schema change, once.
+        // tasks + 10 columns, then 6 new tables. Every new column is
+        // nullable or DEFAULTed, so tester rows survive untouched.
+        //
+        // Column order below MUST match TaskEntity's field order — Room
+        // validates the migrated schema against the entities on open.
+        // status carries a SQL DEFAULT 'TODO' (matching the entity's
+        // @ColumnInfo defaultValue); the backfill then flips completed
+        // rows to 'DONE'. New tables' CREATE TABLE statements must match
+        // the entity definitions exactly (column order, FK clauses).
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `status` TEXT NOT NULL DEFAULT 'TODO'")
+        db.execSQL("UPDATE `tasks` SET `status` = 'DONE' WHERE `isCompleted` = 1")
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `plannedStartEpochMillis` INTEGER")
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `plannedDate` TEXT")
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `estimatedMinutes` INTEGER")
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `actualMinutes` INTEGER")
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `parentTaskId` TEXT")
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `projectId` TEXT")
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `carriedOverFromDate` TEXT")
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `templateId` TEXT")
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `reminderRepeatMinutes` INTEGER")
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `tags` (
+                `id` TEXT NOT NULL,
+                `userId` TEXT NOT NULL,
+                `name` TEXT NOT NULL,
+                `color` TEXT NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `task_tags` (
+                `taskId` TEXT NOT NULL,
+                `tagId` TEXT NOT NULL,
+                PRIMARY KEY(`taskId`, `tagId`),
+                FOREIGN KEY(`taskId`) REFERENCES `tasks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE,
+                FOREIGN KEY(`tagId`) REFERENCES `tags`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `projects` (
+                `id` TEXT NOT NULL,
+                `userId` TEXT NOT NULL,
+                `name` TEXT NOT NULL,
+                `color` TEXT NOT NULL,
+                `createdAtEpochMillis` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `saved_views` (
+                `id` TEXT NOT NULL,
+                `userId` TEXT NOT NULL,
+                `name` TEXT NOT NULL,
+                `filterJson` TEXT NOT NULL,
+                `createdAtEpochMillis` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `task_attachments` (
+                `id` TEXT NOT NULL,
+                `taskId` TEXT NOT NULL,
+                `userId` TEXT NOT NULL,
+                `fileName` TEXT NOT NULL,
+                `mimeType` TEXT NOT NULL,
+                `localPath` TEXT NOT NULL,
+                `sizeBytes` INTEGER NOT NULL,
+                `createdAtEpochMillis` INTEGER NOT NULL,
+                PRIMARY KEY(`id`),
+                FOREIGN KEY(`taskId`) REFERENCES `tasks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `task_templates` (
+                `id` TEXT NOT NULL,
+                `userId` TEXT NOT NULL,
+                `name` TEXT NOT NULL,
+                `templateJson` TEXT NOT NULL,
+                `isBuiltIn` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+        """.trimIndent())
+    }
+}
+
 @Database(
     entities = [
         TaskEntity::class,
@@ -103,9 +202,15 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
         DailyBriefEntity::class,
         ChatMessageEntity::class,
         GroupEntity::class,
-        GroupMemberEntity::class
+        GroupMemberEntity::class,
+        TagEntity::class,
+        TaskTagCrossRef::class,
+        ProjectEntity::class,
+        SavedViewEntity::class,
+        TaskAttachmentEntity::class,
+        TaskTemplateEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -117,6 +222,11 @@ abstract class NudgyDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
     abstract fun groupDao(): GroupDao
     abstract fun groupMemberDao(): GroupMemberDao
+    abstract fun tagDao(): TagDao
+    abstract fun projectDao(): ProjectDao
+    abstract fun savedViewDao(): SavedViewDao
+    abstract fun taskAttachmentDao(): TaskAttachmentDao
+    abstract fun taskTemplateDao(): TaskTemplateDao
 
     companion object {
         @Volatile
@@ -129,7 +239,7 @@ abstract class NudgyDatabase : RoomDatabase() {
                     NudgyDatabase::class.java,
                     "nudgy_local_db"
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                     // Public-launch policy (revisited from the pre-launch
                     // note): destructive fallback is RETIRED from v5.
                     // Every distributed install is v4 (1.0.2 was the first

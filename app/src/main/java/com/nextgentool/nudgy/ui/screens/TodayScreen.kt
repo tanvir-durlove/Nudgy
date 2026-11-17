@@ -32,7 +32,12 @@ import com.nextgentool.nudgy.ui.theme.NudgyTokens
  * No ViewModel, no data, nothing is saved here.
  */
 @Composable
-fun TodayScreen(onPlanClick: () -> Unit) {
+fun TodayScreen(
+    onPlanClick: () -> Unit,
+    // Sprint 1-1: entry point to the Tasks list (its only entry until S1-2
+    // rebuilds Today). Defaults to no-op so older call sites keep compiling.
+    onAllTasksClick: () -> Unit = {}
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -99,6 +104,16 @@ fun TodayScreen(onPlanClick: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(12.dp))
         NudgySkeletonRow()
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(
+            onClick = onAllTasksClick,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = colorResource(R.color.nudgy_teal),
+                contentColor = colorResource(R.color.nudgy_cream)
+            )
+        ) {
+            Text(text = "All tasks")
+        }
         Spacer(modifier = Modifier.height(16.dp))
         Text(
             text = "Sprint 1-2 fills this in: due tasks, meetings, carry-over — one timeline.",
