@@ -76,7 +76,7 @@ data class TasksUiState(
 @HiltViewModel
 class TasksViewModel @Inject constructor(
     private val repository: TaskRepository,
-    private val createTask: CreateTaskUseCase,
+    private val createTaskUseCase: CreateTaskUseCase,
     private val toggleCompletion: ToggleTaskCompletionUseCase,
     private val updateTask: UpdateTaskUseCase,
     private val deleteTask: DeleteTaskUseCase,
@@ -212,7 +212,7 @@ class TasksViewModel @Inject constructor(
         viewModelScope.launch {
             isCreatingFlow.value = true
             try {
-                val created = createTask(title)
+                val created = createTaskUseCase(title)
                 lastCreatedTaskIdFlow.value = created?.id
             } finally {
                 isCreatingFlow.value = false
