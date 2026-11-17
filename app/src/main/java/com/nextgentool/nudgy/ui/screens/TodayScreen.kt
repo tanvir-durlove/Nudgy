@@ -15,12 +15,17 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.nextgentool.nudgy.R
+import com.nextgentool.nudgy.ui.components.QuickAddTask
 import com.nextgentool.nudgy.ui.theme.NudgyTokens
+import com.nextgentool.nudgy.ui.viewmodel.TasksViewModel
 
 /**
  * Sprint 1-0 — Today destination (skeleton only).
@@ -36,8 +41,15 @@ fun TodayScreen(
     onPlanClick: () -> Unit,
     // Sprint 1-1: entry point to the Tasks list (its only entry until S1-2
     // rebuilds Today). Defaults to no-op so older call sites keep compiling.
-    onAllTasksClick: () -> Unit = {}
+    onAllTasksClick: () -> Unit = {},
+    // Sprint 1-1 fix: the Today quick-add (Feature 1) shares TasksViewModel
+    // with TasksScreen — a separate instance scoped to this destination,
+    // same singleton repository, so the guards (empty title, double-tap)
+    // are identical. S1-2 owns the full Today rewrite; this only adds the
+    // quick-add field.
+    viewModel: TasksViewModel = hiltViewModel()
 ) {
+    val uiState by viewModel.uiState.collectAsState()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -88,6 +100,20 @@ fun TodayScreen(
                 }
             }
         }
+        Spacer(modifier = Modifier.height(16.dp))
+        // Sprint 1-1 fix — quick add on Today (Feature 1 requires the field
+        // on the Today hero AND the Tasks screen; S1-1 only put it on Tasks,
+        // so there was no way to create a task until the Tasks list opened).
+        val lastCreated = uiState.items
+            .firstOrNull { it.task.id == uiState.lastCreatedTaskId }
+        QuickAddTask(
+            onCreate = { viewModel.createTask(it) },
+            isCreating = uiState.isCreating,
+            lastCreatedTask = lastCreated?.task,
+            onLastCreatedDue = { viewModel.setLastCreatedDue(it) },
+            onLastCreatedPriority = { viewModel.setLastCreatedPriority(it) },
+            onDismissLastCreated = { viewModel.clearLastCreated() }
+        )
         Spacer(modifier = Modifier.height(16.dp))
         Text(
             text = "My Day",

@@ -347,10 +347,15 @@ class ClientIntentPreFilter(
             "morning", "afternoon", "evening", "night"
         )
         for (token in tokensToRemove) {
-            // No (?U) here: Android's \b is already Unicode-aware, so the
-            // flag is unnecessary on Android — and (?U) is the suspect
-            // behind the 2026-11-11 chat failure. Do not re-add it.
-            cleaned = cleaned.replace(Regex("(?i)\\b${Regex.escape(token)}\\b"), " ")
+            // No \b here: on the JVM (Robolectric) \b is ASCII-only, so
+            // \bTOKEN\b never matches a Bengali word and the date word
+            // survives into the title (S1-1 CI failure, 2026-11-16:
+            // "Bengali date word is stripped from the title"). The
+            // \p{L}/\p{N} lookarounds are the same "not next to a letter
+            // or digit" boundary, Unicode-aware on BOTH Android and JVM.
+            // Do NOT re-add the (?U) flag — it was the suspect behind the
+            // 2026-11-11 chat failure.
+            cleaned = cleaned.replace(Regex("(?i)(?<![\\p{L}\\p{N}])${Regex.escape(token)}(?![\\p{L}\\p{N}])"), " ")
         }
         cleaned = cleaned.replace(Regex("""\b\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)\b""", RegexOption.IGNORE_CASE), " ")
         // Bare English hour: "at 5" / "at 5:30" is a time token, never
