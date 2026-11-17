@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -100,7 +101,7 @@ class TodayScreenUiFixTest {
             composeRule.onAllNodesWithText("Buy milk")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("Buy milk").assertIsDisplayed()
+        composeRule.onNodeWithText("Buy milk").performScrollTo().assertIsDisplayed()
         // The empty-day text is gone — the task did not vanish.
         assertTrue(
             composeRule.onAllNodesWithText("No tasks yet — add one above")
@@ -112,8 +113,8 @@ class TodayScreenUiFixTest {
             composeRule.onAllNodesWithText("Call mum")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("Buy milk").assertIsDisplayed()
-        composeRule.onNodeWithText("Call mum").assertIsDisplayed()
+        composeRule.onNodeWithText("Buy milk").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Call mum").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -135,7 +136,9 @@ class TodayScreenUiFixTest {
                 .fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText("Saved: Buy milk").assertIsDisplayed()
-        composeRule.onNodeWithText("Done").assertIsDisplayed()
+        // The Done button sits at the bottom of the confirmation card,
+        // below the fold in the scrollable column — scroll to it first.
+        composeRule.onNodeWithText("Done").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -170,7 +173,7 @@ class TodayScreenUiFixTest {
             composeRule.onAllNodesWithText("Timeline")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("Timeline").assertIsDisplayed()
-        composeRule.onNodeWithText("Dentist").assertIsDisplayed()
+        composeRule.onNodeWithText("Timeline").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Dentist").performScrollTo().assertIsDisplayed()
     }
 }
