@@ -2,6 +2,7 @@ package com.nextgentool.nudgy.di
 
 import android.content.Context
 import com.nextgentool.nudgy.data.local.NudgyDatabase
+import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.reminders.ReminderManager
 import dagger.Module
 import dagger.Provides
@@ -32,4 +33,17 @@ object TaskModule {
     @Singleton
     fun provideReminderManager(@ApplicationContext context: Context): ReminderManager =
         ReminderManager(context)
+
+    /**
+     * Sprint 1-2 — the Today timeline reads today's calendar events
+     * (read-only, spec §6 Feature 15). CalendarRepository is a plain
+     * class (constructed manually elsewhere); this is its only Hilt
+     * binding, so there is exactly one instance.
+     */
+    @Provides
+    @Singleton
+    fun provideCalendarRepository(
+        @ApplicationContext context: Context,
+        database: NudgyDatabase
+    ): CalendarRepository = CalendarRepository(context, database)
 }
