@@ -39,6 +39,7 @@ import com.nextgentool.nudgy.ui.screens.GroupsShell
 import com.nextgentool.nudgy.ui.screens.PlanScreen
 import com.nextgentool.nudgy.ui.screens.SettingsShell
 import com.nextgentool.nudgy.ui.screens.TasksScreen
+import com.nextgentool.nudgy.ui.screens.TemplatesScreen
 import com.nextgentool.nudgy.ui.screens.TodayScreen
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
 
@@ -96,7 +97,14 @@ fun NudgyNavHost(
         // Sprint 1-1 — Tasks list. NOT a bottom destination: no tab is
         // highlighted while it is open (see NudgyRoute.all).
         composable(NudgyRoute.Tasks.route) {
-            TasksScreen(onBackClick = { navController.popBackStack() })
+            TasksScreen(
+                onBackClick = { navController.popBackStack() },
+                onNavigateToTemplates = { navController.navigate(NudgyRoute.Templates.route) }
+            )
+        }
+        // Sprint 1-4 — Templates. NOT a bottom destination either.
+        composable(NudgyRoute.Templates.route) {
+            TemplatesScreen(onBack = { navController.popBackStack() })
         }
         composable(NudgyRoute.Calendar.route) { CalendarShell() }
         composable(NudgyRoute.Chat.route) { ChatShell() }

@@ -106,6 +106,12 @@ interface TaskAttachmentDao {
     @Query("SELECT * FROM task_attachments WHERE taskId = :taskId ORDER BY createdAtEpochMillis ASC")
     fun getAttachmentsForTaskFlow(taskId: String): Flow<List<TaskAttachmentEntity>>
 
+    @Query("SELECT * FROM task_attachments WHERE taskId = :taskId ORDER BY createdAtEpochMillis ASC")
+    suspend fun getAttachmentsForTaskOnce(taskId: String): List<TaskAttachmentEntity>
+
+    @Query("SELECT * FROM task_attachments WHERE id = :id LIMIT 1")
+    suspend fun getAttachmentById(id: String): TaskAttachmentEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAttachment(attachment: TaskAttachmentEntity)
 

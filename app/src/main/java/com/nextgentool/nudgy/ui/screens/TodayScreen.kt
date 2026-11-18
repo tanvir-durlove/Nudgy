@@ -22,6 +22,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -29,6 +31,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,6 +49,8 @@ import com.nextgentool.nudgy.domain.formatMinutes
 import com.nextgentool.nudgy.domain.startOfDayMillis
 import com.nextgentool.nudgy.domain.timeLabel
 import com.nextgentool.nudgy.ui.components.QuickAddTask
+import com.nextgentool.nudgy.ui.components.TaskBoard
+import com.nextgentool.nudgy.ui.components.TaskViewMode
 import com.nextgentool.nudgy.ui.theme.NudgyTokens
 import com.nextgentool.nudgy.ui.viewmodel.TaskListItem
 import com.nextgentool.nudgy.ui.viewmodel.TasksViewModel
@@ -85,6 +92,8 @@ fun TodayScreen(
     val uiState by todayViewModel.uiState.collectAsState()
     val tasksUiState by tasksViewModel.uiState.collectAsState()
     val scrollState = rememberScrollState()
+    // Sprint 1-4 — List / Board toggle for the My Day section (Feature 5).
+    var myDayViewMode by remember { mutableStateOf(TaskViewMode.LIST) }
     val percent = if (uiState.todayTotal == 0) 0
     else uiState.doneCount * 100 / uiState.todayTotal
 
@@ -288,11 +297,31 @@ fun TodayScreen(
         Spacer(modifier = Modifier.height(16.dp))
         if (uiState.tab == TodayTab.TODAY) {
             // My Day — Plan-picked tasks only (Q3), top section.
-            Text(
-                text = "My Day",
-                style = MaterialTheme.typography.titleMedium,
-                color = colorResource(R.color.nudgy_ink)
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "My Day",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = colorResource(R.color.nudgy_ink),
+                    modifier = Modifier.weight(1f)
+                )
+                // Sprint 1-4 — List / Board toggle (Feature 5).
+                TaskViewMode.entries.forEach { mode ->
+                    FilterChip(
+                        selected = myDayViewMode == mode,
+                        onClick = { myDayViewMode = mode },
+                        label = {
+                            Text(if (mode == TaskViewMode.LIST) "List" else "Board")
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = colorResource(R.color.nudgy_teal),
+                            selectedLabelColor = colorResource(R.color.nudgy_cream)
+                        ),
+                        modifier = Modifier.testTag(
+                            "my_day_view_mode_${mode.name.lowercase()}"
+                        )
+                    )
+                }
+            }
             Spacer(modifier = Modifier.height(12.dp))
             if (uiState.isLoading) {
                 // Real loading only: one skeleton until the first emission.
@@ -303,6 +332,18 @@ fun TodayScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = colorResource(R.color.nudgy_muted),
                     modifier = Modifier.padding(vertical = 8.dp)
+                )
+            } else if (myDayViewMode == TaskViewMode.BOARD) {
+                // Sprint 1-4 — Board over the SAME My Day items. Dragging
+                // a card changes its status; the detail sheet lives on
+                // the Tasks screen, so a tap here does nothing.
+                TaskBoard(
+                    items = uiState.myDayItems,
+                    onMoveTask = { task, status ->
+                        tasksViewModel.setTaskStatus(task, status)
+                    },
+                    onToggle = { todayViewModel.toggleTask(it) },
+                    onTaskClick = {}
                 )
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

@@ -19,8 +19,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -46,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
@@ -53,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.data.local.entity.ProjectEntity
 import com.nextgentool.nudgy.data.local.entity.TagEntity
+import com.nextgentool.nudgy.data.local.entity.TaskAttachmentEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.repository.TaskRepository
@@ -106,7 +110,15 @@ fun TaskDetailSheet(
     onAddSubtask: (String, String) -> Unit,
     onToggleSubtask: (TaskEntity) -> Unit,
     onDeleteSubtask: (String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    // Sprint 1-4 — attachments (Feature 10). Optional with no-op defaults
+    // so existing callers keep compiling; the Tasks screen passes them.
+    attachments: List<TaskAttachmentEntity> = emptyList(),
+    attachmentError: String? = null,
+    onAddAttachment: () -> Unit = {},
+    onOpenAttachment: (TaskAttachmentEntity) -> Unit = {},
+    onDeleteAttachment: (String) -> Unit = {},
+    onClearAttachmentError: () -> Unit = {}
 ) {
     val task = detail.task
     val isGroup = task.groupId != null
@@ -127,7 +139,8 @@ fun TaskDetailSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp),
+                .padding(bottom = 32.dp)
+                .testTag("task_detail_sheet_list"),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
@@ -219,6 +232,20 @@ fun TaskDetailSheet(
                     enabled = !isGroup,
                     onUpdateTask = onUpdateTask
                 )
+            }
+
+            // Attachments (S1-4, Feature 10) — top-level personal tasks only.
+            if (!isGroup && !isSubtask) {
+                item {
+                    AttachmentSection(
+                        attachments = attachments,
+                        error = attachmentError,
+                        onAdd = onAddAttachment,
+                        onOpen = onOpenAttachment,
+                        onDelete = onDeleteAttachment,
+                        onClearError = onClearAttachmentError
+                    )
+                }
             }
 
             // Priority.
@@ -503,6 +530,105 @@ fun TaskDetailSheet(
             onDismiss = { showProjectDialog = false }
         )
     }
+}
+
+/**
+ * Sprint 1-4 — file attachments (Feature 10, spec §6).
+ *
+ * Files are LOCAL-ONLY (locked decision 6): copied into app-private
+ * storage, Room holds only the path. Limits (spec-fixed): 25 MB per
+ * file, 10 files per task — a rejected add shows the reason here,
+ * never a silent drop. Tapping a row opens the file in another app
+ * (via FileProvider); deleting removes the row AND the file.
+ */
+@Composable
+private fun AttachmentSection(
+    attachments: List<TaskAttachmentEntity>,
+    error: String?,
+    onAdd: () -> Unit,
+    onOpen: (TaskAttachmentEntity) -> Unit,
+    onDelete: (String) -> Unit,
+    onClearError: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "Attachments",
+                style = MaterialTheme.typography.labelLarge,
+                color = colorResource(R.color.nudgy_ink),
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = onAdd) {
+                Icon(
+                    imageVector = Icons.Filled.AttachFile,
+                    contentDescription = null,
+                    tint = colorResource(R.color.nudgy_teal)
+                )
+                Text("Add file", color = colorResource(R.color.nudgy_teal))
+            }
+        }
+        if (error != null) {
+            Text(
+                text = error,
+                style = MaterialTheme.typography.bodyMedium,
+                color = colorResource(R.color.nudgy_coral),
+                modifier = Modifier.clickable { onClearError() }
+            )
+        }
+        if (attachments.isEmpty()) {
+            Text(
+                text = "No files attached yet",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colorResource(R.color.nudgy_muted)
+            )
+        }
+        attachments.forEach { attachment ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.AttachFile,
+                    contentDescription = null,
+                    tint = colorResource(R.color.nudgy_muted)
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = attachment.fileName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colorResource(R.color.nudgy_ink),
+                        maxLines = 1
+                    )
+                    Text(
+                        text = formatFileSize(attachment.sizeBytes),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colorResource(R.color.nudgy_muted)
+                    )
+                }
+                IconButton(onClick = { onOpen(attachment) }) {
+                    Icon(
+                        imageVector = Icons.Filled.OpenInNew,
+                        contentDescription = "Open ${attachment.fileName}",
+                        tint = colorResource(R.color.nudgy_teal)
+                    )
+                }
+                IconButton(onClick = { onDelete(attachment.id) }) {
+                    Icon(
+                        imageVector = Icons.Filled.Delete,
+                        contentDescription = "Delete ${attachment.fileName}",
+                        tint = colorResource(R.color.nudgy_muted)
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun formatFileSize(bytes: Long): String = when {
+    bytes < 1024L -> "$bytes B"
+    bytes < 1024L * 1024L -> "${bytes / 1024L} KB"
+    else -> String.format(Locale.getDefault(), "%.1f MB", bytes / (1024.0 * 1024.0))
 }
 
 /**

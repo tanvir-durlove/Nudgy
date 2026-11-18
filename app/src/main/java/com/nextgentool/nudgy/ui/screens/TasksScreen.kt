@@ -1,5 +1,7 @@
 package com.nextgentool.nudgy.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -42,9 +44,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.data.local.entity.ProjectEntity
@@ -54,11 +59,14 @@ import com.nextgentool.nudgy.data.model.TaskStatus
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.domain.model.SavedViewFilter
 import com.nextgentool.nudgy.ui.components.QuickAddTask
+import com.nextgentool.nudgy.ui.components.TaskBoard
 import com.nextgentool.nudgy.ui.components.TaskDetailSheet
+import com.nextgentool.nudgy.ui.components.TaskViewMode
 import com.nextgentool.nudgy.ui.components.colorFromHex
 import com.nextgentool.nudgy.ui.theme.NudgyTokens
 import com.nextgentool.nudgy.ui.viewmodel.TaskListItem
 import com.nextgentool.nudgy.ui.viewmodel.TasksViewModel
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -84,11 +92,25 @@ import java.util.Locale
 @Composable
 fun TasksScreen(
     viewModel: TasksViewModel = hiltViewModel(),
-    onBackClick: () -> Unit = {}
+    onBackClick: () -> Unit = {},
+    onNavigateToTemplates: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showSaveViewDialog by remember { mutableStateOf(false) }
     var saveViewName by remember { mutableStateOf("") }
+    // Sprint 1-4 — List / Board toggle (Feature 5). Local UI state only.
+    var viewMode by remember { mutableStateOf(TaskViewMode.LIST) }
+    // Sprint 1-4 — file picker target: the task open in the detail sheet.
+    var pendingAttachmentTaskId by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val attachmentError by viewModel.attachmentError.collectAsState()
+    val pickFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        val taskId = pendingAttachmentTaskId
+        if (uri != null && taskId != null) viewModel.attachFile(taskId, uri)
+        pendingAttachmentTaskId = null
+    }
 
     Column(
         modifier = Modifier
@@ -121,6 +143,13 @@ fun TasksScreen(
                 color = colorResource(R.color.nudgy_muted)
             )
             Spacer(modifier = Modifier.width(16.dp))
+            // Sprint 1-4 — templates (Feature 13).
+            TextButton(
+                onClick = onNavigateToTemplates,
+                modifier = Modifier.testTag("templates_button")
+            ) {
+                Text("Templates", color = colorResource(R.color.nudgy_teal))
+            }
         }
 
         if (uiState.isLoading) {
@@ -223,6 +252,28 @@ fun TasksScreen(
                 )
             }
 
+            // Sprint 1-4 — List / Board toggle (Feature 5).
+            item(key = "view_mode") {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TaskViewMode.entries.forEach { mode ->
+                        FilterChip(
+                            selected = viewMode == mode,
+                            onClick = { viewMode = mode },
+                            label = {
+                                Text(if (mode == TaskViewMode.LIST) "List" else "Board")
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = colorResource(R.color.nudgy_teal),
+                                selectedLabelColor = colorResource(R.color.nudgy_cream)
+                            ),
+                            modifier = Modifier.testTag(
+                                "view_mode_${mode.name.lowercase()}"
+                            )
+                        )
+                    }
+                }
+            }
+
             // Task list.
             val activeItems = uiState.items.filter { !it.task.isCompleted }
             val doneItems = uiState.items.filter { it.task.isCompleted }
@@ -265,6 +316,20 @@ fun TasksScreen(
                         }
                     }
                 }
+            } else if (viewMode == TaskViewMode.BOARD) {
+                // Sprint 1-4 — Board view (Feature 5): the SAME filtered
+                // items as the List, grouped by status. Dragging a card
+                // moves it; ticking in the List moves it to Done here.
+                item(key = "board") {
+                    TaskBoard(
+                        items = uiState.items,
+                        onMoveTask = { task, status ->
+                            viewModel.setTaskStatus(task, status)
+                        },
+                        onToggle = { viewModel.toggleTask(it) },
+                        onTaskClick = { viewModel.selectTask(it.id) }
+                    )
+                }
             } else {
                 items(activeItems, key = { it.task.id }) { item ->
                     TaskRow(
@@ -298,6 +363,9 @@ fun TasksScreen(
 
     // Detail sheet.
     uiState.selectedDetail?.let { detail ->
+        // Sprint 1-4 — attachments of the open task (Feature 10).
+        val attachments by viewModel.observeAttachments(detail.task.id)
+            .collectAsState(initial = emptyList())
         TaskDetailSheet(
             detail = detail,
             allTags = uiState.tags,
@@ -315,7 +383,39 @@ fun TasksScreen(
             onAddSubtask = { parentId, title -> viewModel.addSubtask(parentId, title) },
             onToggleSubtask = { viewModel.toggleSubtask(it) },
             onDeleteSubtask = { viewModel.deleteSubtask(it) },
-            onDismiss = { viewModel.dismissDetail() }
+            onDismiss = { viewModel.dismissDetail() },
+            attachments = attachments,
+            attachmentError = attachmentError,
+            onAddAttachment = {
+                pendingAttachmentTaskId = detail.task.id
+                pickFileLauncher.launch("*/*")
+            },
+            onOpenAttachment = { attachment ->
+                // FileProvider: the file lives in app-private storage, so
+                // it can only be opened through a content Uri with a
+                // one-shot read grant.
+                val file = File(attachment.localPath)
+                if (file.exists()) {
+                    val uri = FileProvider.getUriForFile(
+                        context,
+                        "com.nextgentool.nudgy.fileprovider",
+                        file
+                    )
+                    val intent = android.content.Intent(
+                        android.content.Intent.ACTION_VIEW
+                    ).apply {
+                        setDataAndType(uri, attachment.mimeType)
+                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    runCatching { context.startActivity(intent) }.onFailure {
+                        viewModel.setAttachmentError(
+                            "No app can open this file"
+                        )
+                    }
+                }
+            },
+            onDeleteAttachment = { viewModel.removeAttachment(it) },
+            onClearAttachmentError = { viewModel.clearAttachmentError() }
         )
     }
 

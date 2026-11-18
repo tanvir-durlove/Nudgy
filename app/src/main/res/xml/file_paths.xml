@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sprint 1-4 — FileProvider paths (Feature 10): attachments live in
+     app-private storage under files/attachments/ and are shared with
+     other apps only as content Uris with a one-shot read grant. -->
+<paths>
+    <files-path name="attachments" path="attachments/" />
+</paths>

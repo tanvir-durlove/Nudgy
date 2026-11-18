@@ -1,15 +1,23 @@
 package com.nextgentool.nudgy.data.repository
 
 import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import com.nextgentool.nudgy.auth.AuthManager
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.local.entity.ProjectEntity
 import com.nextgentool.nudgy.data.local.entity.SavedViewEntity
 import com.nextgentool.nudgy.data.local.entity.TagEntity
+import com.nextgentool.nudgy.data.local.entity.TaskAttachmentEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
+import com.nextgentool.nudgy.data.local.entity.TaskTemplateEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
 import com.nextgentool.nudgy.data.model.TaskStatus
+import com.nextgentool.nudgy.domain.model.BuiltInTemplates
+import com.nextgentool.nudgy.domain.model.TaskTemplate
+import com.nextgentool.nudgy.domain.model.parseTemplateDrafts
+import com.nextgentool.nudgy.domain.model.toTemplateJson
 import com.nextgentool.nudgy.domain.usecase.Recurrence
 import com.nextgentool.nudgy.reminders.ReminderManager
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -17,6 +25,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.InputStream
 import java.util.Calendar
 import java.util.UUID
 import javax.inject.Inject
@@ -69,11 +79,17 @@ class TaskRepository @Inject constructor(
     private val tagDao = database.tagDao()
     private val projectDao = database.projectDao()
     private val savedViewDao = database.savedViewDao()
+    private val templateDao = database.taskTemplateDao()
+    private val attachmentDao = database.taskAttachmentDao()
     private val reminderManager = ReminderManager(context)
 
     companion object {
         /** dueDateEpochMillis value meaning "no due date" (Feature 1). */
         const val NO_DUE_DATE: Long = 0L
+
+        /** Sprint 1-4 — attachment limits (Feature 10, spec-fixed). */
+        const val MAX_ATTACHMENT_BYTES: Long = 25L * 1024L * 1024L
+        const val MAX_ATTACHMENTS_PER_TASK: Int = 10
     }
 
     /** The user whose data this repository serves (guest when signed out). */
@@ -369,13 +385,16 @@ class TaskRepository @Inject constructor(
         // Group v1: group rows are deleted from the shared group item by the
         // creator (GroupRepository). A member-side delete is local-only.
         // Either way the row goes; task_tags / attachments rows follow via
-        // the FK cascades.
+        // the FK cascades — but the FILES live on disk, so they are removed
+        // here first (S1-4, Feature 10: deleting a task deletes its files).
+        deleteAttachmentFilesForTask(taskId)
         taskDao.deleteTaskByIdForUser(userId, taskId)
     }
 
     suspend fun deleteTask(taskId: String) = withContext(Dispatchers.IO) {
         reminderManager.cancelReminder(taskId)
         val task = taskDao.getTaskById(taskId)
+        deleteAttachmentFilesForTask(taskId)
         if (task != null) {
             taskDao.deleteTaskByIdForUser(task.userId, taskId)
         } else {
@@ -416,6 +435,11 @@ class TaskRepository @Inject constructor(
         // Group v1: completed group rows are NOT cleared here — the shared
         // group item still exists, so a listener/poll tick would resurrect
         // them. Only personal completed tasks are purged.
+        // Their attachment files go first (S1-4, Feature 10), same as a
+        // single delete — group rows keep their files (they still exist).
+        taskDao.getCompletedTasksOnce(userId)
+            .filter { it.groupId == null }
+            .forEach { deleteAttachmentFilesForTask(it.id) }
         taskDao.deleteCompletedPersonalTasks(userId)
     }
 
@@ -509,6 +533,250 @@ class TaskRepository @Inject constructor(
 
     suspend fun deleteSavedView(userId: String, viewId: String) = withContext(Dispatchers.IO) {
         savedViewDao.deleteSavedViewById(userId, viewId)
+    }
+
+    // -------------------------------------------------------------- templates
+
+    fun observeTemplates(userId: String): Flow<List<TaskTemplate>> =
+        templateDao.getTemplatesFlow(userId).map { entities ->
+            entities.map { entity ->
+                TaskTemplate(
+                    id = entity.id,
+                    name = entity.name,
+                    drafts = entity.templateJson.parseTemplateDrafts(),
+                    isBuiltIn = entity.isBuiltIn
+                )
+            }
+        }
+
+    /**
+     * Sprint 1-4 — seeds the 3 approved built-in templates (Feature 13,
+     * Q6 draft) on first run. Fixed IDs + insert-if-absent make it
+     * idempotent: a re-seed never duplicates them, and a built-in is
+     * never overwritten once it exists.
+     */
+    suspend fun seedBuiltInTemplates(userId: String) = withContext(Dispatchers.IO) {
+        BuiltInTemplates.all.forEach { template ->
+            if (templateDao.getTemplateById(userId, template.id) == null) {
+                templateDao.insertTemplate(
+                    TaskTemplateEntity(
+                        id = template.id,
+                        userId = userId,
+                        name = template.name,
+                        templateJson = template.drafts.toTemplateJson(),
+                        isBuiltIn = true
+                    )
+                )
+            }
+        }
+    }
+
+    suspend fun createTemplate(
+        userId: String,
+        name: String,
+        drafts: List<com.nextgentool.nudgy.domain.model.TemplateDraft>
+    ): TaskTemplate = withContext(Dispatchers.IO) {
+        val template = TaskTemplate(
+            id = UUID.randomUUID().toString(),
+            name = name.trim(),
+            drafts = drafts,
+            isBuiltIn = false
+        )
+        templateDao.insertTemplate(
+            TaskTemplateEntity(
+                id = template.id,
+                userId = userId,
+                name = template.name,
+                templateJson = template.drafts.toTemplateJson(),
+                isBuiltIn = false
+            )
+        )
+        template
+    }
+
+    suspend fun updateTemplate(userId: String, template: TaskTemplate) =
+        withContext(Dispatchers.IO) {
+            // Built-ins are read-only in the UI; this is the backstop.
+            require(!template.isBuiltIn) { "Built-in templates cannot be edited" }
+            templateDao.insertTemplate(
+                TaskTemplateEntity(
+                    id = template.id,
+                    userId = userId,
+                    name = template.name,
+                    templateJson = template.drafts.toTemplateJson(),
+                    isBuiltIn = false
+                )
+            )
+        }
+
+    suspend fun deleteTemplate(userId: String, templateId: String) =
+        withContext(Dispatchers.IO) {
+            // Deleting a template never deletes the tasks it created —
+            // they are separate rows (templateId is just a label).
+            templateDao.deleteTemplateById(userId, templateId)
+        }
+
+    /**
+     * Sprint 1-4 — 9:00 local on the given date: the default due time for
+     * tasks created from a template (Feature 13), the same default Plan
+     * My Day and the detail sheet use.
+     */
+    fun planMyDayDefaultDueEpochMillis(date: java.time.LocalDate): Long =
+        date.atTime(9, 0).atZone(java.time.ZoneId.systemDefault())
+            .toInstant().toEpochMilli()
+
+    /**
+     * Creates a template's tasks together (Feature 13): every draft
+     * becomes a task with the SAME due date (picked once by the user),
+     * its estimate + priority carried over, its subtasks created under
+     * it, and templateId set. No reminders (the user adds them later).
+     */
+    suspend fun createTasksFromTemplate(
+        userId: String,
+        template: TaskTemplate,
+        dueEpochMillis: Long
+    ): List<TaskEntity> = withContext(Dispatchers.IO) {
+        val created = mutableListOf<TaskEntity>()
+        template.drafts.forEach { draft ->
+            val task = createTask(
+                userId = userId,
+                title = draft.title,
+                dueEpochMillis = dueEpochMillis,
+                priority = draft.priority,
+                templateId = template.id,
+                estimatedMinutes = draft.estimatedMinutes
+            )
+            draft.subtaskTitles.forEach { subtaskTitle ->
+                createSubtask(task.id, subtaskTitle)
+            }
+            created += task
+        }
+        created
+    }
+
+    // ------------------------------------------------------------ attachments
+
+    fun observeAttachments(taskId: String): Flow<List<TaskAttachmentEntity>> =
+        attachmentDao.getAttachmentsForTaskFlow(taskId)
+
+    /** Result of adding a file: the saved row, or a user-facing reason. */
+    sealed interface AddAttachmentResult {
+        data class Added(val attachment: TaskAttachmentEntity) : AddAttachmentResult
+        data class Rejected(val reason: String) : AddAttachmentResult
+    }
+
+    /**
+     * Sprint 1-4 — adds a file to a task (Feature 10).
+     *
+     * LOCAL-ONLY (locked decision 6): the file is copied into
+     * app-private storage (`files/attachments/`); Room holds only its
+     * path. Limits are spec-fixed: max 25 MB per file, max 10 files per
+     * task — beyond either, the add is BLOCKED with a reason, never
+     * silently dropped. A `sizeBytes` of null means "unknown": the file
+     * is copied first, then measured, and removed again if too big.
+     */
+    suspend fun addAttachmentFromStream(
+        taskId: String,
+        fileName: String,
+        mimeType: String,
+        sizeBytes: Long?,
+        openStream: () -> InputStream?
+    ): AddAttachmentResult = withContext(Dispatchers.IO) {
+        val task = taskDao.getTaskById(taskId)
+            ?: return@withContext AddAttachmentResult.Rejected("Task not found")
+        if (task.groupId != null) {
+            return@withContext AddAttachmentResult.Rejected(
+                "Group tasks can't have attachments here"
+            )
+        }
+        val existing = attachmentDao.getAttachmentsForTaskOnce(taskId)
+        if (existing.size >= MAX_ATTACHMENTS_PER_TASK) {
+            return@withContext AddAttachmentResult.Rejected(
+                "This task already has $MAX_ATTACHMENTS_PER_TASK attachments"
+            )
+        }
+        if (sizeBytes != null && sizeBytes > MAX_ATTACHMENT_BYTES) {
+            return@withContext AddAttachmentResult.Rejected(
+                "File is larger than 25 MB"
+            )
+        }
+        val attachmentId = UUID.randomUUID().toString()
+        val dir = File(context.filesDir, "attachments").apply { mkdirs() }
+        val safeName = fileName
+            .substringAfterLast('/')
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .takeLast(100)
+            .ifBlank { "file" }
+        val dest = File(dir, "${attachmentId}_$safeName")
+        val copiedBytes = try {
+            val stream = openStream() ?: return@withContext AddAttachmentResult.Rejected(
+                "Couldn't read the file"
+            )
+            stream.use { input ->
+                dest.outputStream().use { output -> input.copyTo(output) }
+            }
+            dest.length()
+        } catch (e: Exception) {
+            dest.delete()
+            return@withContext AddAttachmentResult.Rejected("Couldn't save the file")
+        }
+        if (copiedBytes > MAX_ATTACHMENT_BYTES) {
+            dest.delete()
+            return@withContext AddAttachmentResult.Rejected("File is larger than 25 MB")
+        }
+        val attachment = TaskAttachmentEntity(
+            id = attachmentId,
+            taskId = taskId,
+            userId = task.userId,
+            fileName = fileName.substringAfterLast('/').ifBlank { "file" },
+            mimeType = mimeType,
+            localPath = dest.absolutePath,
+            sizeBytes = copiedBytes
+        )
+        attachmentDao.insertAttachment(attachment)
+        AddAttachmentResult.Added(attachment)
+    }
+
+    /** Adds a file picked from a content Uri (name/size/mime resolved here). */
+    suspend fun addAttachment(taskId: String, uri: Uri): AddAttachmentResult {
+        val resolver = context.contentResolver
+        var displayName: String? = null
+        var size: Long? = null
+        resolver.query(
+            uri,
+            arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+            null, null, null
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIndex >= 0) displayName = cursor.getString(nameIndex)
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (sizeIndex >= 0) size = cursor.getLong(sizeIndex).takeIf { it >= 0 }
+            }
+        }
+        val mime = resolver.getType(uri) ?: "application/octet-stream"
+        return addAttachmentFromStream(
+            taskId = taskId,
+            fileName = displayName ?: "file",
+            mimeType = mime,
+            sizeBytes = size,
+            openStream = { resolver.openInputStream(uri) }
+        )
+    }
+
+    /** Removes one attachment: its file first, then its row. */
+    suspend fun deleteAttachment(attachmentId: String) = withContext(Dispatchers.IO) {
+        val attachment = attachmentDao.getAttachmentById(attachmentId) ?: return@withContext
+        File(attachment.localPath).delete()
+        attachmentDao.deleteAttachmentById(attachmentId)
+    }
+
+    /** Deletes every file (and row) attached to a task. Called before the task row goes. */
+    private suspend fun deleteAttachmentFilesForTask(taskId: String) {
+        attachmentDao.getAttachmentsForTaskOnce(taskId).forEach { attachment ->
+            File(attachment.localPath).delete()
+        }
+        attachmentDao.deleteAttachmentsForTask(taskId)
     }
 
     /**

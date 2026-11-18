@@ -68,6 +68,20 @@
             </intent-filter>
         </receiver>
 
+        <!-- Sprint 1-4 — FileProvider for attachment opening (Feature 10).
+             Files live in app-private storage (files/attachments/), so
+             another app can only open one through a content Uri with a
+             one-shot read grant. Not exported; the authority matches the
+             string used in TasksScreen. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.nextgentool.nudgy.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
     </application>
 
