@@ -2,6 +2,7 @@ package com.nextgentool.nudgy.domain.usecase
 
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.domain.dateStringOf
+import com.nextgentool.nudgy.domain.startOfDayMillis
 import com.nextgentool.nudgy.domain.startOfWeekMillis
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -34,10 +35,10 @@ data class WeeklyReview(
  *
  * - Finished: completedAtEpochMillis inside this week. A task completed
  *   this week counts even if it was due last week — it finished now.
- * - Missed: due inside this week, deadline already passed, still
- *   unfinished. A task due later this week is NOT missed yet — its
- *   deadline has not passed. A task due before this week was missed
- *   last week, not this one. No-date tasks are never missed.
+ * - Missed: due EARLIER this week (before today) and still unfinished.
+ *   A task due today is NOT missed yet — the day is not over, the user
+ *   still has time. A task due before this week was missed last week,
+ *   not this one. No-date tasks are never missed.
  * - Slipped: carriedOverFromDate inside this week, whatever its
  *   completion state — the slip itself happened this week.
  * - Subtasks are never review items: they are part of their parent's
@@ -53,6 +54,9 @@ class WeeklyReviewUseCase @Inject constructor() {
     fun buildReview(tasks: List<TaskEntity>, now: Long): WeeklyReview {
         val weekStart = startOfWeekMillis(now)
         val weekEnd = weekStart + 7 * 24 * 60 * 60 * 1000L
+        // "Missed" needs the day to be over: a task due today is still
+        // actionable, so only due dates before today count.
+        val todayStart = startOfDayMillis(now)
         val weekStartDate = dateStringOf(weekStart)
         val weekEndDate = dateStringOf(weekEnd)
         val topLevel = tasks.filter { it.parentTaskId == null }
@@ -63,7 +67,7 @@ class WeeklyReviewUseCase @Inject constructor() {
         }.sortedBy { it.completedAtEpochMillis }
         val missed = topLevel.filter {
             !it.isCompleted &&
-                it.dueDateEpochMillis in weekStart..now
+                it.dueDateEpochMillis in weekStart until todayStart
         }.sortedBy { it.dueDateEpochMillis }
         val slipped = topLevel.filter {
             val from = it.carriedOverFromDate

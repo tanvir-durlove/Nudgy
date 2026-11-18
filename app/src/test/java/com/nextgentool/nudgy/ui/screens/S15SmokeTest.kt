@@ -124,8 +124,19 @@ class S15SmokeTest {
         val midWeek = midWeekInstant()
         val mondayDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
             .format(mondayOfThisWeek())
+        // Missed needs a due day that is over: yesterday 09:00. On a
+        // Monday there is no such day inside this week (the week just
+        // started), so the test then pins the empty state instead.
+        val yesterdayNine = Calendar.getInstance().apply {
+            add(Calendar.DAY_OF_MONTH, -1)
+            set(Calendar.HOUR_OF_DAY, 9)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val canMiss = yesterdayNine >= mondayOfThisWeek()
         val finished: TaskEntity
-        val missed: TaskEntity
+        val missed: TaskEntity?
         val slipped: TaskEntity
         runBlocking {
             finished = repository.createTask(
@@ -143,11 +154,15 @@ class S15SmokeTest {
                     actualMinutes = 45
                 )
             )
-            missed = repository.createTask(
-                userId = userId,
-                title = "Missed task",
-                dueEpochMillis = midWeek
-            )
+            missed = if (canMiss) {
+                repository.createTask(
+                    userId = userId,
+                    title = "Missed task",
+                    dueEpochMillis = yesterdayNine
+                )
+            } else {
+                null
+            }
             slipped = repository.createTask(userId, "Slipped task")
             repository.updateTask(slipped.copy(carriedOverFromDate = mondayDate))
         }
@@ -173,7 +188,13 @@ class S15SmokeTest {
         // Feature 18: the hand-written actual surfaces on the row.
         composeRule.onNodeWithText("45 min").assertIsDisplayed()
         composeRule.onNodeWithText("Missed").assertIsDisplayed()
-        composeRule.onNodeWithTag("weekly_review_row_${missed.id}").assertExists()
+        if (canMiss) {
+            composeRule.onNodeWithTag("weekly_review_row_${missed!!.id}").assertExists()
+        } else {
+            // Monday: no day of this week is over yet, so nothing can
+            // be missed — the empty state is the correct behaviour.
+            composeRule.onNodeWithText("Nothing missed").assertIsDisplayed()
+        }
         composeRule.onNodeWithText("Slipped").assertIsDisplayed()
         composeRule.onNodeWithTag("weekly_review_row_${slipped.id}").assertExists()
     }

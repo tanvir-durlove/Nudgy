@@ -115,6 +115,20 @@ class WeeklyReviewUseCaseTest {
     }
 
     @Test
+    fun `a task due today is not missed yet — the day is not over`() {
+        // Now is Wednesday 15:00; this task is due today 09:00 and
+        // unfinished, but today is still actionable. It must not show
+        // as missed — and must not duplicate its Timeline/My Day row
+        // into the review card (the S1-5 CI round-1 lesson: the review
+        // duplicating today's titles broke three Today tests).
+        val review = useCase.buildReview(
+            listOf(task("due-today", due = at(2026, 11, 18, 9))),
+            now
+        )
+        assertTrue(review.missed.isEmpty())
+    }
+
+    @Test
     fun `slipped holds tasks carried over this week`() {
         val review = useCase.buildReview(
             listOf(
