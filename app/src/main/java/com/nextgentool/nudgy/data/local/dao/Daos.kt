@@ -90,13 +90,16 @@ interface TaskDao {
     @Query("DELETE FROM tasks WHERE id = :id")
     suspend fun deleteTaskById(id: String)
 
-    @Query("UPDATE tasks SET dueDateEpochMillis = :dueDate, reminderEpochMillis = :reminderDate, reminderSet = 1, isSyncedToCloud = 0, updatedAtEpochMillis = :now WHERE id = :id")
-    suspend fun snoozeTask(id: String, dueDate: Long, reminderDate: Long, now: Long)
+    // S1-3a: snooze only moves the REMINDER, never the due date. v1 moved
+    // both, which corrupted the due date (a 5 PM task snoozed at 3 PM
+    // became due at 3:10 PM). Snooze is runtime state — no new column.
+    @Query("UPDATE tasks SET reminderEpochMillis = :reminderEpochMillis, reminderSet = 1, isSyncedToCloud = 0, updatedAtEpochMillis = :now WHERE id = :id")
+    suspend fun setReminderTime(id: String, reminderEpochMillis: Long, now: Long)
 
     // Group rows only: snooze is local-only (same reason as
     // setTaskCompletionLocal — never mark a group row dirty).
-    @Query("UPDATE tasks SET dueDateEpochMillis = :dueDate, reminderEpochMillis = :reminderDate, reminderSet = 1, updatedAtEpochMillis = :now WHERE id = :id")
-    suspend fun snoozeTaskLocal(id: String, dueDate: Long, reminderDate: Long, now: Long)
+    @Query("UPDATE tasks SET reminderEpochMillis = :reminderEpochMillis, reminderSet = 1, updatedAtEpochMillis = :now WHERE id = :id")
+    suspend fun setReminderTimeLocal(id: String, reminderEpochMillis: Long, now: Long)
 
     // Group reconciliation helpers (polling worker, Phase 1): ids of local
     // group rows, and removal of a whole group's local rows.

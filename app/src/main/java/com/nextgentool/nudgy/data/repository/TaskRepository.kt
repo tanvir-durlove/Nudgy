@@ -10,6 +10,7 @@ import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
 import com.nextgentool.nudgy.data.model.TaskStatus
+import com.nextgentool.nudgy.domain.usecase.Recurrence
 import com.nextgentool.nudgy.reminders.ReminderManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -251,7 +252,50 @@ class TaskRepository @Inject constructor(
         } else {
             reminderManager.cancelReminder(task.id)
         }
+        // Completing through an edit (not just the checkbox / Board drag)
+        // also advances a recurrence — but only on a real transition.
+        if (resolvedIsCompleted && existing?.isCompleted == false) {
+            maybeCreateNextOccurrence(resolved)
+        }
     }
+
+    /**
+     * Sprint 1-3a — recurrence (Feature 3). Completing a task with a
+     * recurrence rule creates its next occurrence: same title, description,
+     * priority, project and estimate; the reminder lead (due − reminder) is
+     * preserved, falling back to the 2h default when the preserved time
+     * would already be past. The old occurrence is NOT deleted — history
+     * stays. Subtasks and tags are not carried over (v1 scope). Group
+     * recurrence is Sprint 5; no-date tasks have no anchor to step from.
+     * Completing consumes the current occurrence, so the next one is always
+     * a later cycle — even when completed early.
+     */
+    private suspend fun maybeCreateNextOccurrence(completedTask: TaskEntity) {
+        val rule = completedTask.recurrenceRule ?: return
+        if (completedTask.parentTaskId != null) return
+        if (completedTask.groupId != null) return
+        if (completedTask.dueDateEpochMillis == NO_DUE_DATE) return
+        val nextDue = Recurrence.nextOccurrence(rule, completedTask.dueDateEpochMillis) ?: return
+        val lead = completedTask.reminderEpochMillis?.let { completedTask.dueDateEpochMillis - it }
+            ?: ReminderManager.REMINDER_LEAD_MILLIS
+        val nextReminder = (nextDue - lead).takeIf { it > System.currentTimeMillis() }
+        createTask(
+            userId = completedTask.userId,
+            title = completedTask.title,
+            description = completedTask.description,
+            dueEpochMillis = nextDue,
+            priority = completedTask.priority,
+            category = completedTask.category,
+            reminderSet = completedTask.reminderSet,
+            reminderEpochMillis = if (completedTask.reminderSet) nextReminder else null,
+            recurrenceRule = rule,
+            projectId = completedTask.projectId,
+            estimatedMinutes = completedTask.estimatedMinutes
+        )
+    }
+
+    /** Whether the system allows exact alarms (UI: "missed" state + hint). */
+    fun canScheduleExactAlarms(): Boolean = reminderManager.canScheduleExactAlarms()
 
     /** Flip completion — and the status with it (DONE ⇔ isCompleted). */
     suspend fun toggleTaskCompletion(task: TaskEntity) = withContext(Dispatchers.IO) {
@@ -281,6 +325,7 @@ class TaskRepository @Inject constructor(
         }
         if (newCompleted) {
             reminderManager.cancelReminder(task.id)
+            maybeCreateNextOccurrence(task)
         } else if (task.reminderSet) {
             val trigger = ReminderManager.dueReminderTriggerMillis(task.reminderEpochMillis, task.dueDateEpochMillis)
             if (trigger > System.currentTimeMillis()) {
@@ -313,7 +358,10 @@ class TaskRepository @Inject constructor(
                 now = now
             )
         }
-        if (completed) reminderManager.cancelReminder(task.id)
+        if (completed) {
+            reminderManager.cancelReminder(task.id)
+            maybeCreateNextOccurrence(task)
+        }
     }
 
     suspend fun deleteTask(userId: String, taskId: String) = withContext(Dispatchers.IO) {
@@ -335,30 +383,33 @@ class TaskRepository @Inject constructor(
         }
     }
 
+    /**
+     * Sprint 1-3a — snooze (Feature 6). Only the REMINDER moves to the
+     * snooze time; the due date is untouched (v1 moved both, which
+     * corrupted the due date). The alarm itself is re-scheduled by
+     * ReminderManager, so the snooze survives app kill — and a reboot
+     * restores it via BootReceiver from the stored reminder time.
+     */
     suspend fun snoozeTask(taskId: String, snoozeEpochMillis: Long) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
+        val existing = taskDao.getTaskById(taskId) ?: return@withContext
+        if (existing.isCompleted) return@withContext
         // Group v1: snoozing a group task is a local-only change (same rule
         // as completion) — never dirty-mark a group row.
-        val existing = taskDao.getTaskById(taskId)
-        if (existing?.groupId != null) {
-            taskDao.snoozeTaskLocal(
+        if (existing.groupId != null) {
+            taskDao.setReminderTimeLocal(
                 id = taskId,
-                dueDate = snoozeEpochMillis,
-                reminderDate = snoozeEpochMillis,
+                reminderEpochMillis = snoozeEpochMillis,
                 now = now
             )
         } else {
-            taskDao.snoozeTask(
+            taskDao.setReminderTime(
                 id = taskId,
-                dueDate = snoozeEpochMillis,
-                reminderDate = snoozeEpochMillis,
+                reminderEpochMillis = snoozeEpochMillis,
                 now = now
             )
         }
-        val task = taskDao.getTaskById(taskId)
-        if (task != null) {
-            reminderManager.scheduleReminder(task.id, task.title, snoozeEpochMillis)
-        }
+        reminderManager.scheduleReminder(taskId, existing.title, snoozeEpochMillis)
     }
 
     suspend fun clearCompletedTasks(userId: String) = withContext(Dispatchers.IO) {

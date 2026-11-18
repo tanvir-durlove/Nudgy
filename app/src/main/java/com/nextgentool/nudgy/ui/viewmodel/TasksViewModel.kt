@@ -311,6 +311,14 @@ class TasksViewModel @Inject constructor(
         viewModelScope.launch { repository.setTaskStatus(task, status) }
     }
 
+    /**
+     * Sprint 1-3a — whether the system allows exact alarms. Read fresh on
+     * each access (the user can toggle it in system settings while the app
+     * runs); the detail sheet uses it for the "missed" state and hint.
+     */
+    val exactAlarmsAllowed: Boolean
+        get() = repository.canScheduleExactAlarms()
+
     // ------------------------------------------------------------- subtasks
 
     fun addSubtask(parentId: String, title: String) {

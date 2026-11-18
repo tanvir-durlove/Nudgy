@@ -302,6 +302,7 @@ fun TasksScreen(
             detail = detail,
             allTags = uiState.tags,
             allProjects = uiState.projects,
+            exactAlarmsAllowed = viewModel.exactAlarmsAllowed,
             onUpdateTask = { viewModel.updateSelectedTask(it) },
             onDeleteTask = { viewModel.deleteTask(it) },
             onSetTags = { taskId, tagIds -> viewModel.setTaskTags(taskId, tagIds) },

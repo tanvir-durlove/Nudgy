@@ -28,6 +28,11 @@ class ReminderReceiver : BroadcastReceiver() {
                     try {
                         if (isTaskVisibleToActiveUser(context, taskId)) {
                             showActionableNotification(context, notificationManager, taskId, taskTitle)
+                            // Repeat (Feature 6): keep firing every N minutes
+                            // until the task is completed. Completing cancels
+                            // the alarm (toggleTaskCompletion), and a fresh
+                            // read here stops the chain the moment it is done.
+                            scheduleNextRepeat(context, taskId, taskTitle)
                         } else {
                             // Signed out or a different account is active:
                             // never surface another account's reminder, and
@@ -74,7 +79,10 @@ class ReminderReceiver : BroadcastReceiver() {
             ReminderManager.ACTION_SNOOZE_30M -> {
                 val notifId = ReminderManager.getRequestCode(taskId)
                 notificationManager.cancel(notifId)
-                val snoozeTime = System.currentTimeMillis() + (30 * 60 * 1000L)
+                // S1-3a: snooze is 10 minutes (spec). The ACTION_SNOOZE_30M
+                // action name is historical (v1 used 30m); the string stays
+                // for compat with in-flight PendingIntents.
+                val snoozeTime = System.currentTimeMillis() + ReminderManager.SNOOZE_MILLIS
                 val pendingResult = goAsync()
                 CoroutineScope(Dispatchers.IO).launch {
                     try {
@@ -93,6 +101,28 @@ class ReminderReceiver : BroadcastReceiver() {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Sprint 1-3a — repeat (Feature 6). After a reminder fires, schedule
+     * its next fire at now + reminderRepeatMinutes — unless the task is
+     * completed (or the interval is unset), in which case the chain ends.
+     * The repeat alarm reuses the task's request code, so it replaces the
+     * just-fired alarm; completing cancels it outright.
+     */
+    private suspend fun scheduleNextRepeat(context: Context, taskId: String, taskTitle: String) {
+        try {
+            val repository = com.nextgentool.nudgy.data.repository.TaskRepository(context)
+            val task = repository.getTaskById(taskId) ?: return
+            val next = ReminderManager.nextRepeatFireMillis(
+                task.reminderRepeatMinutes,
+                task.isCompleted,
+                System.currentTimeMillis()
+            ) ?: return
+            ReminderManager(context).scheduleReminder(taskId, taskTitle, next)
+        } catch (e: Exception) {
+            android.util.Log.w("ReminderReceiver", "Error scheduling repeat: ${e.message}")
         }
     }
 
@@ -138,7 +168,8 @@ class ReminderReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Action 2: "Snooze 30m"
+        // Action 2: "Snooze 10m" (S1-3a: 10 minutes; the action string keeps
+        // its historical 30m name for PendingIntent compat).
         val snoozeIntent = Intent(context, ReminderReceiver::class.java).apply {
             action = ReminderManager.ACTION_SNOOZE_30M
             putExtra(ReminderManager.EXTRA_TASK_ID, taskId)
@@ -159,7 +190,7 @@ class ReminderReceiver : BroadcastReceiver() {
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .addAction(0, "Done", donePendingIntent)
-            .addAction(0, "Snooze 30m", snoozePendingIntent)
+            .addAction(0, "Snooze 10m", snoozePendingIntent)
             .build()
 
         notificationManager.notify(notifId, notification)
