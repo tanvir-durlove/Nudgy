@@ -1,8 +1,10 @@
 package com.nextgentool.nudgy.ui.viewmodel
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nextgentool.nudgy.data.local.entity.ProjectEntity
+import com.nextgentool.nudgy.data.local.entity.TaskAttachmentEntity
 import com.nextgentool.nudgy.data.local.entity.TaskTagCrossRef
 import com.nextgentool.nudgy.data.local.entity.SavedViewEntity
 import com.nextgentool.nudgy.data.local.entity.TagEntity
@@ -18,9 +20,11 @@ import com.nextgentool.nudgy.domain.usecase.SaveViewUseCase
 import com.nextgentool.nudgy.domain.usecase.ToggleTaskCompletionUseCase
 import com.nextgentool.nudgy.domain.usecase.UpdateTaskUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -318,6 +322,45 @@ class TasksViewModel @Inject constructor(
      */
     val exactAlarmsAllowed: Boolean
         get() = repository.canScheduleExactAlarms()
+
+    // ---------------------------------------------------------- attachments
+
+    init {
+        // Sprint 1-4 — seeds the 3 approved built-in templates (Feature 13).
+        // Idempotent: a re-seed never duplicates them.
+        viewModelScope.launch { repository.seedBuiltInTemplates(userId) }
+    }
+
+    /** Sprint 1-4 — latest attachment rejection, shown in the detail sheet. */
+    private val _attachmentError = MutableStateFlow<String?>(null)
+    val attachmentError: StateFlow<String?> = _attachmentError.asStateFlow()
+
+    /** Sprint 1-4 — attachments of the task currently open in the sheet. */
+    fun observeAttachments(taskId: String): Flow<List<TaskAttachmentEntity>> =
+        repository.observeAttachments(taskId)
+
+    /** Sprint 1-4 — adds a picked file; a rejection lands in [attachmentError]. */
+    fun attachFile(taskId: String, uri: Uri) {
+        viewModelScope.launch {
+            when (val result = repository.addAttachment(taskId, uri)) {
+                is TaskRepository.AddAttachmentResult.Added -> _attachmentError.value = null
+                is TaskRepository.AddAttachmentResult.Rejected ->
+                    _attachmentError.value = result.reason
+            }
+        }
+    }
+
+    fun removeAttachment(attachmentId: String) {
+        viewModelScope.launch { repository.deleteAttachment(attachmentId) }
+    }
+
+    fun setAttachmentError(message: String) {
+        _attachmentError.value = message
+    }
+
+    fun clearAttachmentError() {
+        _attachmentError.value = null
+    }
 
     // ------------------------------------------------------------- subtasks
 
