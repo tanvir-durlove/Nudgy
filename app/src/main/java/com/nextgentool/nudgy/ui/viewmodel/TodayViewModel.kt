@@ -13,6 +13,8 @@ import com.nextgentool.nudgy.domain.usecase.CarryOverUseCase
 import com.nextgentool.nudgy.domain.usecase.GetTodayTimelineUseCase
 import com.nextgentool.nudgy.domain.usecase.TimelineEntry
 import com.nextgentool.nudgy.domain.usecase.ToggleTaskCompletionUseCase
+import com.nextgentool.nudgy.domain.usecase.WeeklyReview
+import com.nextgentool.nudgy.domain.usecase.WeeklyReviewUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -60,7 +62,9 @@ data class TodayUiState(
     val hasPlannedToday: Boolean = false,
     /** Hero ring: completed / total over today's due tasks. */
     val doneCount: Int = 0,
-    val todayTotal: Int = 0
+    val todayTotal: Int = 0,
+    /** Sprint 1-5 — this week's review (Feature 17): three plain lists. */
+    val weeklyReview: WeeklyReview? = null
 )
 
 /**
@@ -89,7 +93,9 @@ class TodayViewModel @Inject constructor(
     private val calendarRepository: CalendarRepository,
     private val toggleCompletion: ToggleTaskCompletionUseCase,
     private val carryOverUseCase: CarryOverUseCase,
-    private val timelineUseCase: GetTodayTimelineUseCase
+    private val timelineUseCase: GetTodayTimelineUseCase,
+    // Sprint 1-5 — Weekly review (Feature 17), computed from tasks only.
+    private val weeklyReviewUseCase: WeeklyReviewUseCase
 ) : ViewModel() {
 
     private val userId: String = repository.currentUserId()
@@ -186,6 +192,13 @@ class TodayViewModel @Inject constructor(
             .map(::toItem)
             .sortedBy { it.task.createdAtEpochMillis }
 
+        // Weekly review (Feature 17): this week's finished / missed /
+        // slipped, from the same task list — no new table.
+        val weeklyReview = weeklyReviewUseCase.buildReview(
+            tasks = allTasks,
+            now = System.currentTimeMillis()
+        )
+
         TodayUiState(
             isLoading = false,
             tab = tab,
@@ -197,7 +210,8 @@ class TodayViewModel @Inject constructor(
             noDateItems = noDateItems,
             hasPlannedToday = myDayItems.isNotEmpty(),
             doneCount = doneCount,
-            todayTotal = todayDue.size
+            todayTotal = todayDue.size,
+            weeklyReview = weeklyReview
         )
     }.stateIn(
         scope = viewModelScope,

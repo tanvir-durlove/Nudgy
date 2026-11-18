@@ -42,6 +42,17 @@ fun startOfDayMillis(daysAhead: Int, now: Long = System.currentTimeMillis()): Lo
     return startOfDayMillis(cal.timeInMillis)
 }
 
+/** Start of the local week (Monday 00:00) containing [now] (Q5: Mon–Sun). */
+fun startOfWeekMillis(now: Long = System.currentTimeMillis()): Long {
+    // Same Monday-diff as CalendarScreen: Sunday belongs to the week
+    // that started six days earlier, never to the week starting tomorrow.
+    val cal = Calendar.getInstance().apply { timeInMillis = now }
+    val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK)
+    val diffToMonday = if (dayOfWeek == Calendar.SUNDAY) -6 else Calendar.MONDAY - dayOfWeek
+    cal.add(Calendar.DAY_OF_MONTH, diffToMonday)
+    return startOfDayMillis(cal.timeInMillis)
+}
+
 /** "Mon, Nov 17" style label for a day, device-local. */
 fun dayLabel(epochMillis: Long): String =
     SimpleDateFormat("EEE, MMM d", Locale.getDefault()).format(epochMillis)

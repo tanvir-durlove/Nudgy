@@ -456,7 +456,152 @@ fun TodayScreen(
                 }
             }
         }
+        // Weekly review (Feature 17, S1-5) — always visible at the
+        // bottom of Today, on either tab: this week's finished / missed /
+        // slipped, as three plain lists. No counts, no percentages, no
+        // report — Sprint 4 owns numbers (feature 27).
         Spacer(modifier = Modifier.height(24.dp))
+        uiState.weeklyReview?.let { review ->
+            WeeklyReviewCard(review = review)
+        }
+        Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+/**
+ * Sprint 1-5 — Weekly review card (Feature 17, spec §6).
+ *
+ * Three plain lists for the current Mon–Sun week, computed from tasks
+ * only (no new table). A finished row shows the hand-written actual
+ * time when one was logged (Feature 18) — list content, not a report.
+ * Group rows carry the same "Group" badge as everywhere else.
+ */
+@Composable
+private fun WeeklyReviewCard(review: com.nextgentool.nudgy.domain.usecase.WeeklyReview) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("weekly_review_card"),
+        shape = NudgyTokens.cardRadius,
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = NudgyTokens.cardElevation
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Weekly review",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = colorResource(R.color.nudgy_ink),
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = review.weekLabel,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colorResource(R.color.nudgy_muted)
+                )
+            }
+            Text(
+                text = "What finished, what was missed, what slipped this week.",
+                style = MaterialTheme.typography.bodySmall,
+                color = colorResource(R.color.nudgy_muted)
+            )
+            WeeklyReviewSection(
+                title = "Finished",
+                tasks = review.finished,
+                emptyText = "Nothing finished yet",
+                showActual = true
+            )
+            WeeklyReviewSection(
+                title = "Missed",
+                tasks = review.missed,
+                emptyText = "Nothing missed",
+                showActual = false
+            )
+            WeeklyReviewSection(
+                title = "Slipped",
+                tasks = review.slipped,
+                emptyText = "Nothing slipped",
+                showActual = false
+            )
+        }
+    }
+}
+
+@Composable
+private fun WeeklyReviewSection(
+    title: String,
+    tasks: List<com.nextgentool.nudgy.data.local.entity.TaskEntity>,
+    emptyText: String,
+    showActual: Boolean
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            color = colorResource(R.color.nudgy_ink)
+        )
+        if (tasks.isEmpty()) {
+            Text(
+                text = emptyText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = colorResource(R.color.nudgy_muted)
+            )
+        } else {
+            tasks.forEach { task ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("weekly_review_row_${task.id}")
+                ) {
+                    Text(
+                        text = task.title,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            textDecoration = if (task.isCompleted) {
+                                TextDecoration.LineThrough
+                            } else {
+                                TextDecoration.None
+                            }
+                        ),
+                        color = if (task.isCompleted) {
+                            colorResource(R.color.nudgy_muted)
+                        } else {
+                            colorResource(R.color.nudgy_ink)
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    // Feature 18: the hand-written actual time surfaces
+                    // here on finished rows, when one was logged.
+                    if (showActual && task.actualMinutes != null) {
+                        Text(
+                            text = formatMinutes(task.actualMinutes),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colorResource(R.color.nudgy_muted)
+                        )
+                    }
+                    if (task.groupId != null) {
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(
+                                    colorResource(R.color.nudgy_teal).copy(alpha = 0.12f)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "Group",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colorResource(R.color.nudgy_teal)
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
