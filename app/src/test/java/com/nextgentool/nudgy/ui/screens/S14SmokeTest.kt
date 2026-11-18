@@ -116,18 +116,25 @@ class S14SmokeTest {
         composeRule.setContent {
             TemplatesScreen(onBack = {}, viewModel = templatesViewModel)
         }
+        // The DAO orders by name ASC (কাজ, দৈনিক রুটিন, পড়াশোনা), so
+        // only the 1st card is visible at scroll 0 — check the cards
+        // top to bottom, scrolling as each next one composes. Checking
+        // a card after scrolling past it fails: LazyColumn uncomposes
+        // items that leave the viewport.
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("দৈনিক রুটিন")
+            composeRule.onAllNodesWithText("কাজ")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        // The DAO orders by name ASC, so দৈনিক রুটিন is the 2nd card —
-        // below the fold in the Robolectric viewport. Scroll each card
-        // into view before asserting it is displayed.
+        composeRule.onNodeWithText("কাজ").assertIsDisplayed()
         composeRule.onNodeWithText("দৈনিক রুটিন").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("পড়াশোনা").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("কাজ").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Morning routine").assertExists()
         composeRule.onNodeWithTag("use_template_builtin-daily-routine").assertExists()
+        composeRule.onRoot().performTouchInput { swipeUp() }
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("পড়াশোনা")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("পড়াশোনা").performScrollTo().assertIsDisplayed()
         // Built-ins are read-only: no edit/delete affordance on them.
         composeRule.onNodeWithContentDescription("Delete template").assertDoesNotExist()
         composeRule.onNodeWithContentDescription("Edit template").assertDoesNotExist()
@@ -169,14 +176,16 @@ class S14SmokeTest {
         // The Attachments section sits mid-sheet in the sheet's
         // LazyColumn — below the fold in the Robolectric viewport, so
         // its rows are not composed until the sheet is scrolled. Swipe
-        // up on the root (never down — down dismisses the sheet) twice
-        // to bring it in.
+        // up on the sheet's own title (never onRoot — with a
+        // ModalBottomSheet open there are TWO roots, main + popup, and
+        // onRoot throws on multiple matches; never swipe down — down
+        // dismisses the sheet). The whole AttachmentSection is one
+        // LazyColumn item, so once its header is composed the file
+        // rows are too.
         composeRule.waitForIdle()
-        composeRule.onRoot().performTouchInput { swipeUp() }
-        composeRule.waitForIdle()
-        composeRule.onRoot().performTouchInput { swipeUp() }
+        composeRule.onNodeWithText("Task details").performTouchInput { swipeUp() }
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("photo.jpg")
+            composeRule.onAllNodesWithText("Attachments")
                 .fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText("Attachments").assertIsDisplayed()
