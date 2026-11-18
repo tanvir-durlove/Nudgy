@@ -127,7 +127,9 @@ class S14SmokeTest {
         }
         composeRule.onNodeWithText("কাজ").assertIsDisplayed()
         composeRule.onNodeWithText("দৈনিক রুটিন").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Morning routine").assertExists()
+        // The card renders "• Morning routine" (bullet prefix), so the
+        // match must be a substring, not exact.
+        composeRule.onNodeWithText("Morning routine", substring = true).assertExists()
         composeRule.onNodeWithTag("use_template_builtin-daily-routine").assertExists()
         composeRule.onRoot().performTouchInput { swipeUp() }
         composeRule.waitUntil(timeoutMillis = 10_000) {
@@ -176,14 +178,17 @@ class S14SmokeTest {
         // The Attachments section sits mid-sheet in the sheet's
         // LazyColumn — below the fold in the Robolectric viewport, so
         // its rows are not composed until the sheet is scrolled. Swipe
-        // up on the sheet's own title (never onRoot — with a
+        // up on the sheet's list itself (never onRoot — with a
         // ModalBottomSheet open there are TWO roots, main + popup, and
         // onRoot throws on multiple matches; never swipe down — down
-        // dismisses the sheet). The whole AttachmentSection is one
-        // LazyColumn item, so once its header is composed the file
-        // rows are too.
+        // dismisses the sheet). swipeUp spans the TARGET node's bounds
+        // (verified in 1.7.0 sources), so swiping the small title node
+        // moves ~30dp and never reaches the section — the list node is
+        // full-height. The whole AttachmentSection is one LazyColumn
+        // item, so once its header is composed the file rows are too.
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Task details").performTouchInput { swipeUp() }
+        composeRule.onNodeWithTag("task_detail_sheet_list")
+            .performTouchInput { swipeUp() }
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("Attachments")
                 .fetchSemanticsNodes().isNotEmpty()
