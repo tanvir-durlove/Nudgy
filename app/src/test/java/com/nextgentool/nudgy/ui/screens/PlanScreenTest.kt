@@ -5,15 +5,16 @@ import android.os.Looper
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
@@ -108,16 +109,28 @@ class PlanScreenTest {
         composeRule.onNodeWithText(text).fetchSemanticsNode().boundsInRoot.top
 
     /**
-     * Position of the first occurrence of [title] in the semantics
-     * tree's printed form, which lists nodes in traversal (layout)
-     * order. -1 if absent. (Merged nodes can concatenate a row's
-     * title and detail into one text, so this matches by containment,
-     * not equality; a row's own title always prints before its move
-     * buttons' content descriptions, so the first occurrence is the
-     * title's position.)
+     * Index of the first text node containing [title] in the semantics
+     * tree's traversal order, which follows layout order. -1 if no such
+     * node exists yet. (Merged nodes can concatenate a row's title and
+     * detail into one text, so this matches by containment, not
+     * equality. Note: onAllNodes is a member of the rule — it takes NO
+     * import — and SemanticsConfiguration has no getOrNull in Compose
+     * 1.7, hence contains + [] below.)
      */
-    private fun traversalIndex(title: String): Int =
-        composeRule.onRoot().printToString().indexOf(title)
+    private fun traversalIndex(title: String): Int {
+        val textNodes = SemanticsMatcher("node with text") { node ->
+            node.config.contains(SemanticsProperties.Text)
+        }
+        val texts = composeRule.onAllNodes(textNodes).fetchSemanticsNodes()
+            .map {
+                if (it.config.contains(SemanticsProperties.Text)) {
+                    it.config[SemanticsProperties.Text].text
+                } else {
+                    ""
+                }
+            }
+        return texts.indexOfFirst { it.contains(title) }
+    }
 
     /**
      * Pump the (paused, in Robolectric) main looper until [condition]
