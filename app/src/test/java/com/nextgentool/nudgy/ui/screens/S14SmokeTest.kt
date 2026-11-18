@@ -7,8 +7,11 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
@@ -97,9 +100,12 @@ class S14SmokeTest {
         composeRule.onNodeWithTag("view_mode_board").performScrollTo()
         composeRule.onNodeWithTag("view_mode_board").performClick()
         composeRule.onNodeWithTag("task_board").assertExists()
-        composeRule.onNodeWithText("To do").assertExists()
-        composeRule.onNodeWithText("In progress").assertExists()
-        composeRule.onNodeWithText("Done").assertExists()
+        // The column headers share their labels with the status filter
+        // chips ("To do" / "In progress" / "Done"), so onNodeWithText
+        // throws on multiple matches — pin the columns by testTag.
+        composeRule.onNodeWithTag("board_column_TODO").assertExists()
+        composeRule.onNodeWithTag("board_column_IN_PROGRESS").assertExists()
+        composeRule.onNodeWithTag("board_column_DONE").assertExists()
         composeRule.onNodeWithText("Board task one").assertExists()
     }
 
@@ -114,10 +120,13 @@ class S14SmokeTest {
             composeRule.onAllNodesWithText("দৈনিক রুটিন")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("দৈনিক রুটিন").assertIsDisplayed()
-        composeRule.onNodeWithText("পড়াশোনা").assertIsDisplayed()
-        composeRule.onNodeWithText("কাজ").assertIsDisplayed()
-        composeRule.onNodeWithText("Morning routine").assertIsDisplayed()
+        // The DAO orders by name ASC, so দৈনিক রুটিন is the 2nd card —
+        // below the fold in the Robolectric viewport. Scroll each card
+        // into view before asserting it is displayed.
+        composeRule.onNodeWithText("দৈনিক রুটিন").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("পড়াশোনা").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("কাজ").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Morning routine").assertExists()
         composeRule.onNodeWithTag("use_template_builtin-daily-routine").assertExists()
         // Built-ins are read-only: no edit/delete affordance on them.
         composeRule.onNodeWithContentDescription("Delete template").assertDoesNotExist()
@@ -157,6 +166,15 @@ class S14SmokeTest {
                 attachments = listOf(attachment)
             )
         }
+        // The Attachments section sits mid-sheet in the sheet's
+        // LazyColumn — below the fold in the Robolectric viewport, so
+        // its rows are not composed until the sheet is scrolled. Swipe
+        // up on the root (never down — down dismisses the sheet) twice
+        // to bring it in.
+        composeRule.waitForIdle()
+        composeRule.onRoot().performTouchInput { swipeUp() }
+        composeRule.waitForIdle()
+        composeRule.onRoot().performTouchInput { swipeUp() }
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("photo.jpg")
                 .fetchSemanticsNodes().isNotEmpty()

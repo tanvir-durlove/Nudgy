@@ -67,14 +67,18 @@ class TaskRepositoryS14Test {
         repository.seedBuiltInTemplates(userId)
         val templates = repository.observeTemplates(userId).first()
         assertEquals(3, templates.size)
+        // The DAO orders by name ASC (Bengali codepoint order: কাজ,
+        // দৈনিক রুটিন, পড়াশোনা) — NOT seed order. Assert by id, never
+        // by position.
         assertEquals(
-            listOf("দৈনিক রুটিন", "পড়াশোনা", "কাজ"),
-            templates.map { it.name }
+            setOf("দৈনিক রুটিন", "পড়াশোনা", "কাজ"),
+            templates.map { it.name }.toSet()
         )
-        assertEquals(5, templates[0].drafts.size)
-        assertEquals(110, templates[0].totalEstimatedMinutes)
-        assertEquals(160, templates[1].totalEstimatedMinutes)
-        assertEquals(180, templates[2].totalEstimatedMinutes)
+        val byId = templates.associateBy { it.id }
+        assertEquals(5, byId.getValue(BuiltInTemplates.DAILY_ROUTINE_ID).drafts.size)
+        assertEquals(110, byId.getValue(BuiltInTemplates.DAILY_ROUTINE_ID).totalEstimatedMinutes)
+        assertEquals(160, byId.getValue(BuiltInTemplates.STUDY_ID).totalEstimatedMinutes)
+        assertEquals(180, byId.getValue(BuiltInTemplates.WORK_ID).totalEstimatedMinutes)
     }
 
     @Test
