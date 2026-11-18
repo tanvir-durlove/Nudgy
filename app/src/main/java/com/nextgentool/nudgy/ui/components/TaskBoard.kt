@@ -246,6 +246,10 @@ private fun BoardTaskCard(
                             )
                         )
                     },
+                    // Required by the detector (no default). The platform
+                    // drag session owns the drag visuals once startTransfer
+                    // runs, so there is nothing to do per move here.
+                    onDrag = { _, _ -> },
                     onDragEnd = { dragState.value = null },
                     onDragCancel = { dragState.value = null }
                 )
