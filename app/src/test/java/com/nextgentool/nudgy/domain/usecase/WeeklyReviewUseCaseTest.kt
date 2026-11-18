@@ -115,14 +115,34 @@ class WeeklyReviewUseCaseTest {
     }
 
     @Test
-    fun `a task due today is not missed yet — the day is not over`() {
-        // Now is Wednesday 15:00; this task is due today 09:00 and
-        // unfinished, but today is still actionable. It must not show
-        // as missed — and must not duplicate its Timeline/My Day row
+    fun `a task due today at a passed time is missed`() {
+        // Tanvir's decision 2026-11-18: "সময় পেরোলেই missed ধরো" —
+        // now is Wednesday 15:00 and this task was due today 09:00.
+        val review = useCase.buildReview(
+            listOf(task("due-today-9am", due = at(2026, 11, 18, 9))),
+            now
+        )
+        assertEquals(listOf("due-today-9am"), review.missed.map { it.id })
+    }
+
+    @Test
+    fun `a date-only task due today is not missed yet`() {
+        // Due today at local midnight = no time set (quick-add / date
+        // picker). It has no real time to pass, so it stays actionable
+        // all day — and must not duplicate its Timeline/My Day row
         // into the review card (the S1-5 CI round-1 lesson: the review
         // duplicating today's titles broke three Today tests).
         val review = useCase.buildReview(
-            listOf(task("due-today", due = at(2026, 11, 18, 9))),
+            listOf(task("due-today-midnight", due = at(2026, 11, 18))),
+            now
+        )
+        assertTrue(review.missed.isEmpty())
+    }
+
+    @Test
+    fun `a task due today at a future time is not missed yet`() {
+        val review = useCase.buildReview(
+            listOf(task("due-today-6pm", due = at(2026, 11, 18, 18))),
             now
         )
         assertTrue(review.missed.isEmpty())

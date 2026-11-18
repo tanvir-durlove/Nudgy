@@ -163,7 +163,16 @@ class S15SmokeTest {
             } else {
                 null
             }
-            slipped = repository.createTask(userId, "Slipped task")
+            slipped = repository.createTask(
+                userId = userId,
+                title = "Slipped task",
+                // No due date: the default due is "now", and under the
+                // S1-5b missed rule (due time passed) a task due "now"
+                // would also land in Missed — the same review row tag
+                // would then match twice and the tag assertion below
+                // would throw. A slipped task needs no due to slip.
+                dueEpochMillis = TaskRepository.NO_DUE_DATE
+            )
             repository.updateTask(slipped.copy(carriedOverFromDate = mondayDate))
         }
         composeRule.setContent {

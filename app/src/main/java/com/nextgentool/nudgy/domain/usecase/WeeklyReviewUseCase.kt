@@ -35,10 +35,13 @@ data class WeeklyReview(
  *
  * - Finished: completedAtEpochMillis inside this week. A task completed
  *   this week counts even if it was due last week — it finished now.
- * - Missed: due EARLIER this week (before today) and still unfinished.
- *   A task due today is NOT missed yet — the day is not over, the user
- *   still has time. A task due before this week was missed last week,
- *   not this one. No-date tasks are never missed.
+ * - Missed: due this week, due moment passed, still unfinished
+ *   (Tanvir's decision 2026-11-18: "সময় পেরোলেই missed ধরো").
+ *   A date-only due (local midnight — what quick-add and the date
+ *   picker write when no time is given) has no real time: it stays
+ *   actionable all day and only counts as missed from tomorrow. A
+ *   task due before this week was missed last week, not this one.
+ *   No-date tasks are never missed.
  * - Slipped: carriedOverFromDate inside this week, whatever its
  *   completion state — the slip itself happened this week.
  * - Subtasks are never review items: they are part of their parent's
@@ -54,8 +57,6 @@ class WeeklyReviewUseCase @Inject constructor() {
     fun buildReview(tasks: List<TaskEntity>, now: Long): WeeklyReview {
         val weekStart = startOfWeekMillis(now)
         val weekEnd = weekStart + 7 * 24 * 60 * 60 * 1000L
-        // "Missed" needs the day to be over: a task due today is still
-        // actionable, so only due dates before today count.
         val todayStart = startOfDayMillis(now)
         val weekStartDate = dateStringOf(weekStart)
         val weekEndDate = dateStringOf(weekEnd)
@@ -67,7 +68,8 @@ class WeeklyReviewUseCase @Inject constructor() {
         }.sortedBy { it.completedAtEpochMillis }
         val missed = topLevel.filter {
             !it.isCompleted &&
-                it.dueDateEpochMillis in weekStart until todayStart
+                it.dueDateEpochMillis in weekStart until weekEnd &&
+                isMissed(it.dueDateEpochMillis, now, todayStart)
         }.sortedBy { it.dueDateEpochMillis }
         val slipped = topLevel.filter {
             val from = it.carriedOverFromDate
@@ -81,6 +83,23 @@ class WeeklyReviewUseCase @Inject constructor() {
             weekEndMillis = weekEnd,
             weekLabel = weekLabel(weekStart, weekEnd)
         )
+    }
+
+    /**
+     * Missed = the due moment has passed. A date-only due (local
+     * midnight) has no real time: it stays actionable all day and only
+     * counts as missed from tomorrow. A timed due counts as missed as
+     * soon as its time passes, even today.
+     */
+    private fun isMissed(due: Long, now: Long, todayStart: Long): Boolean {
+        val dueDayStart = startOfDayMillis(due)
+        return if (dueDayStart < todayStart) {
+            true // Due on an earlier day: the day is over.
+        } else if (dueDayStart == todayStart) {
+            due > dueDayStart && due < now // Due today with a real time, now passed.
+        } else {
+            false // Due in the future.
+        }
     }
 
     /** "Nov 16 – Nov 22": Monday to Sunday of the week starting [weekStart]. */
