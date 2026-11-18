@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.nextgentool.nudgy.R
@@ -60,6 +61,7 @@ import com.nextgentool.nudgy.data.local.entity.TaskAttachmentEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.domain.formatMinutes
 import com.nextgentool.nudgy.ui.theme.NudgyTokens
 import com.nextgentool.nudgy.ui.viewmodel.TaskDetailState
 import java.text.SimpleDateFormat
@@ -232,6 +234,26 @@ fun TaskDetailSheet(
                     enabled = !isGroup,
                     onUpdateTask = onUpdateTask
                 )
+            }
+
+            // Estimate + actual time (S1-5, Feature 18) — top-level
+            // personal tasks only. Plan/Timeline blocks already read
+            // estimatedMinutes (S1-2); this is the editor for it.
+            // A subtask's estimate means nothing to Plan, and group
+            // tasks are read-only until Sprint 5.
+            if (!isGroup && !isSubtask) {
+                item {
+                    EstimateSection(
+                        task = task,
+                        onUpdateTask = onUpdateTask
+                    )
+                }
+                item {
+                    ActualTimeSection(
+                        task = task,
+                        onUpdateTask = onUpdateTask
+                    )
+                }
             }
 
             // Attachments (S1-4, Feature 10) — top-level personal tasks only.
@@ -529,6 +551,201 @@ fun TaskDetailSheet(
             },
             onDismiss = { showProjectDialog = false }
         )
+    }
+}
+
+/**
+ * Sprint 1-5 — estimate editor (Feature 18, spec §6).
+ *
+ * Quick-pick 15 / 30 / 60 minutes + a custom number of minutes, or
+ * clear the estimate (Q8 — never mandatory). Applies immediately, the
+ * same as Priority in this sheet. Plan's 8h budget and the Timeline's
+ * blocks already read estimatedMinutes (S1-2); setting one here makes
+ * the block longer there. A task with no estimate stays a point on
+ * the timeline, never a block.
+ */
+@Composable
+private fun EstimateSection(
+    task: TaskEntity,
+    onUpdateTask: (TaskEntity) -> Unit
+) {
+    var showCustom by remember { mutableStateOf(false) }
+    var customText by remember { mutableStateOf("") }
+    val customMinutes = customText.toIntOrNull()
+    val customValid = customMinutes != null && customMinutes in 1..MAX_MINUTES_PER_TASK
+    val estimate = task.estimatedMinutes
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "Estimate",
+            style = MaterialTheme.typography.labelLarge,
+            color = colorResource(R.color.nudgy_ink)
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            EstimateQuickPick.entries.forEach { pick ->
+                val selected = estimate == pick.minutes
+                FilterChip(
+                    selected = selected,
+                    onClick = {
+                        showCustom = false
+                        onUpdateTask(task.copy(estimatedMinutes = pick.minutes))
+                    },
+                    label = { Text(pick.label) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = colorResource(R.color.nudgy_teal),
+                        selectedLabelColor = colorResource(R.color.nudgy_cream)
+                    ),
+                    modifier = Modifier.testTag("estimate_pick_${pick.minutes}")
+                )
+            }
+            FilterChip(
+                selected = estimate != null && estimate !in EstimateQuickPick.entries.map { it.minutes },
+                onClick = { showCustom = true },
+                label = { Text("Custom") },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = colorResource(R.color.nudgy_teal),
+                    selectedLabelColor = colorResource(R.color.nudgy_cream)
+                ),
+                modifier = Modifier.testTag("estimate_pick_custom")
+            )
+            if (estimate != null) {
+                TextButton(
+                    onClick = {
+                        showCustom = false
+                        onUpdateTask(task.copy(estimatedMinutes = null))
+                    },
+                    modifier = Modifier.testTag("estimate_clear")
+                ) { Text("Clear", color = colorResource(R.color.nudgy_muted)) }
+            }
+        }
+        if (showCustom) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = customText,
+                    onValueChange = { customText = it.filter { c -> c.isDigit() } },
+                    placeholder = { Text("Minutes") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Done
+                    ),
+                    shape = NudgyTokens.cardRadius,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("estimate_custom_field")
+                )
+                Button(
+                    onClick = {
+                        if (customValid) {
+                            onUpdateTask(task.copy(estimatedMinutes = customMinutes))
+                            showCustom = false
+                            customText = ""
+                        }
+                    },
+                    enabled = customValid,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colorResource(R.color.nudgy_teal),
+                        contentColor = colorResource(R.color.nudgy_cream)
+                    ),
+                    modifier = Modifier.testTag("estimate_custom_save")
+                ) { Text("Save") }
+            }
+        } else if (estimate != null) {
+            Text(
+                text = "Estimated ${formatMinutes(estimate)}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colorResource(R.color.nudgy_muted)
+            )
+        }
+    }
+}
+
+/** Quick-pick estimates (Feature 18, spec §6): 15 / 30 / 60 minutes. */
+private enum class EstimateQuickPick(val minutes: Int, val label: String) {
+    MIN_15(15, "15 min"),
+    MIN_30(30, "30 min"),
+    MIN_60(60, "60 min")
+}
+
+/** A single task never takes more than a day of minutes (sanity cap). */
+private const val MAX_MINUTES_PER_TASK = 1440
+
+/**
+ * Sprint 1-5 — actual-time editor (Feature 18, spec §6).
+ *
+ * Hand-written only — there is no timer in Sprint 1 (auto-tracking
+ * comes with Sprint 4's Pomodoro, feature 24). The logged actual
+ * surfaces on the finished task in the Weekly review. Applies
+ * immediately, the same as the estimate above.
+ */
+@Composable
+private fun ActualTimeSection(
+    task: TaskEntity,
+    onUpdateTask: (TaskEntity) -> Unit
+) {
+    var actualText by remember(task.id, task.actualMinutes) {
+        mutableStateOf(task.actualMinutes?.toString() ?: "")
+    }
+    val actualMinutes = actualText.toIntOrNull()
+    val actualValid = actualMinutes != null && actualMinutes in 1..MAX_MINUTES_PER_TASK
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "Actual time",
+            style = MaterialTheme.typography.labelLarge,
+            color = colorResource(R.color.nudgy_ink)
+        )
+        Text(
+            text = "How long it actually took — enter by hand.",
+            style = MaterialTheme.typography.bodySmall,
+            color = colorResource(R.color.nudgy_muted)
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = actualText,
+                onValueChange = { actualText = it.filter { c -> c.isDigit() } },
+                placeholder = { Text("Minutes") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    imeAction = ImeAction.Done
+                ),
+                shape = NudgyTokens.cardRadius,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("actual_minutes_field")
+            )
+            Button(
+                onClick = {
+                    if (actualValid) {
+                        onUpdateTask(task.copy(actualMinutes = actualMinutes))
+                    }
+                },
+                enabled = actualValid && actualMinutes != task.actualMinutes,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = colorResource(R.color.nudgy_teal),
+                    contentColor = colorResource(R.color.nudgy_cream)
+                ),
+                modifier = Modifier.testTag("actual_minutes_save")
+            ) { Text("Save") }
+            if (task.actualMinutes != null) {
+                TextButton(
+                    onClick = { onUpdateTask(task.copy(actualMinutes = null)) },
+                    modifier = Modifier.testTag("actual_minutes_clear")
+                ) { Text("Clear", color = colorResource(R.color.nudgy_muted)) }
+            }
+        }
+        if (task.actualMinutes != null) {
+            Text(
+                text = "Actually took ${formatMinutes(task.actualMinutes)}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colorResource(R.color.nudgy_muted)
+            )
+        }
     }
 }
 

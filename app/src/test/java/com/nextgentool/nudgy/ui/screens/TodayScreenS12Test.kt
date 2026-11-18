@@ -23,6 +23,7 @@ import com.nextgentool.nudgy.domain.usecase.GetTodayTimelineUseCase
 import com.nextgentool.nudgy.domain.usecase.SaveViewUseCase
 import com.nextgentool.nudgy.domain.usecase.ToggleTaskCompletionUseCase
 import com.nextgentool.nudgy.domain.usecase.UpdateTaskUseCase
+import com.nextgentool.nudgy.domain.usecase.WeeklyReviewUseCase
 import com.nextgentool.nudgy.ui.viewmodel.TasksViewModel
 import com.nextgentool.nudgy.ui.viewmodel.TodayViewModel
 import com.nextgentool.nudgy.ui.viewmodel.startOfTodayMillis
@@ -89,7 +90,8 @@ class TodayScreenS12Test {
             calendarRepository = CalendarRepository(context, db),
             toggleCompletion = ToggleTaskCompletionUseCase(repository),
             carryOverUseCase = CarryOverUseCase(),
-            timelineUseCase = GetTodayTimelineUseCase()
+            timelineUseCase = GetTodayTimelineUseCase(),
+            weeklyReviewUseCase = WeeklyReviewUseCase()
         )
     }
 

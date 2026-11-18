@@ -131,4 +131,45 @@ class TodayTimelineUseCaseTest {
         assertTrue(result.entries.isEmpty())
         assertTrue(result.untimedTasks.isEmpty())
     }
+
+    @Test
+    fun `a bigger estimate makes a longer block, no estimate is a point (S1-5)`() {
+        val todayStart = startOfDayMillis(System.currentTimeMillis())
+        val now = at(0, 8)
+        // Same task, same planned start — only the estimate changes.
+        val with30 = useCase.buildTimeline(
+            todayTasks = listOf(
+                task("t", at(0, 10), plannedStart = at(0, 9), estimatedMinutes = 30)
+            ),
+            todayEvents = emptyList(),
+            startOfToday = todayStart,
+            now = now
+        )
+        val with60 = useCase.buildTimeline(
+            todayTasks = listOf(
+                task("t", at(0, 10), plannedStart = at(0, 9), estimatedMinutes = 60)
+            ),
+            todayEvents = emptyList(),
+            startOfToday = todayStart,
+            now = now
+        )
+        val block30 = with30.entries.filterIsInstance<TimelineEntry.TaskBlock>().single()
+        val block60 = with60.entries.filterIsInstance<TimelineEntry.TaskBlock>().single()
+        assertEquals(30, block30.durationMinutes)
+        assertEquals(60, block60.durationMinutes)
+        // Estimate cleared: the same planned task falls back to a point
+        // at its due time (Q8 — no estimate, no block).
+        val noEst = useCase.buildTimeline(
+            todayTasks = listOf(
+                task("t", at(0, 10), plannedStart = at(0, 9), estimatedMinutes = null)
+            ),
+            todayEvents = emptyList(),
+            startOfToday = todayStart,
+            now = now
+        )
+        assertTrue(noEst.entries.filterIsInstance<TimelineEntry.TaskBlock>().isEmpty())
+        val points = noEst.entries.filterIsInstance<TimelineEntry.TaskPoint>()
+        assertEquals(listOf("t"), points.map { it.task.id })
+        assertEquals(at(0, 10), points.single().startMillis)
+    }
 }
