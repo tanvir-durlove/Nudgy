@@ -114,6 +114,7 @@ fun TemplatesScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .padding(horizontal = 16.dp, vertical = 12.dp)
+                .testTag("templates_list")
         ) {
             if (templates.isEmpty()) {
                 item {

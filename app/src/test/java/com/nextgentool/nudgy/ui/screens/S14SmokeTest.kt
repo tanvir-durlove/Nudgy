@@ -7,11 +7,9 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
@@ -116,27 +114,24 @@ class S14SmokeTest {
         composeRule.setContent {
             TemplatesScreen(onBack = {}, viewModel = templatesViewModel)
         }
-        // The DAO orders by name ASC (কাজ, দৈনিক রুটিন, পড়াশোনা), so
-        // only the 1st card is visible at scroll 0 — check the cards
-        // top to bottom, scrolling as each next one composes. Checking
-        // a card after scrolling past it fails: LazyColumn uncomposes
-        // items that leave the viewport.
+        // The DAO orders by name ASC (কাজ, দৈনিক রুটিন, পড়াশোনা) —
+        // card indices 0, 1, 2. Jump by index: deterministic, no swipe
+        // physics (a swipe's start position decides what scrolls, and
+        // LazyColumn uncomposes items that leave the viewport, so check
+        // each card's contents before scrolling past it).
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("কাজ")
                 .fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText("কাজ").assertIsDisplayed()
-        composeRule.onNodeWithText("দৈনিক রুটিন").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("templates_list").performScrollToIndex(1)
+        composeRule.onNodeWithText("দৈনিক রুটিন").assertIsDisplayed()
         // The card renders "• Morning routine" (bullet prefix), so the
         // match must be a substring, not exact.
         composeRule.onNodeWithText("Morning routine", substring = true).assertExists()
         composeRule.onNodeWithTag("use_template_builtin-daily-routine").assertExists()
-        composeRule.onRoot().performTouchInput { swipeUp() }
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("পড়াশোনা")
-                .fetchSemanticsNodes().isNotEmpty()
-        }
-        composeRule.onNodeWithText("পড়াশোনা").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("templates_list").performScrollToIndex(2)
+        composeRule.onNodeWithText("পড়াশোনা").assertIsDisplayed()
         // Built-ins are read-only: no edit/delete affordance on them.
         composeRule.onNodeWithContentDescription("Delete template").assertDoesNotExist()
         composeRule.onNodeWithContentDescription("Edit template").assertDoesNotExist()
@@ -177,22 +172,16 @@ class S14SmokeTest {
         }
         // The Attachments section sits mid-sheet in the sheet's
         // LazyColumn — below the fold in the Robolectric viewport, so
-        // its rows are not composed until the sheet is scrolled. Swipe
-        // up on the sheet's list itself (never onRoot — with a
-        // ModalBottomSheet open there are TWO roots, main + popup, and
-        // onRoot throws on multiple matches; never swipe down — down
-        // dismisses the sheet). swipeUp spans the TARGET node's bounds
-        // (verified in 1.7.0 sources), so swiping the small title node
-        // moves ~30dp and never reaches the section — the list node is
-        // full-height. The whole AttachmentSection is one LazyColumn
-        // item, so once its header is composed the file rows are too.
+        // its rows are not composed until the sheet is scrolled. Jump
+        // by index (item 6 for a top-level personal task: title, title
+        // field, notes field, Due, Reminder, Recurrence, Attachments)
+        // — deterministic, no swipe physics: a swipe's start position
+        // decides what scrolls, and swipeUp spans the target node's
+        // bounds, which made swipes miss twice. The whole
+        // AttachmentSection is one LazyColumn item, so once its header
+        // is composed the file rows are too.
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("task_detail_sheet_list")
-            .performTouchInput { swipeUp() }
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Attachments")
-                .fetchSemanticsNodes().isNotEmpty()
-        }
+        composeRule.onNodeWithTag("task_detail_sheet_list").performScrollToIndex(6)
         composeRule.onNodeWithText("Attachments").assertIsDisplayed()
         composeRule.onNodeWithText("photo.jpg").assertIsDisplayed()
         composeRule.onNodeWithText("Add file").assertIsDisplayed()
