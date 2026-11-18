@@ -224,10 +224,7 @@ class TodayScreenS12Test {
 
     @Test
     fun `Upcoming tab groups by day and lists no-date tasks`() {
-        // Date-only due: the Upcoming grouping is by date, and a
-        // date-only today task is never missed (S1-5b), so its title
-        // stays a single match on this tab whatever time it runs at.
-        createTask("Today task", startOfTodayMillis())
+        val todayTask = createTask("Today task", at(0, 11))
         createTask("Tomorrow task", at(1, 11))
         createTask("No-date task", TaskRepository.NO_DUE_DATE)
         setTodayContent()
@@ -244,7 +241,13 @@ class TodayScreenS12Test {
         // under "Today" — they never vanish from the app. "Today" is
         // two nodes (the Today tab + the day-group header), so count.
         composeRule.onAllNodesWithText("Today").assertCountEquals(2)
-        composeRule.onNodeWithText("Today task").performScrollTo().assertIsDisplayed()
+        // S1-5b: once its due time (11:00) passes, "Today task" also
+        // repeats in the review card's Missed section, so a bare
+        // single match would throw — count outside the review instead.
+        // (No scroll-to-row check: Compose 1.7 has no onFirst(), and
+        // onNodeWithText throws on two matches once the review
+        // repeats it.)
+        assertEquals(1, nonReviewCount("Today task", todayTask.id))
     }
 
     @Test
