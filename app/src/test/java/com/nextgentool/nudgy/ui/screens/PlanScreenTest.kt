@@ -124,7 +124,11 @@ class PlanScreenTest {
         val texts = composeRule.onAllNodes(textNodes).fetchSemanticsNodes()
             .map {
                 if (it.config.contains(SemanticsProperties.Text)) {
-                    it.config[SemanticsProperties.Text].text
+                    // toString() on purpose: the Text property's value
+                    // type differs across Compose versions (String vs
+                    // AnnotatedString) — its string form is the text
+                    // either way.
+                    it.config[SemanticsProperties.Text].toString()
                 } else {
                     ""
                 }
