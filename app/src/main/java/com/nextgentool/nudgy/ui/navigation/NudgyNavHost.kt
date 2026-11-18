@@ -55,8 +55,7 @@ import com.nextgentool.nudgy.ui.theme.NudgyTheme
  * keeps its shell until Sprint 3.
  *
  * Today is a nested graph ("today_graph"): TodayScreen + the Plan
- * route ("today/plan", skeleton until S1-2). Back from Plan returns
- * to Today.
+ * route ("today/plan"). Back from Plan returns to Today.
  */
 @Composable
 fun NudgyApp() {

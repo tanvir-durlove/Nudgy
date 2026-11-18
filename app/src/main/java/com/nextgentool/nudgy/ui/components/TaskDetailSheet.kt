@@ -93,6 +93,7 @@ fun TaskDetailSheet(
     detail: TaskDetailState,
     allTags: List<TagEntity>,
     allProjects: List<ProjectEntity>,
+    exactAlarmsAllowed: Boolean = true,
     onUpdateTask: (TaskEntity) -> Unit,
     onDeleteTask: (TaskEntity) -> Unit,
     onSetTags: (taskId: String, tagIds: List<String>) -> Unit,
@@ -201,6 +202,23 @@ fun TaskDetailSheet(
                         }
                     }
                 }
+            }
+
+            // Reminder (S1-3a, Feature 6) + repeat task (Feature 3).
+            item {
+                ReminderSection(
+                    task = task,
+                    exactAlarmsAllowed = exactAlarmsAllowed,
+                    enabled = !isGroup,
+                    onUpdateTask = onUpdateTask
+                )
+            }
+            item {
+                RecurrenceSection(
+                    task = task,
+                    enabled = !isGroup,
+                    onUpdateTask = onUpdateTask
+                )
             }
 
             // Priority.

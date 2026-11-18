@@ -127,7 +127,64 @@ class ReminderManager(private val context: Context) {
         }
     }
 
+    /**
+     * Whether exact alarms may be scheduled. On API 31+ the user can turn
+     * this off in system settings; below 31 exact alarms are always allowed.
+     * Used by the UI to show the "missed" state and the turn-it-on hint.
+     */
+    fun canScheduleExactAlarms(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            alarmManager.canScheduleExactAlarms()
+        } else {
+            true
+        }
+    }
+
     companion object {
+        /**
+         * Snooze length (Feature 6): 10 minutes. The ACTION_SNOOZE_30M
+         * action name is historical (v1 snoozed 30 minutes); the string
+         * value stays unchanged for compat with in-flight PendingIntents.
+         */
+        const val SNOOZE_MILLIS: Long = 10 * 60 * 1000L
+
+        /**
+         * The next repeat fire for a reminder, or null when it must not
+         * repeat: completed tasks never re-fire, and a missing or
+         * non-positive interval means "once". Pure — unit-tested without
+         * Android. The receiver calls this after every trigger fire.
+         */
+        fun nextRepeatFireMillis(
+            reminderRepeatMinutes: Int?,
+            isCompleted: Boolean,
+            nowMillis: Long
+        ): Long? {
+            if (isCompleted) return null
+            val minutes = reminderRepeatMinutes ?: return null
+            if (minutes <= 0) return null
+            return nowMillis + minutes * 60_000L
+        }
+
+        /**
+         * A reminder is "missed" when its (effective) trigger time has
+         * passed, the task is still open, and exact alarms are off — so
+         * the alarm could not be guaranteed on time. Pure — unit-tested
+         * without Android. A reminder that fired normally and was simply
+         * not acted on is NOT missed (it did its job); only the
+         * permission-off case is flagged, exactly as the spec requires
+         * ("permission বন্ধ থাকলে reminder হারায় না, 'missed' দেখায়").
+         */
+        fun isReminderMissed(
+            reminderSet: Boolean,
+            effectiveTriggerMillis: Long?,
+            isCompleted: Boolean,
+            exactAlarmsAllowed: Boolean,
+            nowMillis: Long
+        ): Boolean {
+            if (!reminderSet || isCompleted || exactAlarmsAllowed) return false
+            val trigger = effectiveTriggerMillis ?: return false
+            return trigger < nowMillis
+        }
         const val CHANNEL_ID = "nudgy_reminders_channel"
         // NOTE: action strings stay com.example.* on purpose — renaming would drop alarms already scheduled by installed builds.
         const val ACTION_TRIGGER_REMINDER = "com.example.nudgy.ACTION_TRIGGER_REMINDER"
