@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -128,7 +129,12 @@ class TodayScreenS12Test {
             val created = repository.createTask(
                 userId = repository.currentUserId(),
                 title = title,
-                dueEpochMillis = at(0, 10)
+                // Date-only due (local midnight): the slot comes from
+                // plannedStart, and a date-only today task is never
+                // missed (S1-5b) — so its title stays exactly two
+                // renderings (My Day + Timeline), never a third in
+                // the review card, whatever time the test runs at.
+                dueEpochMillis = startOfTodayMillis()
             )
             val today = java.text.SimpleDateFormat(
                 "yyyy-MM-dd", java.util.Locale.getDefault()
@@ -142,10 +148,23 @@ class TodayScreenS12Test {
             )
         }
 
+    /**
+     * Title matches outside the Weekly review card. A missed task's
+     * title repeats in the review (S1-5b: missed = due time passed),
+     * so a bare text count is clock-dependent — the review row is
+     * pinned by its testTag instead and subtracted.
+     */
+    private fun nonReviewCount(text: String, taskId: String): Int {
+        val total = composeRule.onAllNodesWithText(text).fetchSemanticsNodes().size
+        val inReview = composeRule.onAllNodesWithTag("weekly_review_row_$taskId")
+            .fetchSemanticsNodes().size
+        return total - inReview
+    }
+
     @Test
     fun `My Day shows planned tasks, Timeline shows timed tasks and events`() {
         planTask("Planned task", at(0, 9), 60)
-        createTask("Timed task", at(0, 15))
+        val timed = createTask("Timed task", at(0, 15))
         createTask("Untimed task", startOfTodayMillis())
         runBlocking {
             db.calendarDao().insertEvent(
@@ -165,7 +184,9 @@ class TodayScreenS12Test {
         }
         composeRule.onAllNodesWithText("Planned task").assertCountEquals(2)
         // The timed task is in the Timeline only (My Day is picked-only).
-        composeRule.onAllNodesWithText("Timed task").assertCountEquals(1)
+        // S1-5b: once its due time passes it also repeats in the review
+        // card's Missed section, so count outside the review only.
+        assertEquals(1, nonReviewCount("Timed task", timed.id))
         // The untimed task is in the Timeline's Anytime group.
         composeRule.onNodeWithText("Anytime").performScrollTo().assertIsDisplayed()
         composeRule.onAllNodesWithText("Untimed task").assertCountEquals(1)
@@ -203,7 +224,10 @@ class TodayScreenS12Test {
 
     @Test
     fun `Upcoming tab groups by day and lists no-date tasks`() {
-        createTask("Today task", at(0, 11))
+        // Date-only due: the Upcoming grouping is by date, and a
+        // date-only today task is never missed (S1-5b), so its title
+        // stays a single match on this tab whatever time it runs at.
+        createTask("Today task", startOfTodayMillis())
         createTask("Tomorrow task", at(1, 11))
         createTask("No-date task", TaskRepository.NO_DUE_DATE)
         setTodayContent()
