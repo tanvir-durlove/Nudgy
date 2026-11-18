@@ -169,7 +169,7 @@ class TaskDetailReminderTest {
     }
 
     @Test
-    fun `no-date task explains why reminder and repeat are disabled`() {
+    fun `no-date task explains why the reminder is disabled`() {
         val t = task().copy(dueDateEpochMillis = 0L)
         composeRule.setContent {
             ReminderSection(
@@ -180,6 +180,11 @@ class TaskDetailReminderTest {
             )
         }
         composeRule.onNodeWithText("Set a due date to add a reminder.").assertIsDisplayed()
+    }
+
+    @Test
+    fun `no-date task explains why repeat is disabled`() {
+        val t = task().copy(dueDateEpochMillis = 0L)
         composeRule.setContent {
             RecurrenceSection(task = t, enabled = true, onUpdateTask = {})
         }
