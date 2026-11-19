@@ -66,8 +66,8 @@ class TaskRepositoryBoardReorderTest {
             .filter { it.parentTaskId == null && it.status == status }
             .sortedBy { it.boardOrder }
 
-    private suspend fun columnIds(status: TaskStatus): List<String> =
-        column(status).map { it.id }
+    private suspend fun columnTitles(status: TaskStatus): List<String> =
+        column(status).map { it.title }
 
     private suspend fun createTodo(title: String): TaskEntity =
         repository.createTask(userId = userId, title = title)
@@ -83,20 +83,20 @@ class TaskRepositoryBoardReorderTest {
         val b = createTodo("B")
         val c = createTodo("C")
         val d = createTodo("D")
-        assertEquals(listOf("A", "B", "C", "D"), columnIds(TaskStatus.TODO))
+        assertEquals(listOf("A", "B", "C", "D"), columnTitles(TaskStatus.TODO))
 
         // #1 dragged to position #3 (visible index 2 among B, C, D).
         assertTrue(
             repository.moveTaskToPosition(a, TaskStatus.TODO, 2, listOf(b, c, d))
         )
-        assertEquals(listOf("B", "C", "A", "D"), columnIds(TaskStatus.TODO))
+        assertEquals(listOf("B", "C", "A", "D"), columnTitles(TaskStatus.TODO))
         assertEquals(listOf(0, 1, 2, 3), column(TaskStatus.TODO).map { it.boardOrder })
 
         // Drag it back to the top.
         assertTrue(
             repository.moveTaskToPosition(a, TaskStatus.TODO, 0, listOf(b, c, d))
         )
-        assertEquals(listOf("A", "B", "C", "D"), columnIds(TaskStatus.TODO))
+        assertEquals(listOf("A", "B", "C", "D"), columnTitles(TaskStatus.TODO))
         assertEquals(listOf(0, 1, 2, 3), column(TaskStatus.TODO).map { it.boardOrder })
     }
 
@@ -108,12 +108,12 @@ class TaskRepositoryBoardReorderTest {
         assertFalse(
             repository.moveTaskToPosition(b, TaskStatus.TODO, 1, listOf(a, c))
         )
-        assertEquals(listOf("A", "B", "C"), columnIds(TaskStatus.TODO))
+        assertEquals(listOf("A", "B", "C"), columnTitles(TaskStatus.TODO))
         // One slot down is a real move.
         assertTrue(
             repository.moveTaskToPosition(b, TaskStatus.TODO, 2, listOf(a, c))
         )
-        assertEquals(listOf("A", "C", "B"), columnIds(TaskStatus.TODO))
+        assertEquals(listOf("A", "C", "B"), columnTitles(TaskStatus.TODO))
     }
 
     @Test
@@ -127,7 +127,7 @@ class TaskRepositoryBoardReorderTest {
         assertFalse(
             repository.moveTaskToPosition(sub, TaskStatus.TODO, 0, listOf(a))
         )
-        assertEquals(listOf("A"), columnIds(TaskStatus.TODO))
+        assertEquals(listOf("A"), columnTitles(TaskStatus.TODO))
     }
 
     // ------------------------------------------------------------ cross column
@@ -138,17 +138,17 @@ class TaskRepositoryBoardReorderTest {
         val b = createTodo("B")
         val x = createTodo("X")
         repository.setTaskStatus(x, TaskStatus.IN_PROGRESS)
-        assertEquals(listOf("X"), columnIds(TaskStatus.IN_PROGRESS))
+        assertEquals(listOf("X"), columnTitles(TaskStatus.IN_PROGRESS))
 
         // A into the middle of In progress (index 1, below X).
         assertTrue(
             repository.moveTaskToPosition(a, TaskStatus.IN_PROGRESS, 1, listOf(x))
         )
-        assertEquals(listOf("X", "A"), columnIds(TaskStatus.IN_PROGRESS))
+        assertEquals(listOf("X", "A"), columnTitles(TaskStatus.IN_PROGRESS))
         assertEquals(listOf(0, 1), column(TaskStatus.IN_PROGRESS).map { it.boardOrder })
         assertEquals(TaskStatus.IN_PROGRESS, fresh(a.id).status)
         // The source column closed its gap.
-        assertEquals(listOf("B"), columnIds(TaskStatus.TODO))
+        assertEquals(listOf("B"), columnTitles(TaskStatus.TODO))
         assertEquals(listOf(0), column(TaskStatus.TODO).map { it.boardOrder })
     }
 
@@ -163,7 +163,7 @@ class TaskRepositoryBoardReorderTest {
         assertTrue(done.isCompleted)
         assertNotNull(done.completedAtEpochMillis)
         assertEquals(0, done.boardOrder)
-        assertEquals(emptyList<String>(), columnIds(TaskStatus.TODO))
+        assertEquals(emptyList<String>(), columnTitles(TaskStatus.TODO))
     }
 
     @Test
@@ -186,15 +186,15 @@ class TaskRepositoryBoardReorderTest {
             val a = createTodo("A")
             val b = createTodo("B")
             repository.toggleTaskCompletion(fresh(a.id))
-            assertEquals(listOf("A"), columnIds(TaskStatus.DONE))
+            assertEquals(listOf("A"), columnTitles(TaskStatus.DONE))
             assertEquals(0, fresh(a.id).boardOrder)
             assertTrue(fresh(a.id).isCompleted)
             // B closed the gap.
-            assertEquals(listOf("B"), columnIds(TaskStatus.TODO))
+            assertEquals(listOf("B"), columnTitles(TaskStatus.TODO))
             assertEquals(0, fresh(b.id).boardOrder)
 
             repository.toggleTaskCompletion(fresh(a.id))
-            assertEquals(listOf("B", "A"), columnIds(TaskStatus.TODO))
+            assertEquals(listOf("B", "A"), columnTitles(TaskStatus.TODO))
             assertEquals(1, fresh(a.id).boardOrder)
             assertFalse(fresh(a.id).isCompleted)
             assertNull(fresh(a.id).completedAtEpochMillis)
@@ -208,12 +208,12 @@ class TaskRepositoryBoardReorderTest {
         assertEquals(0, fresh(b.id).boardOrder)
         repository.setTaskStatus(a, TaskStatus.DONE)
         // Newly completed always lands on TOP (c1), pushing B down.
-        assertEquals(listOf("A", "B"), columnIds(TaskStatus.DONE))
+        assertEquals(listOf("A", "B"), columnTitles(TaskStatus.DONE))
         // Moving out appends at the end of the target column.
         repository.setTaskStatus(a, TaskStatus.IN_PROGRESS)
-        assertEquals(listOf("A"), columnIds(TaskStatus.IN_PROGRESS))
+        assertEquals(listOf("A"), columnTitles(TaskStatus.IN_PROGRESS))
         assertEquals(0, fresh(a.id).boardOrder)
-        assertEquals(listOf("B"), columnIds(TaskStatus.DONE))
+        assertEquals(listOf("B"), columnTitles(TaskStatus.DONE))
     }
 
     // ------------------------------------------------------------ creation order
@@ -243,8 +243,8 @@ class TaskRepositoryBoardReorderTest {
         )
         assertEquals(listOf(0, 1, 2, 3, 4), created.map { fresh(it.id).boardOrder })
         assertEquals(
-            created.map { it.id },
-            columnIds(TaskStatus.TODO)
+            created.map { it.title },
+            columnTitles(TaskStatus.TODO)
         )
     }
 
@@ -260,7 +260,7 @@ class TaskRepositoryBoardReorderTest {
         // The personal task took 0; shift the group row after it by hand
         // (the fixture is the pre-move state, not a createTask).
         db.taskDao().insertTask(group.copy(boardOrder = 1))
-        assertEquals(listOf("Personal", "Group homework"), columnIds(TaskStatus.TODO))
+        assertEquals(listOf("Personal", "Group homework"), columnTitles(TaskStatus.TODO))
 
         // Drag the group row to the top of the same column.
         assertTrue(
@@ -268,7 +268,7 @@ class TaskRepositoryBoardReorderTest {
                 fresh("group-task-1"), TaskStatus.TODO, 0, listOf(personal)
             )
         )
-        assertEquals(listOf("Group homework", "Personal"), columnIds(TaskStatus.TODO))
+        assertEquals(listOf("Group homework", "Personal"), columnTitles(TaskStatus.TODO))
         val moved = fresh("group-task-1")
         assertEquals(0, moved.boardOrder)
         // Local-only: the row was never dirty-marked for sync (f2).
@@ -285,14 +285,14 @@ class TaskRepositoryBoardReorderTest {
         val b = createTodo("B")
         val h2 = createTodo("H2")
         val c = createTodo("C")
-        assertEquals(listOf("H1", "B", "H2", "C"), columnIds(TaskStatus.TODO))
+        assertEquals(listOf("H1", "B", "H2", "C"), columnTitles(TaskStatus.TODO))
 
         // Drag C above B (visible index 0 among [B]).
         assertTrue(
             repository.moveTaskToPosition(c, TaskStatus.TODO, 0, listOf(b))
         )
         // Visible order is now C, B; hidden H1/H2 keep their relative order.
-        assertEquals(listOf("H1", "C", "B", "H2"), columnIds(TaskStatus.TODO))
+        assertEquals(listOf("H1", "C", "B", "H2"), columnTitles(TaskStatus.TODO))
         assertEquals(listOf(0, 1, 2, 3), column(TaskStatus.TODO).map { it.boardOrder })
 
         // Drag B below the last visible card (visible index 1 among [C]).
@@ -301,7 +301,7 @@ class TaskRepositoryBoardReorderTest {
         assertTrue(
             repository.moveTaskToPosition(b, TaskStatus.TODO, 1, listOf(c))
         )
-        assertEquals(listOf("H1", "C", "B", "H2"), columnIds(TaskStatus.TODO))
+        assertEquals(listOf("H1", "C", "B", "H2"), columnTitles(TaskStatus.TODO))
     }
 
     // ------------------------------------------------------------ My Day plannedStart (e2)
@@ -343,8 +343,8 @@ class TaskRepositoryBoardReorderTest {
         assertEquals(at(10), fresh("myday-b").plannedStartEpochMillis)
         // The Tasks Board order follows too (same boardOrder field).
         assertEquals(
-            listOf("myday-c", "myday-a", "myday-b"),
-            columnIds(TaskStatus.TODO)
+            listOf("C", "A", "B"),
+            columnTitles(TaskStatus.TODO)
         )
     }
 
