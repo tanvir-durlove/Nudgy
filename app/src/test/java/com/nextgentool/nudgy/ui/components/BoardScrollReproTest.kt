@@ -1101,4 +1101,46 @@ class BoardScrollReproTest {
         }
     }
 
+
+    /**
+     * q3 — S1-4f diagnostic: the SAME downward drag as test q, but
+     * asserting the RECORDED drag pointer (via onDragPositionChanged)
+     * actually reaches the bottom edge zone (y > 244dp). If this
+     * passes while q fails, the pointer reaches the zone but the
+     * tick is not scrolling the column in the gesture. If this fails,
+     * the pointerViewport is not tracking the finger (a drag-tracking
+     * issue, not a scroll issue).
+     */
+    @Test(timeout = 60_000)
+    fun `q3_downward drag pointer reaches the bottom edge zone (pointer-tracking check)`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        val positions = mutableListOf<Offset>()
+        setBoard(
+            items,
+            boardScroll = boardScroll,
+            columnScrolls = columnScrolls,
+            onDragPositionChanged = { positions.add(it) }
+        )
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_card_p1").performTouchInput {
+            down(center + Offset(-px(100), 0f))
+            advanceEventTime(1000)
+            repeat(25) {
+                moveBy(Offset(0f, px(10)))
+                advanceEventTime(50)
+            }
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue(positions.size >= 10)
+            assertTrue(positions.maxOf { it.y } > px(244))
+        }
+    }
+
 }
