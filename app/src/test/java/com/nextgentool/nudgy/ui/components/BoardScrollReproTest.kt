@@ -48,6 +48,21 @@ import kotlin.math.abs
  * (left + right); the loop remains for dwelling and is verified
  * on device.
  *
+ * S1-4f (half-visible column): dragging DOWN in a column that is
+ * only half (or less) visible at the screen edge never scrolls it,
+ * while a fully-visible column scrolls fine. The finger sits in the
+ * board's horizontal edge zone for the whole drag, so the tick's
+ * horizontal branch scrolls the board right on every move while the
+ * pointer travels down — by the time it reaches the bottom edge
+ * zone the board has scrolled so far that boardColumnAt flips to
+ * the next column (one card, no overflow), so the dragged column
+ * never scrolls at all. The small 10dp moves in test q matter:
+ * with big moves the pointer reaches the bottom zone before the
+ * board has scrolled far enough to flip, and the bug hides. Test q
+ * (card-drag repro) and test r (plain swipe, the other reading)
+ * separate the two behaviours: q must fail on the old code, r
+ * must pass.
+ *
  * S1-4e (vertical auto-scroll): the horizontal branches are proven
  * on device, but vertical never fired. The prime suspect is the
  * drag-start y: it subtracts this column's scroll, but the board
@@ -761,8 +776,88 @@ class BoardScrollReproTest {
         }
         composeRule.runOnIdle {
             assertTrue(positions.isNotEmpty())
-            val todoScroll = columnScrolls.getValue(TaskStatus.TODO).value
-            assertTrue(todoScroll < px(200).toInt() - px(50).toInt())
+    /**
+     * q — S1-4f repro: dragging DOWN in a half-visible column scrolls
+     * that column (scroll-on-move), not the board sideways. The board
+     * is at scroll 0, so the In progress column is only ~76dp visible
+     * at the right edge and the finger sits in the board's right edge
+     * zone for the whole drag. The touch starts 100dp left of the
+     * card's centre — the card's centre is off-screen (the column is
+     * less than half visible), so down(center) would miss the card;
+     * the visible sliver is what the finger can actually touch.
+     * 25 small 10dp moves (50ms apart, so every move ticks past the
+     * 32ms throttle) carry the pointer into the bottom edge zone.
+     * On the old code the board scrolls right on every move while the
+     * pointer travels down, so by the time it reaches the bottom zone
+     * boardColumnAt has flipped to Done (one card, no overflow) and
+     * the dragged column never moves: inProgress stays 0, board hits
+     * its 480dp max. Assertions on separate lines so the failing line
+     * names the outcome (CI strips assertion messages).
+     */
+    @Test(timeout = 60_000)
+    fun `q_dragging down in a half-visible column scrolls that column, not the board (scroll-on-move)`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        val positions = mutableListOf<Offset>()
+        setBoard(
+            items,
+            boardScroll = boardScroll,
+            columnScrolls = columnScrolls,
+            onDragPositionChanged = { positions.add(it) }
+        )
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_card_p1").performTouchInput {
+            down(center + Offset(-px(100), 0f))
+            advanceEventTime(1000)
+            repeat(25) {
+                moveBy(Offset(0f, px(10)))
+                advanceEventTime(50)
+            }
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue(positions.isNotEmpty())
+            val inProgressScroll = columnScrolls.getValue(TaskStatus.IN_PROGRESS).value
+            assertTrue(inProgressScroll > px(50).toInt())
+            assertTrue(boardScroll.value < px(50).toInt())
+        }
+    }
+
+    /**
+     * r — S1-4f, the other reading: a plain (non-long-press) upward
+     * swipe on a half-visible column scrolls that column through its
+     * own verticalScroll. No long-press delay, so the card's drag
+     * detector never starts. This must pass on the old code too —
+     * it pins that plain manual scrolling is NOT the broken reading,
+     * so the fix belongs to the card-drag auto-scroll path (test q),
+     * not to the column's scrollable.
+     */
+    @Test(timeout = 60_000)
+    fun `r_plain swipe scrolls a half-visible column (no long-press)`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        // Touch the visible sliver (100dp left of the column centre,
+        // which is off-screen) and swipe straight up.
+        composeRule.onNodeWithTag("board_column_IN_PROGRESS").performTouchInput {
+            down(center + Offset(-px(100), 0f))
+            moveBy(Offset(0f, -px(100)))
+            up()
+        }
+        composeRule.runOnIdle {
+            val inProgressScroll = columnScrolls.getValue(TaskStatus.IN_PROGRESS).value
+            assertTrue(inProgressScroll > px(20).toInt())
         }
     }
 }
