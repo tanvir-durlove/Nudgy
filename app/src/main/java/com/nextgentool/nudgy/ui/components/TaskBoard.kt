@@ -40,12 +40,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -115,6 +117,42 @@ private val BOARD_COLUMN_WIDTH = 272.dp
 private val BOARD_COLUMN_GAP = 12.dp
 private val BOARD_HEIGHT = 520.dp
 
+/**
+ * One auto-scroll tick (S1-4c): given the pointer in board-viewport
+ * coordinates, scroll the board and the hovered column one step when
+ * the pointer dwells near an edge. Extracted from the drag loop so
+ * the edge detection + scroll can be driven directly in a test —
+ * Robolectric cannot tick the loop's delay during a held gesture
+ * (proven by three harness approaches in BoardScrollReproTest), so
+ * the loop itself is verified end-to-end on device. The loop just
+ * calls this tick every 32ms while a drag is in flight.
+ */
+internal suspend fun boardAutoScrollTick(
+    pointerViewport: Offset,
+    boardSize: IntSize,
+    boardScrollState: ScrollState,
+    columnScrollStates: Map<TaskStatus, ScrollState>,
+    pitchPx: Float,
+    edgeXPx: Float,
+    edgeYPx: Float,
+    scrollStepPx: Float
+) {
+    if (pointerViewport.x > boardSize.width - edgeXPx) {
+        boardScrollState.scrollBy(scrollStepPx)
+    } else if (pointerViewport.x < edgeXPx) {
+        boardScrollState.scrollBy(-scrollStepPx)
+    }
+    val hovered = boardColumnAt(
+        pointerViewport.x + boardScrollState.value, pitchPx
+    )
+    val columnState = columnScrollStates.getValue(hovered)
+    if (pointerViewport.y > boardSize.height - edgeYPx) {
+        columnState.scrollBy(scrollStepPx)
+    } else if (pointerViewport.y < edgeYPx) {
+        columnState.scrollBy(-scrollStepPx)
+    }
+}
+
 /** In-flight Board drag: the dragged id + the pointer position in the board viewport (px). */
 private data class BoardDrag(val taskId: String, val pointerViewport: Offset)
 
@@ -144,7 +182,24 @@ fun TaskBoard(
     onMoveTask: (TaskEntity, TaskStatus) -> Unit,
     onToggle: (TaskEntity) -> Unit,
     onTaskClick: (TaskEntity) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // Test observability (S1-4c): reports the live drag pointer
+    // position (board-viewport px) at drag start and on every move.
+    // Null in production — no behaviour change. The floating preview
+    // is centered on exactly this value, so asserting it asserts the
+    // preview position without reading semantics mid-gesture (which
+    // hangs the test worker). Invoked synchronously from the gesture
+    // callbacks, never via recomposition.
+    onDragPositionChanged: ((Offset) -> Unit)? = null,
+    // Test seams (S1-4c): an externally owned board scroll state and
+    // board height, so a test can render the board already scrolled
+    // (ScrollState(initial = …)) or scroll it after layout
+    // (scrollTo) without performScrollTo — which hangs the test
+    // worker when the main clock is paused. Null/default in
+    // production — no behaviour change.
+    boardScrollState: ScrollState? = null,
+    columnScrollStates: Map<TaskStatus, ScrollState>? = null,
+    boardHeight: Dp = BOARD_HEIGHT
 ) {
     val density = LocalDensity.current
     val pitchPx = with(density) { (BOARD_COLUMN_WIDTH + BOARD_COLUMN_GAP).toPx() }
@@ -156,11 +211,18 @@ fun TaskBoard(
 
     val dragState = remember { mutableStateOf<BoardDrag?>(null) }
     val drag = dragState.value
-    val boardScrollState = rememberScrollState()
-    val columnScrollStates = remember {
+    val boardScroll = boardScrollState ?: rememberScrollState()
+    val columnScrolls = columnScrollStates ?: remember {
         TaskStatus.entries.associateWith { ScrollState(0) }
     }
-    var boardRootPos by remember { mutableStateOf(Offset.Zero) }
+    // S1-4c fix: the board's LayoutCoordinates, evaluated at drag
+    // time — never a cached Offset. The cached root Offset went
+    // stale/wrong once the board was scrolled, so the drag start
+    // (and the preview, and the auto-scroll edges) were off by the
+    // scroll amount. LayoutCoordinates.localToRoot is evaluated
+    // fresh on every drag start, so it always reflects the current
+    // scroll.
+    var boardCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var boardSize by remember { mutableStateOf(IntSize.Zero) }
     val grouped = remember(items) { groupBoardItems(items) }
 
@@ -168,7 +230,7 @@ fun TaskBoard(
     // keyed on the task id only, so it must not close over stale values).
     val allItemsState = rememberUpdatedState(items)
     val onMoveTaskState = rememberUpdatedState(onMoveTask)
-    val boardRootPosState = rememberUpdatedState(boardRootPos)
+    val boardCoordsState = rememberUpdatedState(boardCoords)
 
     // Auto-scroll while dragging. A drag session scrolls nothing by
     // itself, and the pointer can sit still at an edge waiting for the
@@ -179,20 +241,16 @@ fun TaskBoard(
         if (drag == null) return@LaunchedEffect
         while (true) {
             val current = dragState.value ?: break
-            if (current.pointerViewport.x > boardSize.width - edgeXPx) {
-                boardScrollState.scrollBy(scrollStepPx)
-            } else if (current.pointerViewport.x < edgeXPx) {
-                boardScrollState.scrollBy(-scrollStepPx)
-            }
-            val hovered = boardColumnAt(
-                current.pointerViewport.x + boardScrollState.value, pitchPx
+            boardAutoScrollTick(
+                current.pointerViewport,
+                boardSize,
+                boardScroll,
+                columnScrolls,
+                pitchPx,
+                edgeXPx,
+                edgeYPx,
+                scrollStepPx
             )
-            val columnState = columnScrollStates.getValue(hovered)
-            if (current.pointerViewport.y > boardSize.height - edgeYPx) {
-                columnState.scrollBy(scrollStepPx)
-            } else if (current.pointerViewport.y < edgeYPx) {
-                columnState.scrollBy(-scrollStepPx)
-            }
             delay(32)
         }
     }
@@ -204,22 +262,23 @@ fun TaskBoard(
             horizontalArrangement = Arrangement.spacedBy(BOARD_COLUMN_GAP),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(BOARD_HEIGHT)
-                .horizontalScroll(boardScrollState)
-                .onGloballyPositioned { boardRootPos = it.localToRoot(Offset.Zero) }
+                .height(boardHeight)
+                .horizontalScroll(boardScroll)
+                .onGloballyPositioned { boardCoords = it }
                 .onSizeChanged { boardSize = it }
         ) {
             TaskStatus.entries.forEach { status ->
                 BoardColumn(
                     status = status,
                     items = grouped[status].orEmpty(),
-                    columnScrollState = columnScrollStates.getValue(status),
+                    columnScrollState = columnScrolls.getValue(status),
                     dragState = dragState,
-                    boardRootPosState = boardRootPosState,
-                    boardScrollState = boardScrollState,
+                    boardCoordsState = boardCoordsState,
+                    boardScrollState = boardScroll,
                     pitchPx = pitchPx,
                     allItemsState = allItemsState,
                     onMoveTaskState = onMoveTaskState,
+                    onDragPositionChanged = onDragPositionChanged,
                     onToggle = onToggle,
                     onTaskClick = onTaskClick
                 )
@@ -259,11 +318,12 @@ private fun BoardColumn(
     items: List<TaskListItem>,
     columnScrollState: ScrollState,
     dragState: MutableState<BoardDrag?>,
-    boardRootPosState: State<Offset>,
+    boardCoordsState: State<LayoutCoordinates?>,
     boardScrollState: ScrollState,
     pitchPx: Float,
     allItemsState: State<List<TaskListItem>>,
     onMoveTaskState: State<(TaskEntity, TaskStatus) -> Unit>,
+    onDragPositionChanged: ((Offset) -> Unit)?,
     onToggle: (TaskEntity) -> Unit,
     onTaskClick: (TaskEntity) -> Unit
 ) {
@@ -325,11 +385,13 @@ private fun BoardColumn(
                     BoardTaskCard(
                         item = item,
                         dragState = dragState,
-                        boardRootPosState = boardRootPosState,
+                        boardCoordsState = boardCoordsState,
                         boardScrollState = boardScrollState,
+                        columnScrollState = columnScrollState,
                         pitchPx = pitchPx,
                         allItemsState = allItemsState,
                         onMoveTaskState = onMoveTaskState,
+                        onDragPositionChanged = onDragPositionChanged,
                         isDragging = dragState.value?.taskId == item.task.id,
                         onToggle = { onToggle(item.task) },
                         onClick = { onTaskClick(item.task) }
@@ -344,41 +406,66 @@ private fun BoardColumn(
 private fun BoardTaskCard(
     item: TaskListItem,
     dragState: MutableState<BoardDrag?>,
-    boardRootPosState: State<Offset>,
+    boardCoordsState: State<LayoutCoordinates?>,
     boardScrollState: ScrollState,
+    columnScrollState: ScrollState,
     pitchPx: Float,
     allItemsState: State<List<TaskListItem>>,
     onMoveTaskState: State<(TaskEntity, TaskStatus) -> Unit>,
+    onDragPositionChanged: ((Offset) -> Unit)?,
     isDragging: Boolean,
     onToggle: () -> Unit,
     onClick: () -> Unit
 ) {
     val task = item.task
-    var cardRootPos by remember { mutableStateOf(Offset.Zero) }
+    // S1-4c fix: keep the card's LayoutCoordinates, not a cached
+    // Offset. The drag start evaluates localToRoot fresh, so the
+    // position follows the board's current scroll.
+    var cardCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer { alpha = if (isDragging) 0.35f else 1f }
-            .onGloballyPositioned { cardRootPos = it.localToRoot(Offset.Zero) }
+            .onGloballyPositioned { cardCoords = it }
             .pointerInput(task.id) {
                 detectDragGesturesAfterLongPress(
                     onDragStart = { offsetInCard ->
-                        // Pointer in board-viewport coordinates: the card
-                        // and the board share the same root, so the
-                        // difference is viewport-relative. Later moves
-                        // only add deltas, so this stays right even as
-                        // the board auto-scrolls under the finger.
-                        val startViewport =
-                            cardRootPos + offsetInCard - boardRootPosState.value
+                        // Pointer in board-viewport coordinates,
+                        // evaluated fresh from the live coordinates.
+                        // The card and the board share the same root,
+                        // but both sit inside the scrolling container,
+                        // so their difference is the pointer's position
+                        // in board-CONTENT coordinates — the scroll
+                        // offset cancels in the subtraction. Subtract
+                        // the board scroll (x) and this column's scroll
+                        // (y) to land in viewport coordinates. Later
+                        // moves only add deltas, so this stays right
+                        // even as the board auto-scrolls under the
+                        // finger.
+                        val card = cardCoords
+                        val board = boardCoordsState.value
+                        val startViewport = if (card != null && board != null) {
+                            card.localToRoot(offsetInCard) -
+                                board.localToRoot(Offset.Zero) -
+                                Offset(
+                                    boardScrollState.value.toFloat(),
+                                    columnScrollState.value.toFloat()
+                                )
+                        } else {
+                            offsetInCard
+                        }
                         dragState.value = BoardDrag(task.id, startViewport)
+                        onDragPositionChanged?.invoke(startViewport)
                     },
                     // Required by the detector (no default in 1.7).
                     onDrag = { _, dragAmount ->
                         val current = dragState.value
                         if (current != null && current.taskId == task.id) {
-                            dragState.value = current.copy(
+                            val next = current.copy(
                                 pointerViewport = current.pointerViewport + dragAmount
                             )
+                            dragState.value = next
+                            onDragPositionChanged?.invoke(next.pointerViewport)
                         }
                     },
                     onDragEnd = {
