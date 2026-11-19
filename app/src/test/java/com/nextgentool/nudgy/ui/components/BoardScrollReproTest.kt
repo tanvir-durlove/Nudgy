@@ -860,6 +860,60 @@ class BoardScrollReproTest {
             moveBy(Offset(0f, -px(100)))
             up()
         }
+    /**
+     * r2 — S1-4f control: the SAME single-move swipe as test r, but on
+     * the fully-visible TODO column. If this passes while r fails, the
+     * failure is specific to half-visibility (a real product issue).
+     * If this fails too, plain swipes do not drive the column's
+     * scrollable in this harness at all, and test r cannot prove a
+     * product bug as written.
+     */
+    @Test(timeout = 60_000)
+    fun `r2_plain swipe scrolls a fully-visible column (control)`() {
+        val items = (1..12).map { item("t$it", TaskStatus.TODO) } +
+            listOf(
+                item("b", TaskStatus.IN_PROGRESS),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_column_TODO").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, -px(100)))
+            up()
+        }
+        composeRule.runOnIdle {
+            val todoScroll = columnScrolls.getValue(TaskStatus.TODO).value
+            assertTrue(todoScroll > px(20).toInt())
+        }
+    }
+
+    /**
+     * r3 — S1-4f: the same half-visible swipe as test r, but as a
+     * multi-event swipe over 300ms instead of a single move event.
+     * If r3 passes while r fails, the single-move method is what the
+     * harness cannot drive, not the product.
+     */
+    @Test(timeout = 60_000)
+    fun `r3_multi-event swipe scrolls a half-visible column (no long-press)`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_column_IN_PROGRESS").performTouchInput {
+            swipe(
+                start = center + Offset(-px(100), 0f),
+                end = center + Offset(-px(100), -px(100)),
+                durationMillis = 300
+            )
+        }
         composeRule.runOnIdle {
             val inProgressScroll = columnScrolls.getValue(TaskStatus.IN_PROGRESS).value
             assertTrue(inProgressScroll > px(20).toInt())
