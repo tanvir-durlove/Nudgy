@@ -776,6 +776,11 @@ class BoardScrollReproTest {
         }
         composeRule.runOnIdle {
             assertTrue(positions.isNotEmpty())
+            val todoScroll = columnScrolls.getValue(TaskStatus.TODO).value
+            assertTrue(todoScroll < px(200).toInt() - px(50).toInt())
+        }
+    }
+
     /**
      * q — S1-4f repro: dragging DOWN in a half-visible column scrolls
      * that column (scroll-on-move), not the board sideways. The board
