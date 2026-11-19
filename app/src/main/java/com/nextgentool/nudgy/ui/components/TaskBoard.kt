@@ -381,6 +381,7 @@ private fun BoardColumn(
                         dragState = dragState,
                         boardCoordsState = boardCoordsState,
                         boardScrollState = boardScrollState,
+                        columnScrollState = columnScrollState,
                         pitchPx = pitchPx,
                         allItemsState = allItemsState,
                         onMoveTaskState = onMoveTaskState,
@@ -401,6 +402,7 @@ private fun BoardTaskCard(
     dragState: MutableState<BoardDrag?>,
     boardCoordsState: State<LayoutCoordinates?>,
     boardScrollState: ScrollState,
+    columnScrollState: ScrollState,
     pitchPx: Float,
     allItemsState: State<List<TaskListItem>>,
     onMoveTaskState: State<(TaskEntity, TaskStatus) -> Unit>,
@@ -423,17 +425,26 @@ private fun BoardTaskCard(
                 detectDragGesturesAfterLongPress(
                     onDragStart = { offsetInCard ->
                         // Pointer in board-viewport coordinates,
-                        // evaluated fresh from the live coordinates:
-                        // the card and the board share the same root,
-                        // so the difference is viewport-relative.
-                        // Later moves only add deltas, so this stays
-                        // right even as the board auto-scrolls under
-                        // the finger.
+                        // evaluated fresh from the live coordinates.
+                        // The card and the board share the same root,
+                        // but both sit inside the scrolling container,
+                        // so their difference is the pointer's position
+                        // in board-CONTENT coordinates — the scroll
+                        // offset cancels in the subtraction. Subtract
+                        // the board scroll (x) and this column's scroll
+                        // (y) to land in viewport coordinates. Later
+                        // moves only add deltas, so this stays right
+                        // even as the board auto-scrolls under the
+                        // finger.
                         val card = cardCoords
                         val board = boardCoordsState.value
                         val startViewport = if (card != null && board != null) {
                             card.localToRoot(offsetInCard) -
-                                board.localToRoot(Offset.Zero)
+                                board.localToRoot(Offset.Zero) -
+                                Offset(
+                                    boardScrollState.value.toFloat(),
+                                    columnScrollState.value.toFloat()
+                                )
                         } else {
                             offsetInCard
                         }
