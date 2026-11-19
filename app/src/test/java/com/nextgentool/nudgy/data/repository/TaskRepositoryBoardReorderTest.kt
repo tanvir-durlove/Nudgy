@@ -295,13 +295,14 @@ class TaskRepositoryBoardReorderTest {
         assertEquals(listOf("H1", "C", "B", "H2"), columnTitles(TaskStatus.TODO))
         assertEquals(listOf(0, 1, 2, 3), column(TaskStatus.TODO).map { it.boardOrder })
 
-        // Drag B below the last visible card (visible index 1 among [C]).
-        // B lands directly below C in the full column — after the last
-        // visible card, NOT at the absolute end (H2 stays below B).
+        // Drag C below the last visible card (visible index 1 among [B]).
+        // C lands directly below B in the full column — after the last
+        // visible card, NOT at the absolute end (H2 stays below C).
         assertTrue(
-            repository.moveTaskToPosition(b, TaskStatus.TODO, 1, listOf(c))
+            repository.moveTaskToPosition(c, TaskStatus.TODO, 1, listOf(b))
         )
-        assertEquals(listOf("H1", "C", "B", "H2"), columnTitles(TaskStatus.TODO))
+        assertEquals(listOf("H1", "B", "C", "H2"), columnTitles(TaskStatus.TODO))
+        assertEquals(listOf(0, 1, 2, 3), column(TaskStatus.TODO).map { it.boardOrder })
     }
 
     // ------------------------------------------------------------ My Day plannedStart (e2)
