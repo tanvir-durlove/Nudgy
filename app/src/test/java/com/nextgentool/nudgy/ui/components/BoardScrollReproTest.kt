@@ -860,6 +860,12 @@ class BoardScrollReproTest {
             moveBy(Offset(0f, -px(100)))
             up()
         }
+        composeRule.runOnIdle {
+            val inProgressScroll = columnScrolls.getValue(TaskStatus.IN_PROGRESS).value
+            assertTrue(inProgressScroll > px(20).toInt())
+        }
+    }
+
     /**
      * r2 — S1-4f control: the SAME single-move swipe as test r, but on
      * the fully-visible TODO column. If this passes while r fails, the
