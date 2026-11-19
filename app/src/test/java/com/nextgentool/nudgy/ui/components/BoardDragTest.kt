@@ -76,7 +76,7 @@ class BoardDragTest {
             }
         }
         composeRule.onNodeWithTag(tag).performTouchInput {
-            down()
+            down(center)
             // Past the long-press timeout, so the drag starts.
             advanceEventTime(1000)
             moveBy(delta)
