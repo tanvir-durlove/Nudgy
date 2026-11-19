@@ -34,6 +34,12 @@ import kotlin.math.abs
  * fires. Written RED first: each test must fail on the S1-4b code
  * and pass once the position plumbing is fixed.
  *
+ * Sprint 1-4d adds f/g: the left edge was never covered — d/e prove
+ * right + down only. f drives the tick left; g asserts the loop's
+ * INPUT during a leftward drag (the reported pointer must reach the
+ * left edge zone), because the loop itself cannot tick during a held
+ * gesture in Robolectric.
+ *
  * The board is rendered 360dp wide x 300dp tall so the three 272dp
  * columns (840dp of content) always need real horizontal scrolling
  * and a 12-card column always needs real vertical scrolling.
@@ -302,5 +308,83 @@ class BoardScrollReproTest {
             "TODO column scroll state should have moved (value=$todoScroll)",
             todoScroll > px(50).toInt()
         )
+    }
+
+    @Test(timeout = 60_000)
+    fun `f_auto-scroll tick scrolls the board left at the left edge`() {
+        val items = listOf(
+            item("a", TaskStatus.TODO),
+            item("b", TaskStatus.IN_PROGRESS),
+            item("c", TaskStatus.DONE, completed = true)
+        )
+        // Board rendered already scrolled right to Done (max scroll
+        // 480dp), so a left tick has room to move.
+        val boardScroll = ScrollState(px(480).toInt())
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        val board = composeRule.onNodeWithTag("task_board")
+            .fetchSemanticsNode().boundsInRoot
+        // Pointer in the middle of the left edge zone (24dp from the
+        // edge), vertically centred so no column scrolls. Five ticks
+        // at 24dp each move the board 120dp left. Same ground-truth
+        // note as d: the ScrollState value proves the scroll.
+        val pointer = Offset(px(24), board.height / 2)
+        runBlocking {
+            repeat(5) {
+                boardAutoScrollTick(
+                    pointer,
+                    androidx.compose.ui.unit.IntSize(
+                        board.width.toInt(), board.height.toInt()
+                    ),
+                    boardScroll,
+                    columnScrolls,
+                    px(284),
+                    px(48),
+                    px(56),
+                    px(24)
+                )
+            }
+        }
+        assertTrue(
+            "board scroll state should have moved left (value=${boardScroll.value})",
+            boardScroll.value < px(480).toInt() - px(50).toInt()
+        )
+    }
+
+    @Test(timeout = 60_000)
+    fun `g_leftward drag from a scrolled column reports positions reaching the left edge zone`() {
+        val items = listOf(
+            item("a", TaskStatus.TODO),
+            item("b", TaskStatus.IN_PROGRESS),
+            item("c", TaskStatus.DONE, completed = true)
+        )
+        val positions = mutableListOf<Offset>()
+        setBoard(
+            items,
+            boardScroll = ScrollState(px(480).toInt()),
+            onDragPositionChanged = { positions.add(it) }
+        )
+        composeRule.runOnIdle {}
+        // Long-press the Done card and drag it two pitches left, the
+        // device sequence for dragging back toward To do. The loop
+        // cannot tick during a held gesture in Robolectric, so this
+        // test asserts only the INPUT the loop would see: the reported
+        // pointer positions must reach the left edge zone (x < 48dp).
+        // Separate assertions on separate lines, so the failing line
+        // localises the mechanism (CI strips assertion messages).
+        val pitch = px(284)
+        composeRule.onNodeWithTag("board_card_c").performTouchInput {
+            down(center)
+            advanceEventTime(1000)
+            moveBy(Offset(-2 * pitch, 0f))
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue(positions.isNotEmpty())
+            val minX = positions.minOf { it.x }
+            assertTrue(minX < px(100))
+            assertTrue(minX < px(48))
+        }
     }
 }
