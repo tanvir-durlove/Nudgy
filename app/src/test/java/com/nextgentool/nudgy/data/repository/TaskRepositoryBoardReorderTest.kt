@@ -255,7 +255,7 @@ class TaskRepositoryBoardReorderTest {
         val personal = createTodo("Personal")
         val group = TaskEntity(
             id = "group-task-1", userId = userId, title = "Group homework",
-            groupId = "group-1", isSyncedToCloud = 1, boardOrder = 0
+            groupId = "group-1", isSyncedToCloud = true, boardOrder = 0
         )
         // The personal task took 0; shift the group row after it by hand
         // (the fixture is the pre-move state, not a createTask).
@@ -272,7 +272,7 @@ class TaskRepositoryBoardReorderTest {
         val moved = fresh("group-task-1")
         assertEquals(0, moved.boardOrder)
         // Local-only: the row was never dirty-marked for sync (f2).
-        assertEquals(1, moved.isSyncedToCloud)
+        assertTrue(moved.isSyncedToCloud)
     }
 
     // ------------------------------------------------------------ filtered mapping
