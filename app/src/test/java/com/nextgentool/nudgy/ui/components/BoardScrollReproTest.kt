@@ -897,10 +897,12 @@ class BoardScrollReproTest {
     }
 
     /**
-     * r3 — S1-4f: the same half-visible swipe as test r, but as a
-     * multi-event swipe over 300ms instead of a single move event.
-     * If r3 passes while r fails, the single-move method is what the
-     * harness cannot drive, not the product.
+     * r3 — S1-4f: the same half-visible swipe as test r, but as
+     * several small move events over event time instead of a single
+     * move event. (TouchInjectionScope has no swipe() in Compose 1.7,
+     * so the multi-event swipe is written out by hand.) If r3 passes
+     * while r fails, the single-move method is what the harness
+     * cannot drive, not the product.
      */
     @Test(timeout = 60_000)
     fun `r3_multi-event swipe scrolls a half-visible column (no long-press)`() {
@@ -914,11 +916,12 @@ class BoardScrollReproTest {
         setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
         composeRule.runOnIdle {}
         composeRule.onNodeWithTag("board_column_IN_PROGRESS").performTouchInput {
-            swipe(
-                start = center + Offset(-px(100), 0f),
-                end = center + Offset(-px(100), -px(100)),
-                durationMillis = 300
-            )
+            down(center + Offset(-px(100), 0f))
+            repeat(5) {
+                moveBy(Offset(0f, -px(20)))
+                advanceEventTime(60)
+            }
+            up()
         }
         composeRule.runOnIdle {
             val inProgressScroll = columnScrolls.getValue(TaskStatus.IN_PROGRESS).value
