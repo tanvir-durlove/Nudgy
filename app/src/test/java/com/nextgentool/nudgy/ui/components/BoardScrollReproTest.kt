@@ -2,6 +2,12 @@ package com.nextgentool.nudgy.ui.components
 
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
@@ -1044,4 +1050,51 @@ class BoardScrollReproTest {
             assertTrue(inProgressScroll > px(20).toInt())
         }
     }
+
+    /**
+     * r8 — S1-4f minimal repro: a plain nested scrollable (a vertical
+     * list inside a horizontal scroller), half-visible, plain swipe.
+     * No Board code, no card gestures, no clickable. If this fails,
+     * the plain-swipe failure is a framework/Robolectric artifact of
+     * clipped nested scrolling, not TaskBoard code. If it passes, the
+     * issue is in TaskBoard (e.g. the card's pointerInput/clickable).
+     */
+    @Test(timeout = 60_000)
+    fun `r8_minimal nested scrollable swipes when half-visible (framework check)`() {
+        val col2Scroll = ScrollState(0)
+        val boardScroll = ScrollState(0)
+        composeRule.mainClock.autoAdvance = false
+        composeRule.setContent {
+            Box(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .width(360.dp)
+                        .height(300.dp)
+                        .horizontalScroll(boardScroll)
+                ) {
+                    Column(modifier = Modifier.width(272.dp)) {
+                        repeat(12) { Text("A$it", modifier = Modifier.height(72.dp)) }
+                    }
+                    Column(
+                        modifier = Modifier
+                            .width(272.dp)
+                            .verticalScroll(col2Scroll)
+                            .testTag("mini_col2")
+                    ) {
+                        repeat(12) { Text("B$it", modifier = Modifier.height(72.dp)) }
+                    }
+                }
+            }
+        }
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("mini_col2").performTouchInput {
+            down(center + Offset(-px(100), 0f))
+            moveBy(Offset(0f, -px(100)))
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue(col2Scroll.value > px(20).toInt())
+        }
+    }
+
 }
