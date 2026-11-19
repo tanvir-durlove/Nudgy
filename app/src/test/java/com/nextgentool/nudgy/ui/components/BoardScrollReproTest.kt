@@ -48,6 +48,19 @@ import kotlin.math.abs
  * (left + right); the loop remains for dwelling and is verified
  * on device.
  *
+ * S1-4e (vertical auto-scroll): the horizontal branches are proven
+ * on device, but vertical never fired. The prime suspect is the
+ * drag-start y: it subtracts this column's scroll, but the board
+ * does NOT sit inside the column's vertical scroll, so the
+ * difference is already the viewport y and the subtraction
+ * double-counts it — the reported y is short by exactly the column
+ * scroll, which puts the bottom edge zone out of reach. Tests m
+ * (drag-start position with a pre-scrolled column) and o (drag
+ * down through the bottom zone) reproduce it; n (tick top zone)
+ * and p (drag up through the top zone) pin the parts that already
+ * work. A column must actually overflow for vertical scroll to be
+ * possible — the tests use 12 cards against a ~240dp viewport.
+ *
  * S1-4d round 4 (both CI runs failed h + l, i passed) proved TWO
  * bugs in the first scroll-on-move implementation: (1) the move
  * throttle was seeded with Long.MIN_VALUE, and the first
@@ -567,6 +580,189 @@ class BoardScrollReproTest {
         composeRule.runOnIdle {
             assertTrue(positions.isNotEmpty())
             assertTrue(boardScroll.value > px(50).toInt())
+        }
+    }
+
+    /**
+     * m — S1-4e repro: drag-start y is exact when the column is
+     * rendered pre-scrolled. The device reports vertical auto-scroll
+     * never fires; the prime suspect is the drag-start y: it
+     * subtracts this column's scroll, but the board does NOT sit
+     * inside the column's vertical scroll, so the difference is
+     * already the viewport y and the subtraction double-counts it
+     * — the reported y is short by exactly the column scroll. If
+     * the suspect is right, this fails by the pre-scroll amount
+     * (200dp). The x and y assertions are on separate lines, so
+     * the failing line localises the mechanism (CI strips
+     * assertion messages).
+     */
+    @Test(timeout = 60_000)
+    fun `m_drag start y is exact when the column is rendered pre-scrolled`() {
+        val items = (1..12).map { item("t$it", TaskStatus.TODO) } +
+            listOf(
+                item("b", TaskStatus.IN_PROGRESS),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val positions = mutableListOf<Offset>()
+        val columnScrolls = TaskStatus.entries.associateWith {
+            if (it == TaskStatus.TODO) ScrollState(px(200).toInt()) else ScrollState(0)
+        }
+        setBoard(
+            items,
+            columnScrolls = columnScrolls,
+            onDragPositionChanged = { positions.add(it) }
+        )
+        composeRule.runOnIdle {}
+        val finger = fingerOf("board_card_t4")
+        composeRule.onNodeWithTag("board_card_t4").performTouchInput {
+            down(center)
+            advanceEventTime(1000)
+            moveBy(Offset(2f, 0f))
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue("expected at least one drag position report, got none", positions.isNotEmpty())
+            val first = positions.first()
+            val tolerance = px(8)
+            assertTrue(first.x > finger.x - tolerance)
+            assertTrue(first.x < finger.x + tolerance)
+            assertTrue(first.y > finger.y - tolerance)
+            assertTrue(first.y < finger.y + tolerance)
+        }
+    }
+
+    /**
+     * n — S1-4e: the tick's top edge zone scrolls the column up.
+     * Direct tick test (the missing half of d/e): pointer in the
+     * top zone (28dp from the edge) over a pre-scrolled TODO
+     * column — five ticks at 24dp each move it 120dp up. This
+     * isolates the tick from the drag path: it passes on the old
+     * code too (the tick is not the suspect), and pins the tick so
+     * a later change cannot break the top branch silently.
+     */
+    @Test(timeout = 60_000)
+    fun `n_auto-scroll tick scrolls the column up at the top edge`() {
+        val items = (1..12).map { item("t$it", TaskStatus.TODO) } +
+            listOf(
+                item("b", TaskStatus.IN_PROGRESS),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith {
+            if (it == TaskStatus.TODO) ScrollState(px(200).toInt()) else ScrollState(0)
+        }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        val board = composeRule.onNodeWithTag("task_board")
+            .fetchSemanticsNode().boundsInRoot
+        val pointer = Offset(px(136), px(28))
+        repeat(5) {
+            boardAutoScrollTick(
+                pointer,
+                androidx.compose.ui.unit.IntSize(
+                    board.width.toInt(), board.height.toInt()
+                ),
+                boardScroll,
+                columnScrolls,
+                px(284),
+                px(48),
+                px(56),
+                px(24)
+            )
+        }
+        val todoScroll = columnScrolls.getValue(TaskStatus.TODO).value
+        assertTrue(todoScroll < px(200).toInt() - px(50).toInt())
+    }
+
+    /**
+     * o — S1-4e repro: dragging DOWN through the bottom edge zone
+     * scrolls the column down (scroll-on-move). Vertical mirror of
+     * test i/l: the TODO column is pre-scrolled 200dp and the card
+     * is dragged down in steps into the bottom edge zone — three
+     * ticks in the zone, 50ms apart, so 3 x 24dp = 72dp of down
+     * scroll. On the old code the drag-start y is short by the
+     * column scroll, so the bottom zone (y > height - 56dp) is
+     * unreachable and the column never moves.
+     */
+    @Test(timeout = 60_000)
+    fun `o_dragging down through the bottom edge zone scrolls the column down (scroll-on-move)`() {
+        val items = (1..12).map { item("t$it", TaskStatus.TODO) } +
+            listOf(
+                item("b", TaskStatus.IN_PROGRESS),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val columnScrolls = TaskStatus.entries.associateWith {
+            if (it == TaskStatus.TODO) ScrollState(px(200).toInt()) else ScrollState(0)
+        }
+        val positions = mutableListOf<Offset>()
+        setBoard(
+            items,
+            columnScrolls = columnScrolls,
+            onDragPositionChanged = { positions.add(it) }
+        )
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_card_t4").performTouchInput {
+            down(center)
+            advanceEventTime(1000)
+            repeat(3) {
+                moveBy(Offset(0f, px(70)))
+                advanceEventTime(50)
+            }
+            repeat(2) {
+                moveBy(Offset(0f, px(10)))
+                advanceEventTime(50)
+            }
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue(positions.isNotEmpty())
+            val todoScroll = columnScrolls.getValue(TaskStatus.TODO).value
+            assertTrue(todoScroll > px(200).toInt() + px(50).toInt())
+        }
+    }
+
+    /**
+     * p — S1-4e guard: dragging UP through the top edge zone
+     * scrolls the column up (scroll-on-move). Vertical mirror of
+     * test i for the top edge. This passes on the old code too:
+     * with the drag-start y short by the column scroll, the top
+     * zone fires even more readily — so it guards the fix against
+     * breaking up-scroll rather than reproducing the bug.
+     */
+    @Test(timeout = 60_000)
+    fun `p_dragging up through the top edge zone scrolls the column up (scroll-on-move)`() {
+        val items = (1..12).map { item("t$it", TaskStatus.TODO) } +
+            listOf(
+                item("b", TaskStatus.IN_PROGRESS),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val columnScrolls = TaskStatus.entries.associateWith {
+            if (it == TaskStatus.TODO) ScrollState(px(200).toInt()) else ScrollState(0)
+        }
+        val positions = mutableListOf<Offset>()
+        setBoard(
+            items,
+            columnScrolls = columnScrolls,
+            onDragPositionChanged = { positions.add(it) }
+        )
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_card_t4").performTouchInput {
+            down(center)
+            advanceEventTime(1000)
+            repeat(3) {
+                moveBy(Offset(0f, -px(70)))
+                advanceEventTime(50)
+            }
+            repeat(2) {
+                moveBy(Offset(0f, -px(10)))
+                advanceEventTime(50)
+            }
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue(positions.isNotEmpty())
+            val todoScroll = columnScrolls.getValue(TaskStatus.TODO).value
+            assertTrue(todoScroll < px(200).toInt() - px(50).toInt())
         }
     }
 }
