@@ -159,6 +159,38 @@ interface TaskDao {
     @Query("UPDATE tasks SET status = :status, isCompleted = :isCompleted, completedAtEpochMillis = :completedAt, updatedAtEpochMillis = :now WHERE id = :id AND userId = :userId")
     suspend fun setTaskStatusAndCompletionLocal(userId: String, id: String, status: String, isCompleted: Boolean, completedAt: Long?, now: Long)
 
+    // ---- Sprint 1-4g (board reorder, MIGRATION_8_9) ----
+    //
+    // boardOrder is dense 0..n-1 per status column, over TOP-LEVEL tasks
+    // only (subtasks keep 0 — they have no Board presence). Every write
+    // below has a Local twin: group rows are never dirty-marked (same
+    // rule as setTaskStatusAndCompletionLocal — never synced, never
+    // uploaded as a personal cloud copy).
+
+    /** Highest boardOrder in a top-level status column (null = empty). */
+    @Query("SELECT MAX(boardOrder) FROM tasks WHERE userId = :userId AND parentTaskId IS NULL AND status = :status")
+    suspend fun getMaxBoardOrder(userId: String, status: String): Int?
+
+    /** Rewrite one row's position (personal rows are dirty-marked). */
+    @Query("UPDATE tasks SET boardOrder = :boardOrder, isSyncedToCloud = 0, updatedAtEpochMillis = :now WHERE id = :id AND userId = :userId")
+    suspend fun setBoardOrderForUser(userId: String, id: String, boardOrder: Int, now: Long)
+
+    /** Rewrite one row's position (group rows stay clean). */
+    @Query("UPDATE tasks SET boardOrder = :boardOrder, updatedAtEpochMillis = :now WHERE id = :id AND userId = :userId")
+    suspend fun setBoardOrderLocal(userId: String, id: String, boardOrder: Int, now: Long)
+
+    /**
+     * The moved row's write in a Board drop: status + completion +
+     * position (+ plannedStart — the My Day Board re-slots the day, see
+     * TaskRepository.moveTaskToPosition) in one UPDATE. The caller passes
+     * the resolved plannedStart (the stored value when it does not move).
+     */
+    @Query("UPDATE tasks SET status = :status, isCompleted = :isCompleted, completedAtEpochMillis = :completedAt, boardOrder = :boardOrder, plannedStartEpochMillis = :plannedStart, isSyncedToCloud = 0, updatedAtEpochMillis = :now WHERE id = :id AND userId = :userId")
+    suspend fun setStatusCompletionBoardOrderForUser(userId: String, id: String, status: String, isCompleted: Boolean, completedAt: Long?, boardOrder: Int, plannedStart: Long?, now: Long)
+
+    @Query("UPDATE tasks SET status = :status, isCompleted = :isCompleted, completedAtEpochMillis = :completedAt, boardOrder = :boardOrder, plannedStartEpochMillis = :plannedStart, updatedAtEpochMillis = :now WHERE id = :id AND userId = :userId")
+    suspend fun setStatusCompletionBoardOrderLocal(userId: String, id: String, status: String, isCompleted: Boolean, completedAt: Long?, boardOrder: Int, plannedStart: Long?, now: Long)
+
     /** Deleting a project orphans its tasks (projectId -> NULL); tasks are never deleted. */
     @Query("UPDATE tasks SET projectId = NULL, updatedAtEpochMillis = :now WHERE projectId = :projectId")
     suspend fun clearProjectFromTasks(projectId: String, now: Long)

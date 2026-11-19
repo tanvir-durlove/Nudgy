@@ -119,7 +119,7 @@ class BoardScrollReproTest {
         boardScroll: ScrollState? = null,
         columnScrolls: Map<TaskStatus, ScrollState>? = null,
         boardHeight: Dp = 300.dp,
-        onMoveTask: (TaskEntity, TaskStatus) -> Unit = { _, _ -> },
+        onMoveTask: (TaskEntity, TaskStatus, Int, List<TaskEntity>) -> Unit = { _, _, _, _ -> },
         onDragPositionChanged: ((Offset) -> Unit)? = null
     ) {
         composeRule.mainClock.autoAdvance = false
@@ -161,7 +161,7 @@ class BoardScrollReproTest {
         setBoard(
             items,
             boardScroll = ScrollState(px(480).toInt()),
-            onMoveTask = { task, status -> moved.add(task to status) }
+            onMoveTask = { task, status, _, _ -> moved.add(task to status) }
         )
         composeRule.runOnIdle {}
         val pitch = px(284)

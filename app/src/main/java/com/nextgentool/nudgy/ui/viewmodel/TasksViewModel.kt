@@ -311,8 +311,27 @@ class TasksViewModel @Inject constructor(
         viewModelScope.launch { updateTask(task) }
     }
 
-    fun setTaskStatus(task: TaskEntity, status: TaskStatus) {
-        viewModelScope.launch { repository.setTaskStatus(task, status) }
+    /**
+     * Sprint 1-4g — Board reorder (Feature 5). The Board passes the drop
+     * position among the VISIBLE cards of the target column plus those
+     * cards in display order; the repository maps the visible index onto
+     * the full status column. [updatePlannedStart] is true only for the
+     * My Day Board (e2) — there the drop re-slots the day (see
+     * TaskRepository.moveTaskToPosition); the Tasks Board never touches
+     * plannedStart.
+     */
+    fun moveTaskToPosition(
+        task: TaskEntity,
+        targetStatus: TaskStatus,
+        targetIndex: Int,
+        visibleItems: List<TaskEntity>,
+        updatePlannedStart: Boolean = false
+    ) {
+        viewModelScope.launch {
+            repository.moveTaskToPosition(
+                task, targetStatus, targetIndex, visibleItems, updatePlannedStart
+            )
+        }
     }
 
     /**

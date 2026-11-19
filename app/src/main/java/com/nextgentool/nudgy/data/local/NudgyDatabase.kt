@@ -194,6 +194,65 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
     }
 }
 
+// MIGRATION_8_9's backfill row. Top-level (not inside the anonymous
+// object): a class declared in an object expression is treated as a
+// local class, and local classes cannot be private.
+private data class BoardOrderRow(
+    val id: String,
+    val status: String,
+    val due: Long,
+    val completedAt: Long?
+)
+
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Sprint 1-4g (board reorder): one new column, appended LAST
+        // (matching TaskEntity's field order — Room validates the
+        // migrated schema against the entities on open).
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `boardOrder` INTEGER NOT NULL DEFAULT 0")
+        // Backfill in Kotlin, NOT ROW_NUMBER() — the window function
+        // needs SQLite 3.25+ (Android API 30+) and minSdk is 24.
+        // Per status, in TODAY'S visible order, so nobody's board
+        // changes on upgrade: TODO / IN_PROGRESS by due date ASC
+        // (no-date, 0L, last — the dueSortKey rule); DONE by
+        // completedAt DESC (most recently completed on top). Top-level
+        // tasks only — subtasks keep 0 (they have no Board presence).
+        val cursor = db.query(
+            "SELECT `id`, `status`, `dueDateEpochMillis`, `completedAtEpochMillis` " +
+                "FROM `tasks` WHERE `parentTaskId` IS NULL"
+        )
+        cursor.use {
+            val idCol = it.getColumnIndexOrThrow("id")
+            val statusCol = it.getColumnIndexOrThrow("status")
+            val dueCol = it.getColumnIndexOrThrow("dueDateEpochMillis")
+            val completedAtCol = it.getColumnIndexOrThrow("completedAtEpochMillis")
+            val rows = mutableListOf<BoardOrderRow>()
+            while (it.moveToNext()) {
+                rows += BoardOrderRow(
+                    id = it.getString(idCol),
+                    status = it.getString(statusCol),
+                    due = it.getLong(dueCol),
+                    completedAt = if (it.isNull(completedAtCol)) null else it.getLong(completedAtCol)
+                )
+            }
+            for (status in listOf("TODO", "IN_PROGRESS", "DONE")) {
+                val column = rows.filter { row -> row.status == status }
+                val ordered = if (status == "DONE") {
+                    column.sortedByDescending { row -> row.completedAt ?: Long.MIN_VALUE }
+                } else {
+                    column.sortedBy { row -> if (row.due == 0L) Long.MAX_VALUE else row.due }
+                }
+                ordered.forEachIndexed { index, row ->
+                    db.execSQL(
+                        "UPDATE `tasks` SET `boardOrder` = ? WHERE `id` = ?",
+                        arrayOf<Any?>(index, row.id)
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Database(
     entities = [
         TaskEntity::class,
@@ -210,7 +269,7 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
         TaskAttachmentEntity::class,
         TaskTemplateEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -239,7 +298,7 @@ abstract class NudgyDatabase : RoomDatabase() {
                     NudgyDatabase::class.java,
                     "nudgy_local_db"
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                     // Public-launch policy (revisited from the pre-launch
                     // note): destructive fallback is RETIRED from v5.
                     // Every distributed install is v4 (1.0.2 was the first
