@@ -117,6 +117,42 @@ private val BOARD_COLUMN_WIDTH = 272.dp
 private val BOARD_COLUMN_GAP = 12.dp
 private val BOARD_HEIGHT = 520.dp
 
+/**
+ * One auto-scroll tick (S1-4c): given the pointer in board-viewport
+ * coordinates, scroll the board and the hovered column one step when
+ * the pointer dwells near an edge. Extracted from the drag loop so
+ * the edge detection + scroll can be driven directly in a test —
+ * Robolectric cannot tick the loop's delay during a held gesture
+ * (proven by three harness approaches in BoardScrollReproTest), so
+ * the loop itself is verified end-to-end on device. The loop just
+ * calls this tick every 32ms while a drag is in flight.
+ */
+internal suspend fun boardAutoScrollTick(
+    pointerViewport: Offset,
+    boardSize: IntSize,
+    boardScrollState: ScrollState,
+    columnScrollStates: Map<TaskStatus, ScrollState>,
+    pitchPx: Float,
+    edgeXPx: Float,
+    edgeYPx: Float,
+    scrollStepPx: Float
+) {
+    if (pointerViewport.x > boardSize.width - edgeXPx) {
+        boardScrollState.scrollBy(scrollStepPx)
+    } else if (pointerViewport.x < edgeXPx) {
+        boardScrollState.scrollBy(-scrollStepPx)
+    }
+    val hovered = boardColumnAt(
+        pointerViewport.x + boardScrollState.value, pitchPx
+    )
+    val columnState = columnScrollStates.getValue(hovered)
+    if (pointerViewport.y > boardSize.height - edgeYPx) {
+        columnState.scrollBy(scrollStepPx)
+    } else if (pointerViewport.y < edgeYPx) {
+        columnState.scrollBy(-scrollStepPx)
+    }
+}
+
 /** In-flight Board drag: the dragged id + the pointer position in the board viewport (px). */
 private data class BoardDrag(val taskId: String, val pointerViewport: Offset)
 
@@ -162,6 +198,7 @@ fun TaskBoard(
     // worker when the main clock is paused. Null/default in
     // production — no behaviour change.
     boardScrollState: ScrollState? = null,
+    columnScrollStates: Map<TaskStatus, ScrollState>? = null,
     boardHeight: Dp = BOARD_HEIGHT
 ) {
     val density = LocalDensity.current
@@ -169,16 +206,13 @@ fun TaskBoard(
     val edgeXPx = with(density) { 48.dp.toPx() }
     val edgeYPx = with(density) { 56.dp.toPx() }
     val scrollStepPx = with(density) { 24.dp.toPx() }
-    // Small step for a move-driven scroll (S1-4c): moves arrive at
-    // input rate, so one timer-sized step per move would race.
-    val moveScrollStepPx = with(density) { 8.dp.toPx() }
     val previewHalfWidthPx = with(density) { (BOARD_COLUMN_WIDTH / 2).toPx() }
     val previewYOffsetPx = with(density) { 28.dp.toPx() }
 
     val dragState = remember { mutableStateOf<BoardDrag?>(null) }
     val drag = dragState.value
     val boardScroll = boardScrollState ?: rememberScrollState()
-    val columnScrollStates = remember {
+    val columnScrolls = columnScrollStates ?: remember {
         TaskStatus.entries.associateWith { ScrollState(0) }
     }
     // S1-4c fix: the board's LayoutCoordinates, evaluated at drag
@@ -207,45 +241,17 @@ fun TaskBoard(
         if (drag == null) return@LaunchedEffect
         while (true) {
             val current = dragState.value ?: break
-            if (current.pointerViewport.x > boardSize.width - edgeXPx) {
-                boardScroll.scrollBy(scrollStepPx)
-            } else if (current.pointerViewport.x < edgeXPx) {
-                boardScroll.scrollBy(-scrollStepPx)
-            }
-            val hovered = boardColumnAt(
-                current.pointerViewport.x + boardScroll.value, pitchPx
+            boardAutoScrollTick(
+                current.pointerViewport,
+                boardSize,
+                boardScroll,
+                columnScrolls,
+                pitchPx,
+                edgeXPx,
+                edgeYPx,
+                scrollStepPx
             )
-            val columnState = columnScrollStates.getValue(hovered)
-            if (current.pointerViewport.y > boardSize.height - edgeYPx) {
-                columnState.scrollBy(scrollStepPx)
-            } else if (current.pointerViewport.y < edgeYPx) {
-                columnState.scrollBy(-scrollStepPx)
-            }
             delay(32)
-        }
-    }
-
-    // Scroll-on-move (S1-4c): a drag that keeps MOVING into an edge
-    // zone should scroll at once, not only when the pointer dwells
-    // there for the timer loop. Every drag move re-runs this effect
-    // with the new pointer position and scrolls one small step if
-    // the pointer is in an edge zone. The timer loop above still
-    // covers a pointer held still at an edge.
-    LaunchedEffect(drag) {
-        val current = drag ?: return@LaunchedEffect
-        if (current.pointerViewport.x > boardSize.width - edgeXPx) {
-            boardScroll.scrollBy(moveScrollStepPx)
-        } else if (current.pointerViewport.x < edgeXPx) {
-            boardScroll.scrollBy(-moveScrollStepPx)
-        }
-        val hovered = boardColumnAt(
-            current.pointerViewport.x + boardScroll.value, pitchPx
-        )
-        val columnState = columnScrollStates.getValue(hovered)
-        if (current.pointerViewport.y > boardSize.height - edgeYPx) {
-            columnState.scrollBy(moveScrollStepPx)
-        } else if (current.pointerViewport.y < edgeYPx) {
-            columnState.scrollBy(-moveScrollStepPx)
         }
     }
 
@@ -265,7 +271,7 @@ fun TaskBoard(
                 BoardColumn(
                     status = status,
                     items = grouped[status].orEmpty(),
-                    columnScrollState = columnScrollStates.getValue(status),
+                    columnScrollState = columnScrolls.getValue(status),
                     dragState = dragState,
                     boardCoordsState = boardCoordsState,
                     boardScrollState = boardScroll,
