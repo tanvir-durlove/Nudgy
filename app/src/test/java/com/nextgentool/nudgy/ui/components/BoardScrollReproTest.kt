@@ -48,6 +48,19 @@ import kotlin.math.abs
  * (left + right); the loop remains for dwelling and is verified
  * on device.
  *
+ * S1-4d round 4 (both CI runs failed h + l, i passed) proved TWO
+ * bugs in the first scroll-on-move implementation: (1) the move
+ * throttle was seeded with Long.MIN_VALUE, and the first
+ * subtraction (uptime - MIN_VALUE) overflows to a negative number
+ * for any non-negative uptime — so scroll-on-move never fired at
+ * all; the throttle is now a nullable Long (null = no move
+ * scrolled yet). (2) boardSize was measured on the Row inside
+ * horizontalScroll, which reports the CONTENT width (840dp), so
+ * the right edge zone sat at x > 792dp — unreachable; boardSize
+ * is now measured on the outer Box (the viewport). The left edge
+ * does not depend on the width, which is why i passed while h/l
+ * failed — the asymmetry was the tell.
+ *
  * Ground rules, learned the hard way:
  * - Robolectric cannot tick a delay() loop during a held gesture.
  *   The loop is covered by direct tick tests (d/e/f) + device.

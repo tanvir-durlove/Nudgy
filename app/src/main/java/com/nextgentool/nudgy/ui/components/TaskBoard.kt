@@ -136,6 +136,12 @@ private val BOARD_HEIGHT = 520.dp
  * same path). The loop calls this tick every 32ms while a drag is in
  * flight (dwelling); onDrag calls it on movement (see
  * requestMoveScroll in TaskBoard).
+ *
+ * boardSize MUST be the viewport size (the outer Box): the pointer
+ * is in board-viewport coordinates. Passing the content width
+ * (the Row inside horizontalScroll, 840dp) would put the right
+ * edge zone beyond any viewport pointer and right auto-scroll
+ * would never fire.
  */
 internal fun boardAutoScrollTick(
     pointerViewport: Offset,
@@ -253,9 +259,16 @@ fun TaskBoard(
     // (change.uptimeMillis). The tick is synchronous (dispatchRawDelta)
     // so this runs inside onDrag with no coroutine and is directly
     // testable; the loop stays for dwelling.
-    val lastMoveScrollUptime = remember { mutableStateOf(Long.MIN_VALUE) }
+    // Throttle state is a nullable Long, NOT Long.MIN_VALUE: the
+    // first subtraction (eventTime - MIN_VALUE) overflows to a
+    // negative number for any non-negative uptime, so a MIN_VALUE
+    // sentinel would never fire at all (caught by tests h/l in
+    // round 4 — scroll-on-move never ran). null means "no move
+    // scrolled yet", so the first move always fires.
+    val lastMoveScrollUptime = remember { mutableStateOf<Long?>(null) }
     val requestMoveScroll: (Offset, Long) -> Unit = { pointer, eventTimeMillis ->
-        if (eventTimeMillis - lastMoveScrollUptime.value >= 32) {
+        val last = lastMoveScrollUptime.value
+        if (last == null || eventTimeMillis - last >= 32) {
             lastMoveScrollUptime.value = eventTimeMillis
             boardAutoScrollTick(
                 pointer,
@@ -299,7 +312,20 @@ fun TaskBoard(
 
     val draggedTask = drag?.let { d -> items.firstOrNull { it.task.id == d.taskId }?.task }
 
-    Box(modifier = modifier.testTag("task_board")) {
+    // boardSize is the VIEWPORT size (the outer Box), not the
+    // content size: the tick's edge zones are in board-viewport
+    // coordinates, so they must be compared against the viewport.
+    // Measuring the Row (inside horizontalScroll) would report the
+    // CONTENT width (840dp) and put the right edge zone at x > 792dp
+    // — unreachable from any viewport pointer, so right auto-scroll
+    // would never fire (caught by tests h/l in round 4: the left
+    // edge, which does not depend on the width, scrolled fine while
+    // the right edge never moved).
+    Box(
+        modifier = modifier
+            .testTag("task_board")
+            .onSizeChanged { boardSize = it }
+    ) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(BOARD_COLUMN_GAP),
             modifier = Modifier
@@ -307,7 +333,6 @@ fun TaskBoard(
                 .height(boardHeight)
                 .horizontalScroll(boardScroll)
                 .onGloballyPositioned { boardCoords = it }
-                .onSizeChanged { boardSize = it }
         ) {
             TaskStatus.entries.forEach { status ->
                 BoardColumn(
