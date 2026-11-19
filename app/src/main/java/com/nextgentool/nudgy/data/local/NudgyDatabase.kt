@@ -194,6 +194,16 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
     }
 }
 
+// MIGRATION_8_9's backfill row. Top-level (not inside the anonymous
+// object): a class declared in an object expression is treated as a
+// local class, and local classes cannot be private.
+private data class BoardOrderRow(
+    val id: String,
+    val status: String,
+    val due: Long,
+    val completedAt: Long?
+)
+
 val MIGRATION_8_9 = object : Migration(8, 9) {
     override fun migrate(db: SupportSQLiteDatabase) {
         // Sprint 1-4g (board reorder): one new column, appended LAST
@@ -209,8 +219,7 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
         // tasks only — subtasks keep 0 (they have no Board presence).
         val cursor = db.query(
             "SELECT `id`, `status`, `dueDateEpochMillis`, `completedAtEpochMillis` " +
-                "FROM `tasks` WHERE `parentTaskId` IS NULL",
-            null
+                "FROM `tasks` WHERE `parentTaskId` IS NULL"
         )
         cursor.use {
             val idCol = it.getColumnIndexOrThrow("id")
@@ -242,13 +251,6 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
             }
         }
     }
-
-    private data class BoardOrderRow(
-        val id: String,
-        val status: String,
-        val due: Long,
-        val completedAt: Long?
-    )
 }
 
 @Database(
