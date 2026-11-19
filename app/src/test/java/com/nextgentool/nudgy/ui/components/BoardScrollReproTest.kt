@@ -928,4 +928,63 @@ class BoardScrollReproTest {
             assertTrue(inProgressScroll > px(20).toInt())
         }
     }
+
+    /**
+     * r4 — S1-4f control: board scrolled 284dp so the In progress
+     * column is FULLY visible, then the same swipe at its centre.
+     * If this passes, the column scrolls fine when fully visible and
+     * the failure is specific to the half-visible state.
+     */
+    @Test(timeout = 60_000)
+    fun `r4_swipe scrolls the In progress column when it is fully visible (control)`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(px(284).toInt())
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_column_IN_PROGRESS").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, -px(100)))
+            up()
+        }
+        composeRule.runOnIdle {
+            val inProgressScroll = columnScrolls.getValue(TaskStatus.IN_PROGRESS).value
+            assertTrue(inProgressScroll > px(20).toInt())
+        }
+    }
+
+    /**
+     * r5 — S1-4f discriminator: the SAME swipe as test r (board at 0,
+     * touch at centre − 100dp on the half-visible In progress column),
+     * but asserting the TO DO column scrolled instead. If this passes,
+     * the touch is landing on To do — i.e. `center` comes from the
+     * column's clipped visible bounds, so the touch in r/q is
+     * mis-targeted (a test bug, not a product bug). If it fails, the
+     * touch is not landing on To do either.
+     */
+    @Test(timeout = 60_000)
+    fun `r5_same swipe as r scrolls To do instead (mis-targeting check)`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_column_IN_PROGRESS").performTouchInput {
+            down(center + Offset(-px(100), 0f))
+            moveBy(Offset(0f, -px(100)))
+            up()
+        }
+        composeRule.runOnIdle {
+            val todoScroll = columnScrolls.getValue(TaskStatus.TODO).value
+            assertTrue(todoScroll > px(20).toInt())
+        }
+    }
 }
