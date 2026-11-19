@@ -15,9 +15,11 @@ import com.nextgentool.nudgy.data.model.TaskStatus
 import com.nextgentool.nudgy.ui.viewmodel.TaskListItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.FixMethodOrder
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.runners.MethodSorters
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import kotlin.math.abs
@@ -32,9 +34,19 @@ import kotlin.math.abs
  * The board is rendered 360dp wide so the three 272dp columns
  * (840dp of content) always need real horizontal scrolling; the
  * 12-card TODO column needs real vertical scrolling.
+ *
+ * Harness rules learned the hard way (the first version of this file
+ * hung the CI test step for 20+ minutes): never read semantics
+ * during an active drag — the preview position is asserted through
+ * TaskBoard's onDragPositionChanged hook instead (the preview is
+ * centered on exactly that value, so it is the same assertion);
+ * and the clock is only advanced while a drag is held in the
+ * auto-scroll tests, which run last (a/b/c/d order) so a hang
+ * there cannot hide the safe tests' results.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
+@FixMethodOrder(MethodSorters.NAME_ASCENDING)
 class BoardScrollReproTest {
 
     @get:Rule
@@ -55,7 +67,8 @@ class BoardScrollReproTest {
 
     private fun setBoard(
         items: List<TaskListItem>,
-        onMoveTask: (TaskEntity, TaskStatus) -> Unit = { _, _ -> }
+        onMoveTask: (TaskEntity, TaskStatus) -> Unit = { _, _ -> },
+        onDragPositionChanged: ((Offset) -> Unit)? = null
     ) {
         composeRule.mainClock.autoAdvance = false
         composeRule.setContent {
@@ -65,47 +78,15 @@ class BoardScrollReproTest {
                     onMoveTask = onMoveTask,
                     onToggle = {},
                     onTaskClick = {},
-                    modifier = Modifier.width(360.dp)
+                    modifier = Modifier.width(360.dp),
+                    onDragPositionChanged = onDragPositionChanged
                 )
             }
         }
     }
 
     @Test(timeout = 60_000)
-    fun `drag preview stays under the finger after the board is scrolled`() {
-        val items = listOf(
-            item("a", TaskStatus.TODO),
-            item("b", TaskStatus.IN_PROGRESS),
-            item("c", TaskStatus.DONE, completed = true)
-        )
-        setBoard(items)
-        // Scroll the board so Done is visible, then drag its card.
-        composeRule.onNodeWithTag("board_column_DONE").performScrollTo()
-        var fingerX = 0f
-        var previewCenterX = 0f
-        composeRule.onNodeWithTag("board_card_c").performTouchInput {
-            down(center)
-            advanceEventTime(1000)
-            moveBy(Offset(2f, 0f))
-            // Read while the drag is in flight: the preview only exists then.
-            val card = composeRule.onNodeWithTag("board_card_c")
-                .fetchSemanticsNode().boundsInRoot
-            val preview = composeRule.onNodeWithTag("board_drag_preview")
-                .fetchSemanticsNode().boundsInRoot
-            fingerX = card.center.x + 2f
-            previewCenterX = preview.center.x
-            up()
-        }
-        val tolerance = px(8)
-        assertTrue(
-            "preview center x=$previewCenterX should be within $tolerance px " +
-                "of finger x=$fingerX (board was scrolled first)",
-            abs(previewCenterX - fingerX) < tolerance
-        )
-    }
-
-    @Test(timeout = 60_000)
-    fun `drag from a scrolled column lands in the dragged-to column`() {
+    fun `a_drag from a scrolled column lands in the dragged-to column`() {
         val moved = mutableListOf<Pair<TaskEntity, TaskStatus>>()
         val items = listOf(
             item("a", TaskStatus.TODO),
@@ -130,7 +111,43 @@ class BoardScrollReproTest {
     }
 
     @Test(timeout = 60_000)
-    fun `holding near the right edge scrolls the board right`() {
+    fun `b_drag preview stays under the finger after the board is scrolled`() {
+        val items = listOf(
+            item("a", TaskStatus.TODO),
+            item("b", TaskStatus.IN_PROGRESS),
+            item("c", TaskStatus.DONE, completed = true)
+        )
+        val positions = mutableListOf<Offset>()
+        setBoard(items, onDragPositionChanged = { positions.add(it) })
+        // Scroll the board so Done is visible, then drag its card.
+        composeRule.onNodeWithTag("board_column_DONE").performScrollTo()
+        // Finger position in board-viewport px, read BEFORE the gesture.
+        val board = composeRule.onNodeWithTag("task_board")
+            .fetchSemanticsNode().boundsInRoot
+        val card = composeRule.onNodeWithTag("board_card_c")
+            .fetchSemanticsNode().boundsInRoot
+        val finger = Offset(card.center.x - board.left, card.center.y - board.top)
+        composeRule.onNodeWithTag("board_card_c").performTouchInput {
+            down(center)
+            advanceEventTime(1000)
+            moveBy(Offset(2f, 0f))
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue("expected at least one drag position report, got none", positions.isNotEmpty())
+            val first = positions.first()
+            val tolerance = px(8)
+            assertTrue(
+                "drag start position $first should be within $tolerance px " +
+                    "of finger $finger (board was scrolled first)",
+                abs(first.x - finger.x) < tolerance &&
+                    abs(first.y - finger.y) < tolerance
+            )
+        }
+    }
+
+    @Test(timeout = 60_000)
+    fun `c_holding near the right edge scrolls the board right`() {
         val items = listOf(
             item("a", TaskStatus.TODO),
             item("b", TaskStatus.IN_PROGRESS),
@@ -164,7 +181,7 @@ class BoardScrollReproTest {
     }
 
     @Test(timeout = 60_000)
-    fun `holding near the bottom edge scrolls the column down`() {
+    fun `d_holding near the bottom edge scrolls the column down`() {
         val items = (1..12).map { item("t$it", TaskStatus.TODO) } +
             listOf(
                 item("b", TaskStatus.IN_PROGRESS),

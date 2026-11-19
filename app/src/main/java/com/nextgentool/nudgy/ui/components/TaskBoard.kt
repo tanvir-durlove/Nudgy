@@ -144,7 +144,15 @@ fun TaskBoard(
     onMoveTask: (TaskEntity, TaskStatus) -> Unit,
     onToggle: (TaskEntity) -> Unit,
     onTaskClick: (TaskEntity) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // Test observability (S1-4c): reports the live drag pointer
+    // position (board-viewport px) at drag start and on every move.
+    // Null in production — no behaviour change. The floating preview
+    // is centered on exactly this value, so asserting it asserts the
+    // preview position without reading semantics mid-gesture (which
+    // hangs the test worker). Invoked synchronously from the gesture
+    // callbacks, never via recomposition.
+    onDragPositionChanged: ((Offset) -> Unit)? = null
 ) {
     val density = LocalDensity.current
     val pitchPx = with(density) { (BOARD_COLUMN_WIDTH + BOARD_COLUMN_GAP).toPx() }
@@ -220,6 +228,7 @@ fun TaskBoard(
                     pitchPx = pitchPx,
                     allItemsState = allItemsState,
                     onMoveTaskState = onMoveTaskState,
+                    onDragPositionChanged = onDragPositionChanged,
                     onToggle = onToggle,
                     onTaskClick = onTaskClick
                 )
@@ -264,6 +273,7 @@ private fun BoardColumn(
     pitchPx: Float,
     allItemsState: State<List<TaskListItem>>,
     onMoveTaskState: State<(TaskEntity, TaskStatus) -> Unit>,
+    onDragPositionChanged: ((Offset) -> Unit)?,
     onToggle: (TaskEntity) -> Unit,
     onTaskClick: (TaskEntity) -> Unit
 ) {
@@ -330,6 +340,7 @@ private fun BoardColumn(
                         pitchPx = pitchPx,
                         allItemsState = allItemsState,
                         onMoveTaskState = onMoveTaskState,
+                        onDragPositionChanged = onDragPositionChanged,
                         isDragging = dragState.value?.taskId == item.task.id,
                         onToggle = { onToggle(item.task) },
                         onClick = { onTaskClick(item.task) }
@@ -349,6 +360,7 @@ private fun BoardTaskCard(
     pitchPx: Float,
     allItemsState: State<List<TaskListItem>>,
     onMoveTaskState: State<(TaskEntity, TaskStatus) -> Unit>,
+    onDragPositionChanged: ((Offset) -> Unit)?,
     isDragging: Boolean,
     onToggle: () -> Unit,
     onClick: () -> Unit
@@ -371,14 +383,17 @@ private fun BoardTaskCard(
                         val startViewport =
                             cardRootPos + offsetInCard - boardRootPosState.value
                         dragState.value = BoardDrag(task.id, startViewport)
+                        onDragPositionChanged?.invoke(startViewport)
                     },
                     // Required by the detector (no default in 1.7).
                     onDrag = { _, dragAmount ->
                         val current = dragState.value
                         if (current != null && current.taskId == task.id) {
-                            dragState.value = current.copy(
+                            val next = current.copy(
                                 pointerViewport = current.pointerViewport + dragAmount
                             )
+                            dragState.value = next
+                            onDragPositionChanged?.invoke(next.pointerViewport)
                         }
                     },
                     onDragEnd = {
