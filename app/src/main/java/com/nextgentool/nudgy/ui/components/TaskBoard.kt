@@ -206,7 +206,7 @@ fun TaskBoard(
                 .fillMaxWidth()
                 .height(BOARD_HEIGHT)
                 .horizontalScroll(boardScrollState)
-                .onGloballyPositioned { boardRootPos = it.positionInRoot() }
+                .onGloballyPositioned { boardRootPos = it.localToRoot(Offset.Zero) }
                 .onSizeChanged { boardSize = it }
         ) {
             TaskStatus.entries.forEach { status ->
@@ -359,7 +359,7 @@ private fun BoardTaskCard(
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer { alpha = if (isDragging) 0.35f else 1f }
-            .onGloballyPositioned { cardRootPos = it.positionInRoot() }
+            .onGloballyPositioned { cardRootPos = it.localToRoot(Offset.Zero) }
             .pointerInput(task.id) {
                 detectDragGesturesAfterLongPress(
                     onDragStart = { offsetInCard ->
