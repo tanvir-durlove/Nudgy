@@ -252,6 +252,11 @@ class BoardScrollReproTest {
             }
         }
         composeRule.runOnIdle {}
+        // Let the layout frame run so the semantics bounds reflect
+        // the new scroll position (a programmatic scroll only
+        // re-places content; the bounds update on the next frame).
+        composeRule.mainClock.advanceTimeBy(100)
+        composeRule.runOnIdle {}
         // Ground truth first: the scroll state itself must have moved.
         assertTrue(
             "board scroll state should have moved (value=${boardScroll.value})",
@@ -302,6 +307,11 @@ class BoardScrollReproTest {
                 )
             }
         }
+        composeRule.runOnIdle {}
+        // Let the layout frame run so the semantics bounds reflect
+        // the new scroll position (a programmatic scroll only
+        // re-places content; the bounds update on the next frame).
+        composeRule.mainClock.advanceTimeBy(100)
         composeRule.runOnIdle {}
         // Ground truth first: the column scroll state itself must have moved.
         val todoScroll = columnScrolls.getValue(TaskStatus.TODO).value
