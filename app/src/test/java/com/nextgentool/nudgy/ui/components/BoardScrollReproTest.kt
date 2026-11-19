@@ -48,6 +48,44 @@ import kotlin.math.abs
  * (left + right); the loop remains for dwelling and is verified
  * on device.
  *
+ * S1-4f (half-visible column): dragging DOWN in a column that is
+ * only half (or less) visible at the screen edge never scrolls it,
+ * while a fully-visible column scrolls fine. The finger sits in the
+ * board's horizontal edge zone for the whole drag, so the tick's
+ * horizontal branch scrolls the board right on every move while the
+ * pointer travels down — by the time it reaches the bottom edge
+ * zone the board has scrolled so far that boardColumnAt flips to
+ * the next column (one card, no overflow), so the dragged column
+ * never scrolls at all. The small 10dp moves in test q matter:
+ * with big moves the pointer reaches the bottom zone before the
+ * board has scrolled far enough to flip, and the bug hides.
+ * FIX: the tick's horizontal branch is gated on the drag's
+ * last-move axis (BoardDragAxis: NONE / HORIZONTAL / VERTICAL,
+ * computed in onDrag from dragAmount). While the last move was
+ * vertical — or no move has happened yet (NONE) with the pointer
+ * already in a vertical zone — the board does not slide sideways,
+ * so the vertical scroll lands on the dragged column. A horizontal
+ * move flips the axis, so left/right auto-scroll still works.
+ * Tests s/t pin the tick directly (corner pointer + VERTICAL axis
+ * vs + HORIZONTAL axis); u pins the axis flip in a gesture (drag
+ * down, then right); q is the card-drag repro (must fail on the
+ * old code, pass on the fix).
+ *
+ * S1-4f, the other reading (plain swipe) — HARNESS LIMIT, NOT a
+ * product bug, and NOT tested here: a plain (non-long-press)
+ * upward swipe on a half-visible column does not scroll it in
+ * this harness, while the identical swipe on a fully-visible
+ * column does (controls r2/r4 pass). The failure was proven to be
+ * a framework/Robolectric artifact, not TaskBoard code: a minimal
+ * repro — a bare verticalScroll Column inside a horizontalScroll
+ * Row, half-visible, no Board code, no card gestures, no
+ * clickable — failed identically (former test r8), while the same
+ * minimal layout scrolls fine when fully visible. The plain-swipe
+ * half-visible tests (r, r3, r5, r7, r8) were removed for that
+ * reason; do NOT re-add a half-visible plain-swipe test without
+ * first proving it can pass in this harness. On a real device the
+ * plain swipe is standard nested scrolling and works.
+ *
  * S1-4e (vertical auto-scroll): the horizontal branches are proven
  * on device, but vertical never fired. The prime suspect is the
  * drag-start y: it subtracts this column's scroll, but the board
@@ -765,4 +803,384 @@ class BoardScrollReproTest {
             assertTrue(todoScroll < px(200).toInt() - px(50).toInt())
         }
     }
+
+    /**
+     * q — S1-4f repro: dragging DOWN in a half-visible column scrolls
+     * that column (scroll-on-move), not the board sideways. The board
+     * is at scroll 0, so the In progress column is only ~76dp visible
+     * at the right edge and the finger sits in the board's right edge
+     * zone for the whole drag. The touch starts 100dp left of the
+     * card's centre — the card's centre is off-screen (the column is
+     * less than half visible), so down(center) would miss the card;
+     * the visible sliver is what the finger can actually touch.
+     * 25 small 10dp moves (50ms apart, so every move ticks past the
+     * 32ms throttle) carry the pointer into the bottom edge zone.
+     * On the old code the board scrolls right on every move while the
+     * pointer travels down, so by the time it reaches the bottom zone
+     * boardColumnAt has flipped to Done (one card, no overflow) and
+     * the dragged column never moves: inProgress stays 0, board hits
+     * its 480dp max. Assertions on separate lines so the failing line
+     * names the outcome (CI strips assertion messages).
+     */
+    @Test(timeout = 60_000)
+    fun `q_dragging down in a half-visible column scrolls that column, not the board (scroll-on-move)`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        val positions = mutableListOf<Offset>()
+        setBoard(
+            items,
+            boardScroll = boardScroll,
+            columnScrolls = columnScrolls,
+            onDragPositionChanged = { positions.add(it) }
+        )
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_card_p1").performTouchInput {
+            down(center + Offset(-px(100), 0f))
+            advanceEventTime(1000)
+            repeat(25) {
+                moveBy(Offset(0f, px(10)))
+                advanceEventTime(50)
+            }
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue(positions.isNotEmpty())
+            val inProgressScroll = columnScrolls.getValue(TaskStatus.IN_PROGRESS).value
+            assertTrue(inProgressScroll > px(50).toInt())
+            assertTrue(boardScroll.value < px(50).toInt())
+        }
+    }
+
+    /**
+     * r2 — S1-4f control: the SAME single-move swipe as test r, but on
+     * the fully-visible TODO column. If this passes while r fails, the
+     * failure is specific to half-visibility (a real product issue).
+     * If this fails too, plain swipes do not drive the column's
+     * scrollable in this harness at all, and test r cannot prove a
+     * product bug as written.
+     */
+    @Test(timeout = 60_000)
+    fun `r2_plain swipe scrolls a fully-visible column (control)`() {
+        val items = (1..12).map { item("t$it", TaskStatus.TODO) } +
+            listOf(
+                item("b", TaskStatus.IN_PROGRESS),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_column_TODO").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, -px(100)))
+            up()
+        }
+        composeRule.runOnIdle {
+            val todoScroll = columnScrolls.getValue(TaskStatus.TODO).value
+            assertTrue(todoScroll > px(20).toInt())
+        }
+    }
+
+    /**
+     * r4 — S1-4f control: board scrolled 284dp so the In progress
+     * column is FULLY visible, then the same swipe at its centre.
+     * If this passes, the column scrolls fine when fully visible and
+     * the failure is specific to the half-visible state.
+     */
+    @Test(timeout = 60_000)
+    fun `r4_swipe scrolls the In progress column when it is fully visible (control)`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(px(284).toInt())
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_column_IN_PROGRESS").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, -px(100)))
+            up()
+        }
+        composeRule.runOnIdle {
+            val inProgressScroll = columnScrolls.getValue(TaskStatus.IN_PROGRESS).value
+            assertTrue(inProgressScroll > px(20).toInt())
+        }
+    }
+
+    /**
+     * r6 — S1-4f discriminator: the SAME swipe as test r, but asserting
+     * the BOARD did not move sideways. If this passes (board == 0)
+     * while r fails (IP == 0), the gesture went nowhere — neither
+     * scrollable consumed it. If this fails (board > 0), the board's
+     * horizontal scrollable consumed a purely vertical swipe.
+     */
+    @Test(timeout = 60_000)
+    fun `r6_same swipe as r does not move the board sideways (consumption check)`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_column_IN_PROGRESS").performTouchInput {
+            down(center + Offset(-px(100), 0f))
+            moveBy(Offset(0f, -px(100)))
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue(boardScroll.value == 0)
+        }
+    }
+
+
+    /**
+     * s — S1-4f: a tick at a CORNER pointer (right edge zone AND
+     * bottom edge zone) with a VERTICAL drag axis scrolls the hovered
+     * column down but does NOT move the board sideways. The board must
+     * not slide while the user drags vertically — otherwise, in a
+     * half-visible column, boardColumnAt flips to the next column
+     * before the pointer reaches the bottom zone (test q's failure).
+     */
+    @Test(timeout = 60_000)
+    fun `s_tick at a corner with a vertical axis scrolls the column, not the board`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        val board = composeRule.onNodeWithTag("task_board")
+            .fetchSemanticsNode().boundsInRoot
+        // Corner pointer: 24dp from the right edge (inside the 48dp
+        // horizontal zone) and 28dp from the bottom (inside the 56dp
+        // vertical zone). x = width-24 lands over In progress
+        // (boardColumnAt(336, 284) = 1). Five ticks.
+        val pointer = Offset(board.width - px(24), board.height - px(28))
+        repeat(5) {
+            boardAutoScrollTick(
+                pointer,
+                androidx.compose.ui.unit.IntSize(
+                    board.width.toInt(), board.height.toInt()
+                ),
+                boardScroll,
+                columnScrolls,
+                px(284),
+                px(48),
+                px(56),
+                px(24),
+                dragAxis = BoardDragAxis.VERTICAL
+            )
+        }
+        assertTrue(boardScroll.value == 0)
+        val inProgressScroll = columnScrolls.getValue(TaskStatus.IN_PROGRESS).value
+        assertTrue(inProgressScroll > px(50).toInt())
+    }
+
+    /**
+     * t — S1-4f: the same corner pointer with a HORIZONTAL drag axis
+     * DOES move the board sideways (the vertical branch is unchanged,
+     * so the column scrolls too). A horizontal drag must still be able
+     * to reveal the next column.
+     */
+    @Test(timeout = 60_000)
+    fun `t_tick at a corner with a horizontal axis scrolls the board`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        val board = composeRule.onNodeWithTag("task_board")
+            .fetchSemanticsNode().boundsInRoot
+        val pointer = Offset(board.width - px(24), board.height - px(28))
+        repeat(5) {
+            boardAutoScrollTick(
+                pointer,
+                androidx.compose.ui.unit.IntSize(
+                    board.width.toInt(), board.height.toInt()
+                ),
+                boardScroll,
+                columnScrolls,
+                px(284),
+                px(48),
+                px(56),
+                px(24),
+                dragAxis = BoardDragAxis.HORIZONTAL
+            )
+        }
+        assertTrue(boardScroll.value > px(50).toInt())
+    }
+
+    /**
+     * u — S1-4f: a drag that starts vertical in a half-visible column
+     * and then turns horizontal scrolls the board once it turns.
+     * Down first (25 x 10dp): the axis is VERTICAL, the board stays
+     * put and the dragged column scrolls down. Then right (5 x 30dp):
+     * the first rightward move flips the axis to HORIZONTAL and the
+     * board starts scrolling. Guards the axis flip — the fix must not
+     * freeze horizontal scrolling after a vertical start.
+     */
+    @Test(timeout = 60_000)
+    fun `u_drag down then right scrolls the board once the drag turns horizontal`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_card_p1").performTouchInput {
+            down(center + Offset(-px(100), 0f))
+            advanceEventTime(1000)
+            repeat(25) {
+                moveBy(Offset(0f, px(10)))
+                advanceEventTime(50)
+            }
+            repeat(5) {
+                moveBy(Offset(px(30), 0f))
+                advanceEventTime(50)
+            }
+            up()
+        }
+        composeRule.runOnIdle {
+            val inProgressScroll = columnScrolls.getValue(TaskStatus.IN_PROGRESS).value
+            assertTrue(inProgressScroll > px(50).toInt())
+            assertTrue(boardScroll.value > 0)
+        }
+    }
+
+
+    /**
+     * q2 — S1-4f diagnostic: the SAME downward drag as test q, but
+     * asserting ONLY that the board did not slide sideways. If this
+     * passes while q fails, the axis gating works (board stayed) and
+     * the vertical scroll itself is not firing in the gesture. If
+     * this fails, the gating does not hold in the gesture and the
+     * board slid away (so boardColumnAt flipped to Done).
+     */
+    @Test(timeout = 60_000)
+    fun `q2_downward drag in a half-visible column does not slide the board (axis-gating check)`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_card_p1").performTouchInput {
+            down(center + Offset(-px(100), 0f))
+            advanceEventTime(1000)
+            repeat(25) {
+                moveBy(Offset(0f, px(10)))
+                advanceEventTime(50)
+            }
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue(boardScroll.value < px(50).toInt())
+        }
+    }
+
+
+    /**
+     * q3 — S1-4f diagnostic: the SAME downward drag as test q, but
+     * asserting the RECORDED drag pointer (via onDragPositionChanged)
+     * actually reaches the bottom edge zone (y > 244dp). If this
+     * passes while q fails, the pointer reaches the zone but the
+     * tick is not scrolling the column in the gesture. If this fails,
+     * the pointerViewport is not tracking the finger (a drag-tracking
+     * issue, not a scroll issue).
+     */
+    @Test(timeout = 60_000)
+    fun `q3_downward drag pointer reaches the bottom edge zone (pointer-tracking check)`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        val positions = mutableListOf<Offset>()
+        setBoard(
+            items,
+            boardScroll = boardScroll,
+            columnScrolls = columnScrolls,
+            onDragPositionChanged = { positions.add(it) }
+        )
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_card_p1").performTouchInput {
+            down(center + Offset(-px(100), 0f))
+            advanceEventTime(1000)
+            repeat(25) {
+                moveBy(Offset(0f, px(10)))
+                advanceEventTime(50)
+            }
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue(positions.size >= 10)
+            assertTrue(positions.maxOf { it.y } > px(244))
+        }
+    }
+
+
+    /**
+     * q4 — S1-4f diagnostic: the SAME downward drag as test q, but
+     * with BIG moves (3 x 70dp + 2 x 10dp, like test o) instead of
+     * 25 x 10dp. If this passes while q fails, the failure is
+     * specific to small moves (throttle/slop interaction). If this
+     * fails too, the half-visible state itself breaks the gesture
+     * regardless of move size.
+     */
+    @Test(timeout = 60_000)
+    fun `q4_big-move downward drag in a half-visible column scrolls that column (move-size check)`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_card_p1").performTouchInput {
+            down(center + Offset(-px(100), 0f))
+            advanceEventTime(1000)
+            repeat(3) {
+                moveBy(Offset(0f, px(70)))
+                advanceEventTime(50)
+            }
+            repeat(2) {
+                moveBy(Offset(0f, px(10)))
+                advanceEventTime(50)
+            }
+            up()
+        }
+        composeRule.runOnIdle {
+            val inProgressScroll = columnScrolls.getValue(TaskStatus.IN_PROGRESS).value
+            assertTrue(inProgressScroll > px(50).toInt())
+            assertTrue(boardScroll.value < px(50).toInt())
+        }
+    }
+
 }

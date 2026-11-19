@@ -60,6 +60,7 @@ import com.nextgentool.nudgy.ui.viewmodel.TaskListItem
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /** List vs Board view for the Tasks screen and Today's My Day section. */
@@ -151,12 +152,32 @@ internal fun boardAutoScrollTick(
     pitchPx: Float,
     edgeXPx: Float,
     edgeYPx: Float,
-    scrollStepPx: Float
+    scrollStepPx: Float,
+    dragAxis: BoardDragAxis = BoardDragAxis.NONE
 ) {
-    if (pointerViewport.x > boardSize.width - edgeXPx) {
-        boardScrollState.dispatchRawDelta(scrollStepPx)
-    } else if (pointerViewport.x < edgeXPx) {
-        boardScrollState.dispatchRawDelta(-scrollStepPx)
+    // S1-4f: gate the horizontal branch on the drag's last-move axis.
+    // When a column is only half visible, the finger sits in the
+    // board's horizontal edge zone for the whole downward travel, so
+    // an ungated tick slides the board sideways on every move and
+    // boardColumnAt flips to the next column (one card, no overflow)
+    // before the pointer reaches the bottom zone — the dragged column
+    // never scrolls. The board must not slide while the user drags
+    // vertically: suppress the horizontal branch while the last move
+    // was vertical, and while no move has happened yet (NONE) with the
+    // pointer already in a vertical zone, so a drag that starts in a
+    // corner and goes down does not slide the board first. A
+    // horizontal move flips the axis, so left/right auto-scroll still
+    // works — including a drag that turns horizontal mid-way.
+    val inVerticalZone = pointerViewport.y > boardSize.height - edgeYPx ||
+        pointerViewport.y < edgeYPx
+    val suppressHorizontal = dragAxis == BoardDragAxis.VERTICAL ||
+        (dragAxis == BoardDragAxis.NONE && inVerticalZone)
+    if (!suppressHorizontal) {
+        if (pointerViewport.x > boardSize.width - edgeXPx) {
+            boardScrollState.dispatchRawDelta(scrollStepPx)
+        } else if (pointerViewport.x < edgeXPx) {
+            boardScrollState.dispatchRawDelta(-scrollStepPx)
+        }
     }
     val hovered = boardColumnAt(
         pointerViewport.x + boardScrollState.value, pitchPx
@@ -169,8 +190,19 @@ internal fun boardAutoScrollTick(
     }
 }
 
+/** The dominant axis of a drag's last move (S1-4f): NONE before any
+ * move, HORIZONTAL when |dx| > |dy|, VERTICAL when |dy| > |dx|; a tie
+ * keeps the previous axis. The auto-scroll tick gates its horizontal
+ * branch on this, so a vertical drag in a half-visible column does
+ * not slide the board sideways (see boardAutoScrollTick). */
+internal enum class BoardDragAxis { NONE, HORIZONTAL, VERTICAL }
+
 /** In-flight Board drag: the dragged id + the pointer position in the board viewport (px). */
-private data class BoardDrag(val taskId: String, val pointerViewport: Offset)
+private data class BoardDrag(
+    val taskId: String,
+    val pointerViewport: Offset,
+    val lastMoveAxis: BoardDragAxis = BoardDragAxis.NONE
+)
 
 /**
  * Sprint 1-4b — Kanban board (Feature 5, spec §6), drag fixed.
@@ -266,22 +298,24 @@ fun TaskBoard(
     // round 4 — scroll-on-move never ran). null means "no move
     // scrolled yet", so the first move always fires.
     val lastMoveScrollUptime = remember { mutableStateOf<Long?>(null) }
-    val requestMoveScroll: (Offset, Long) -> Unit = { pointer, eventTimeMillis ->
-        val last = lastMoveScrollUptime.value
-        if (last == null || eventTimeMillis - last >= 32) {
-            lastMoveScrollUptime.value = eventTimeMillis
-            boardAutoScrollTick(
-                pointer,
-                boardSize,
-                boardScroll,
-                columnScrolls,
-                pitchPx,
-                edgeXPx,
-                edgeYPx,
-                scrollStepPx
-            )
+    val requestMoveScroll: (Offset, BoardDragAxis, Long) -> Unit =
+        { pointer, axis, eventTimeMillis ->
+            val last = lastMoveScrollUptime.value
+            if (last == null || eventTimeMillis - last >= 32) {
+                lastMoveScrollUptime.value = eventTimeMillis
+                boardAutoScrollTick(
+                    pointer,
+                    boardSize,
+                    boardScroll,
+                    columnScrolls,
+                    pitchPx,
+                    edgeXPx,
+                    edgeYPx,
+                    scrollStepPx,
+                    dragAxis = axis
+                )
+            }
         }
-    }
     val requestMoveScrollState = rememberUpdatedState(requestMoveScroll)
 
     // Auto-scroll while dragging. A drag session scrolls nothing by
@@ -304,7 +338,8 @@ fun TaskBoard(
                 pitchPx,
                 edgeXPx,
                 edgeYPx,
-                scrollStepPx
+                scrollStepPx,
+                dragAxis = current.lastMoveAxis
             )
             delay(32)
         }
@@ -392,7 +427,7 @@ private fun BoardColumn(
     allItemsState: State<List<TaskListItem>>,
     onMoveTaskState: State<(TaskEntity, TaskStatus) -> Unit>,
     onDragPositionChanged: ((Offset) -> Unit)?,
-    requestMoveScrollState: State<(Offset, Long) -> Unit>,
+    requestMoveScrollState: State<(Offset, BoardDragAxis, Long) -> Unit>,
     onToggle: (TaskEntity) -> Unit,
     onTaskClick: (TaskEntity) -> Unit
 ) {
@@ -481,7 +516,7 @@ private fun BoardTaskCard(
     allItemsState: State<List<TaskListItem>>,
     onMoveTaskState: State<(TaskEntity, TaskStatus) -> Unit>,
     onDragPositionChanged: ((Offset) -> Unit)?,
-    requestMoveScrollState: State<(Offset, Long) -> Unit>,
+    requestMoveScrollState: State<(Offset, BoardDragAxis, Long) -> Unit>,
     isDragging: Boolean,
     onToggle: () -> Unit,
     onClick: () -> Unit
@@ -536,13 +571,26 @@ private fun BoardTaskCard(
                     onDrag = { change, dragAmount ->
                         val current = dragState.value
                         if (current != null && current.taskId == task.id) {
+                            // S1-4f: the dominant axis of this move.
+                            // A tie keeps the previous axis, so a
+                            // diagonal move does not flip it back and
+                            // forth. The tick gates its horizontal
+                            // branch on this axis.
+                            val axis = when {
+                                abs(dragAmount.x) > abs(dragAmount.y) ->
+                                    BoardDragAxis.HORIZONTAL
+                                abs(dragAmount.y) > abs(dragAmount.x) ->
+                                    BoardDragAxis.VERTICAL
+                                else -> current.lastMoveAxis
+                            }
                             val next = current.copy(
-                                pointerViewport = current.pointerViewport + dragAmount
+                                pointerViewport = current.pointerViewport + dragAmount,
+                                lastMoveAxis = axis
                             )
                             dragState.value = next
                             onDragPositionChanged?.invoke(next.pointerViewport)
                             requestMoveScrollState.value(
-                                next.pointerViewport, change.uptimeMillis
+                                next.pointerViewport, next.lastMoveAxis, change.uptimeMillis
                             )
                         }
                     },
