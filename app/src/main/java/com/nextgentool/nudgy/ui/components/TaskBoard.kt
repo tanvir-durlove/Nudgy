@@ -46,6 +46,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -152,7 +153,15 @@ fun TaskBoard(
     // preview position without reading semantics mid-gesture (which
     // hangs the test worker). Invoked synchronously from the gesture
     // callbacks, never via recomposition.
-    onDragPositionChanged: ((Offset) -> Unit)? = null
+    onDragPositionChanged: ((Offset) -> Unit)? = null,
+    // Test seams (S1-4c): an externally owned board scroll state and
+    // board height, so a test can render the board already scrolled
+    // (ScrollState(initial = …)) or scroll it after layout
+    // (scrollTo) without performScrollTo — which hangs the test
+    // worker when the main clock is paused. Null/default in
+    // production — no behaviour change.
+    boardScrollState: ScrollState? = null,
+    boardHeight: Dp = BOARD_HEIGHT
 ) {
     val density = LocalDensity.current
     val pitchPx = with(density) { (BOARD_COLUMN_WIDTH + BOARD_COLUMN_GAP).toPx() }
@@ -164,7 +173,7 @@ fun TaskBoard(
 
     val dragState = remember { mutableStateOf<BoardDrag?>(null) }
     val drag = dragState.value
-    val boardScrollState = rememberScrollState()
+    val boardScroll = boardScrollState ?: rememberScrollState()
     val columnScrollStates = remember {
         TaskStatus.entries.associateWith { ScrollState(0) }
     }
@@ -188,12 +197,12 @@ fun TaskBoard(
         while (true) {
             val current = dragState.value ?: break
             if (current.pointerViewport.x > boardSize.width - edgeXPx) {
-                boardScrollState.scrollBy(scrollStepPx)
+                boardScroll.scrollBy(scrollStepPx)
             } else if (current.pointerViewport.x < edgeXPx) {
-                boardScrollState.scrollBy(-scrollStepPx)
+                boardScroll.scrollBy(-scrollStepPx)
             }
             val hovered = boardColumnAt(
-                current.pointerViewport.x + boardScrollState.value, pitchPx
+                current.pointerViewport.x + boardScroll.value, pitchPx
             )
             val columnState = columnScrollStates.getValue(hovered)
             if (current.pointerViewport.y > boardSize.height - edgeYPx) {
@@ -212,8 +221,8 @@ fun TaskBoard(
             horizontalArrangement = Arrangement.spacedBy(BOARD_COLUMN_GAP),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(BOARD_HEIGHT)
-                .horizontalScroll(boardScrollState)
+                .height(boardHeight)
+                .horizontalScroll(boardScroll)
                 .onGloballyPositioned { boardRootPos = it.localToRoot(Offset.Zero) }
                 .onSizeChanged { boardSize = it }
         ) {
@@ -224,7 +233,7 @@ fun TaskBoard(
                     columnScrollState = columnScrollStates.getValue(status),
                     dragState = dragState,
                     boardRootPosState = boardRootPosState,
-                    boardScrollState = boardScrollState,
+                    boardScrollState = boardScroll,
                     pitchPx = pitchPx,
                     allItemsState = allItemsState,
                     onMoveTaskState = onMoveTaskState,
