@@ -34,11 +34,15 @@ import kotlin.math.abs
  * fires. Written RED first: each test must fail on the S1-4b code
  * and pass once the position plumbing is fixed.
  *
- * Sprint 1-4d adds f/g: the left edge was never covered — d/e prove
+ * Sprint 1-4d adds f/g/h/i: the left edge was never covered — d/e prove
  * right + down only. f drives the tick left; g asserts the loop's
  * INPUT during a leftward drag (the reported pointer must reach the
  * left edge zone), because the loop itself cannot tick during a held
- * gesture in Robolectric.
+ * gesture in Robolectric. h proves the Row does not scroll manually
+ * during a long-press drag (the detector consumes the drag — see
+ * DragGestureDetector.kt — so the loop is the only scroll mechanism).
+ * i holds the pointer at the left edge while advancing the main clock
+ * to see whether the loop ticks there at all.
  *
  * The board is rendered 360dp wide x 300dp tall so the three 272dp
  * columns (840dp of content) always need real horizontal scrolling
@@ -385,6 +389,69 @@ class BoardScrollReproTest {
             val minX = positions.minOf { it.x }
             assertTrue(minX < px(100))
             assertTrue(minX < px(48))
+        }
+    }
+
+    @Test(timeout = 60_000)
+    fun `h_board does not scroll manually during a long-press drag`() {
+        val items = listOf(
+            item("a", TaskStatus.TODO),
+            item("b", TaskStatus.IN_PROGRESS),
+            item("c", TaskStatus.DONE, completed = true)
+        )
+        val boardScroll = ScrollState(0)
+        setBoard(items, boardScroll = boardScroll)
+        composeRule.runOnIdle {}
+        // Long-press the To do card and drag it right 200dp. The loop
+        // cannot tick during a held gesture in Robolectric, so any
+        // board movement here would be the Row's manual scroll — the
+        // drag detector not consuming the drag. The loop is the only
+        // sanctioned scroll mechanism during a drag, so the board
+        // must stay put until the loop ticks.
+        composeRule.onNodeWithTag("board_card_a").performTouchInput {
+            down(center)
+            advanceEventTime(1000)
+            moveBy(Offset(px(200), 0f))
+            up()
+        }
+        composeRule.runOnIdle {
+            assertEquals(0, boardScroll.value)
+        }
+    }
+
+    @Test(timeout = 60_000)
+    fun `i_holding at the left edge scrolls the board left (loop end-to-end)`() {
+        val items = listOf(
+            item("a", TaskStatus.TODO),
+            item("b", TaskStatus.IN_PROGRESS),
+            item("c", TaskStatus.DONE, completed = true)
+        )
+        val boardScroll = ScrollState(px(480).toInt())
+        val positions = mutableListOf<Offset>()
+        setBoard(
+            items,
+            boardScroll = boardScroll,
+            onDragPositionChanged = { positions.add(it) }
+        )
+        composeRule.runOnIdle {}
+        // Long-press the Done card, drag it left into the left edge
+        // zone (24dp from the edge), HOLD there while the main clock
+        // advances so the LaunchedEffect loop can tick, then release.
+        // The loop is the only scroll mechanism during a drag (h
+        // proves no manual scroll), so a ScrollState decrease here
+        // proves the loop fires for the left edge on a held drag. No
+        // semantics are read while the gesture is held (that hangs
+        // the test worker).
+        composeRule.onNodeWithTag("board_card_c").performTouchInput {
+            down(center)
+            advanceEventTime(1000)
+            moveBy(Offset(-px(200), 0f))
+            composeRule.mainClock.advanceTimeBy(1000)
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue(positions.isNotEmpty())
+            assertTrue(boardScroll.value < px(480).toInt() - px(50).toInt())
         }
     }
 }
