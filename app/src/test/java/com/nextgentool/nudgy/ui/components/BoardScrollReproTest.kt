@@ -47,11 +47,11 @@ import kotlin.math.abs
  * read semantics during an active drag — the preview position is
  * asserted through TaskBoard's onDragPositionChanged hook (the
  * preview is centered on exactly that value, so it is the same
- * assertion). The auto-scroll holds are split across two touch
- * blocks (down+move, then clock advance on the free test thread,
- * then release) so the auto-scroll loop can tick while the pointer
- * is held. The tests run last (a/b/c/d/e order) so a hang there
- * cannot hide the safe tests' results.
+ * assertion). The auto-scroll holds run with the main clock
+ * auto-advancing in real time and a Thread.sleep hold inside one
+ * touch block, so the auto-scroll loop ticks while the pointer
+ * dwells at the edge. The tests run last (a/b/c/d/e order) so a
+ * hang there cannot hide the safe tests' results.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -78,10 +78,11 @@ class BoardScrollReproTest {
         items: List<TaskListItem>,
         boardScroll: ScrollState? = null,
         boardHeight: Dp = 300.dp,
+        autoAdvance: Boolean = false,
         onMoveTask: (TaskEntity, TaskStatus) -> Unit = { _, _ -> },
         onDragPositionChanged: ((Offset) -> Unit)? = null
     ) {
-        composeRule.mainClock.autoAdvance = false
+        composeRule.mainClock.autoAdvance = autoAdvance
         composeRule.setContent {
             Box(modifier = Modifier.fillMaxSize()) {
                 TaskBoard(
@@ -218,7 +219,9 @@ class BoardScrollReproTest {
             item("b", TaskStatus.IN_PROGRESS),
             item("c", TaskStatus.DONE, completed = true)
         )
-        setBoard(items)
+        // Real-time clock so the auto-scroll loop ticks while the
+        // pointer is held at the edge.
+        setBoard(items, autoAdvance = true)
         composeRule.runOnIdle {}
         val board = composeRule.onNodeWithTag("task_board")
             .fetchSemanticsNode().boundsInRoot
@@ -233,11 +236,9 @@ class BoardScrollReproTest {
             down(center)
             advanceEventTime(1000)
             moveBy(Offset(dx, 0f))
-        }
-        // Hold at the edge with the pointer still down: let the
-        // auto-scroll loop tick.
-        composeRule.mainClock.advanceTimeBy(1500)
-        composeRule.onNodeWithTag("board_card_a").performTouchInput {
+            // Hold at the edge in real time: the auto-scroll loop
+            // ticks every 32ms while the pointer dwells here.
+            Thread.sleep(1500)
             up()
         }
         val doneAfter = composeRule.onNodeWithTag("board_column_DONE")
@@ -256,7 +257,9 @@ class BoardScrollReproTest {
                 item("b", TaskStatus.IN_PROGRESS),
                 item("c", TaskStatus.DONE, completed = true)
             )
-        setBoard(items)
+        // Real-time clock so the auto-scroll loop ticks while the
+        // pointer is held at the edge.
+        setBoard(items, autoAdvance = true)
         composeRule.runOnIdle {}
         val board = composeRule.onNodeWithTag("task_board")
             .fetchSemanticsNode().boundsInRoot
@@ -271,11 +274,9 @@ class BoardScrollReproTest {
             down(center)
             advanceEventTime(1000)
             moveBy(Offset(0f, dy))
-        }
-        // Hold at the edge with the pointer still down: let the
-        // auto-scroll loop tick.
-        composeRule.mainClock.advanceTimeBy(1500)
-        composeRule.onNodeWithTag("board_card_t1").performTouchInput {
+            // Hold at the edge in real time: the auto-scroll loop
+            // ticks every 32ms while the pointer dwells here.
+            Thread.sleep(1500)
             up()
         }
         val lastAfter = composeRule.onNodeWithTag("board_card_t12")
