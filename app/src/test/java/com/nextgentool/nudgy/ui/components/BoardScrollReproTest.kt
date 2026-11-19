@@ -987,4 +987,61 @@ class BoardScrollReproTest {
             assertTrue(todoScroll > px(20).toInt())
         }
     }
+
+    /**
+     * r6 — S1-4f discriminator: the SAME swipe as test r, but asserting
+     * the BOARD did not move sideways. If this passes (board == 0)
+     * while r fails (IP == 0), the gesture went nowhere — neither
+     * scrollable consumed it. If this fails (board > 0), the board's
+     * horizontal scrollable consumed a purely vertical swipe.
+     */
+    @Test(timeout = 60_000)
+    fun `r6_same swipe as r does not move the board sideways (consumption check)`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_column_IN_PROGRESS").performTouchInput {
+            down(center + Offset(-px(100), 0f))
+            moveBy(Offset(0f, -px(100)))
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue(boardScroll.value == 0)
+        }
+    }
+
+    /**
+     * r7 — S1-4f discriminator: the same swipe as test r, but at
+     * x = 300dp — inside the visible sliver yet OUTSIDE the board's
+     * right edge zone (x > 312dp). If this passes, the edge zone is
+     * the differentiator; if it fails like r, the half-visibility
+     * itself breaks the swipe.
+     */
+    @Test(timeout = 60_000)
+    fun `r7_swipe at the inner edge of the visible sliver scrolls the column (edge-zone check)`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_column_IN_PROGRESS").performTouchInput {
+            down(center + Offset(-px(120), 0f))
+            moveBy(Offset(0f, -px(100)))
+            up()
+        }
+        composeRule.runOnIdle {
+            val inProgressScroll = columnScrolls.getValue(TaskStatus.IN_PROGRESS).value
+            assertTrue(inProgressScroll > px(20).toInt())
+        }
+    }
 }
