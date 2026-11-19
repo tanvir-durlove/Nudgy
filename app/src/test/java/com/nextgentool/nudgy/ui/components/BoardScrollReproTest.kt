@@ -1143,4 +1143,44 @@ class BoardScrollReproTest {
         }
     }
 
+
+    /**
+     * q4 — S1-4f diagnostic: the SAME downward drag as test q, but
+     * with BIG moves (3 x 70dp + 2 x 10dp, like test o) instead of
+     * 25 x 10dp. If this passes while q fails, the failure is
+     * specific to small moves (throttle/slop interaction). If this
+     * fails too, the half-visible state itself breaks the gesture
+     * regardless of move size.
+     */
+    @Test(timeout = 60_000)
+    fun `q4_big-move downward drag in a half-visible column scrolls that column (move-size check)`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_card_p1").performTouchInput {
+            down(center + Offset(-px(100), 0f))
+            advanceEventTime(1000)
+            repeat(3) {
+                moveBy(Offset(0f, px(70)))
+                advanceEventTime(50)
+            }
+            repeat(2) {
+                moveBy(Offset(0f, px(10)))
+                advanceEventTime(50)
+            }
+            up()
+        }
+        composeRule.runOnIdle {
+            val inProgressScroll = columnScrolls.getValue(TaskStatus.IN_PROGRESS).value
+            assertTrue(inProgressScroll > px(50).toInt())
+            assertTrue(boardScroll.value < px(50).toInt())
+        }
+    }
+
 }
