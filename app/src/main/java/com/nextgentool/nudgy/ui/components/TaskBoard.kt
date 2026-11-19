@@ -60,6 +60,7 @@ import com.nextgentool.nudgy.ui.viewmodel.TaskListItem
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /** List vs Board view for the Tasks screen and Today's My Day section. */
