@@ -252,6 +252,11 @@ class BoardScrollReproTest {
             }
         }
         composeRule.runOnIdle {}
+        // Ground truth first: the scroll state itself must have moved.
+        assertTrue(
+            "board scroll state should have moved (value=${boardScroll.value})",
+            boardScroll.value > px(50).toInt()
+        )
         val doneAfter = composeRule.onNodeWithTag("board_column_DONE")
             .fetchSemanticsNode().boundsInRoot.left
         assertTrue(
@@ -298,6 +303,12 @@ class BoardScrollReproTest {
             }
         }
         composeRule.runOnIdle {}
+        // Ground truth first: the column scroll state itself must have moved.
+        val todoScroll = columnScrolls.getValue(TaskStatus.TODO).value
+        assertTrue(
+            "TODO column scroll state should have moved (value=$todoScroll)",
+            todoScroll > px(50).toInt()
+        )
         val lastAfter = composeRule.onNodeWithTag("board_card_t12")
             .fetchSemanticsNode().boundsInRoot.top
         assertTrue(
