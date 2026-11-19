@@ -28,43 +28,44 @@ import org.robolectric.annotation.Config
 import kotlin.math.abs
 
 /**
- * Sprint 1-4c — reproduction tests for the two remaining Board drag
- * defects on a real device (ci-434): the drag preview appears far
- * from the finger after the board is scrolled, and auto-scroll never
- * fires. Written RED first: each test must fail on the S1-4b code
- * and pass once the position plumbing is fixed.
+ * Board scroll + preview reproduction tests (S1-4c / S1-4d).
  *
- * Sprint 1-4d adds f/g/h/i: the left edge was never covered — d/e prove
- * right + down only. f drives the tick left; g asserts the loop's
- * INPUT during a leftward drag (the reported pointer must reach the
- * left edge zone), because the loop itself cannot tick during a held
- * gesture in Robolectric. h proves the Row does not scroll manually
- * during a long-press drag (the detector consumes the drag — see
- * DragGestureDetector.kt — so the loop is the only scroll mechanism).
- * i holds the pointer at the left edge while advancing the main clock
- * to see whether the loop ticks there at all.
+ * S1-4c root cause, proven here: drag start computed the pointer as
+ * card.localToRoot - board.localToRoot, which is board-CONTENT
+ * coordinates, not viewport — the scroll offset cancels in the
+ * subtraction. The fix subtracts the scroll offsets at drag start.
  *
- * The board is rendered 360dp wide x 300dp tall so the three 272dp
- * columns (840dp of content) always need real horizontal scrolling
- * and a 12-card column always needs real vertical scrolling.
+ * S1-4d (left auto-scroll): the tick and the positions were proven
+ * correct (f, g), the loop cannot be driven in a test (i's first
+ * form held at the edge + advanced the clock 1000ms and still saw
+ * no scroll — the documented harness limit), and the drag deltas
+ * are scroll-stable (j: the pointer stays exact when the board
+ * scrolls mid-drag; k, which asserted the opposite shift model,
+ * failed and was removed). So the moving phase no longer depends
+ * on the loop alone: the tick is now synchronous (dispatchRawDelta)
+ * and is also called from onDrag, throttled to the loop's 32ms
+ * cadence by event time. Tests i and l prove that move path
+ * (left + right); the loop remains for dwelling and is verified
+ * on device.
  *
- * Harness rules learned the hard way (the first two versions of
- * this file hung the CI test step for 12–20 minutes): never call
- * performScrollTo while the main clock is paused — the board is
- * scrolled instead through TaskBoard's test seams (a ScrollState
- * passed in, either pre-scrolled via ScrollState(initial = …) or
- * scrolled after layout via runBlocking { scrollTo(…) }); and never
- * read semantics during an active drag — the preview position is
- * asserted through TaskBoard's onDragPositionChanged hook (the
- * preview is centered on exactly that value, so it is the same
- * assertion). The auto-scroll edge logic is proven by driving one
- * tick of the loop directly (boardAutoScrollTick) — Robolectric
- * cannot tick the loop's delay during a held gesture (proven by
- * three harness approaches: paused-clock advance, split-gesture
- * advance, real-time sleep), so the hold end-to-end is a
- * device-test item for the retest build. The tests run last
- * (a/b/c/d/e order) so a hang there cannot hide the safe tests'
- * results.
+ * Ground rules, learned the hard way:
+ * - Robolectric cannot tick a delay() loop during a held gesture.
+ *   The loop is covered by direct tick tests (d/e/f) + device.
+ * - Compose semantics boundsInRoot does NOT update after a
+ *   programmatic scroll (S1-4c) — so tests assert the ScrollState
+ *   value (the ground truth; a value change always re-places
+ *   content on device), never bounds.
+ * - Never read semantics during an active drag — it hangs the
+ *   test worker. Never call performScrollTo with the main clock
+ *   paused — it hangs. Use a synchronous hook
+ *   (onDragPositionChanged) to observe the drag.
+ * - Layout coordinates must be captured FRESH inside the drag
+ *   gesture (localToRoot at drag start). Cached Offsets go stale
+ *   the moment anything scrolls.
+ * - Keep the clock REAL in these tests (createComposeRule, no
+ *   paused clock): pauseClock + gesture APIs fight each other.
+ *   Event time is advanced with advanceEventTime inside
+ *   performTouchInput.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -249,21 +250,19 @@ class BoardScrollReproTest {
         // so they are not asserted here; the visible movement is a
         // device-test item for the retest build.)
         val pointer = Offset(board.width - px(24), board.height / 2)
-        runBlocking {
-            repeat(5) {
-                boardAutoScrollTick(
-                    pointer,
-                    androidx.compose.ui.unit.IntSize(
-                        board.width.toInt(), board.height.toInt()
-                    ),
-                    boardScroll,
-                    columnScrolls,
-                    px(284),
-                    px(48),
-                    px(56),
-                    px(24)
-                )
-            }
+        repeat(5) {
+            boardAutoScrollTick(
+                pointer,
+                androidx.compose.ui.unit.IntSize(
+                    board.width.toInt(), board.height.toInt()
+                ),
+                boardScroll,
+                columnScrolls,
+                px(284),
+                px(48),
+                px(56),
+                px(24)
+            )
         }
         assertTrue(
             "board scroll state should have moved (value=${boardScroll.value})",
@@ -291,21 +290,19 @@ class BoardScrollReproTest {
         // the ScrollState value proves the scroll; the visible
         // movement is a device-test item.
         val pointer = Offset(px(136), board.height - px(28))
-        runBlocking {
-            repeat(5) {
-                boardAutoScrollTick(
-                    pointer,
-                    androidx.compose.ui.unit.IntSize(
-                        board.width.toInt(), board.height.toInt()
-                    ),
-                    boardScroll,
-                    columnScrolls,
-                    px(284),
-                    px(48),
-                    px(56),
-                    px(24)
-                )
-            }
+        repeat(5) {
+            boardAutoScrollTick(
+                pointer,
+                androidx.compose.ui.unit.IntSize(
+                    board.width.toInt(), board.height.toInt()
+                ),
+                boardScroll,
+                columnScrolls,
+                px(284),
+                px(48),
+                px(56),
+                px(24)
+            )
         }
         val todoScroll = columnScrolls.getValue(TaskStatus.TODO).value
         assertTrue(
@@ -334,21 +331,19 @@ class BoardScrollReproTest {
         // at 24dp each move the board 120dp left. Same ground-truth
         // note as d: the ScrollState value proves the scroll.
         val pointer = Offset(px(24), board.height / 2)
-        runBlocking {
-            repeat(5) {
-                boardAutoScrollTick(
-                    pointer,
-                    androidx.compose.ui.unit.IntSize(
-                        board.width.toInt(), board.height.toInt()
-                    ),
-                    boardScroll,
-                    columnScrolls,
-                    px(284),
-                    px(48),
-                    px(56),
-                    px(24)
-                )
-            }
+        repeat(5) {
+            boardAutoScrollTick(
+                pointer,
+                androidx.compose.ui.unit.IntSize(
+                    board.width.toInt(), board.height.toInt()
+                ),
+                boardScroll,
+                columnScrolls,
+                px(284),
+                px(48),
+                px(56),
+                px(24)
+            )
         }
         assertTrue(
             "board scroll state should have moved left (value=${boardScroll.value})",
@@ -393,7 +388,7 @@ class BoardScrollReproTest {
     }
 
     @Test(timeout = 60_000)
-    fun `h_board does not scroll manually during a long-press drag`() {
+    fun `h_drag scrolls the board by stepped auto-scroll ticks, not by following the finger`() {
         val items = listOf(
             item("a", TaskStatus.TODO),
             item("b", TaskStatus.IN_PROGRESS),
@@ -402,12 +397,16 @@ class BoardScrollReproTest {
         val boardScroll = ScrollState(0)
         setBoard(items, boardScroll = boardScroll)
         composeRule.runOnIdle {}
-        // Long-press the To do card and drag it right 200dp. The loop
-        // cannot tick during a held gesture in Robolectric, so any
-        // board movement here would be the Row's manual scroll — the
-        // drag detector not consuming the drag. The loop is the only
-        // sanctioned scroll mechanism during a drag, so the board
-        // must stay put until the loop ticks.
+        // Long-press the To do card and drag it right 200dp in one
+        // move event. The pointer lands at 336dp — inside the right
+        // edge zone — so scroll-on-move (S1-4d) fires exactly once:
+        // one stepped 24dp tick. A manual scroll following the
+        // finger would move ~200dp; no scroll at all would be 0.
+        // (The old form of this test asserted value == 0, which was
+        // right before scroll-on-move existed: then the loop was the
+        // only sanctioned scroll mechanism and it cannot tick during
+        // a held gesture in Robolectric. Now the move path scrolls
+        // too, and this test pins that it scrolls in steps.)
         composeRule.onNodeWithTag("board_card_a").performTouchInput {
             down(center)
             advanceEventTime(1000)
@@ -415,12 +414,13 @@ class BoardScrollReproTest {
             up()
         }
         composeRule.runOnIdle {
-            assertEquals(0, boardScroll.value)
+            assertTrue(boardScroll.value > 0)
+            assertTrue(boardScroll.value < px(100).toInt())
         }
     }
 
     @Test(timeout = 60_000)
-    fun `i_holding at the left edge scrolls the board left (loop end-to-end)`() {
+    fun `i_dragging left through the edge zone scrolls the board left (scroll-on-move)`() {
         val items = listOf(
             item("a", TaskStatus.TODO),
             item("b", TaskStatus.IN_PROGRESS),
@@ -434,19 +434,32 @@ class BoardScrollReproTest {
             onDragPositionChanged = { positions.add(it) }
         )
         composeRule.runOnIdle {}
-        // Long-press the Done card, drag it left into the left edge
-        // zone (24dp from the edge), HOLD there while the main clock
-        // advances so the LaunchedEffect loop can tick, then release.
-        // The loop is the only scroll mechanism during a drag (h
-        // proves no manual scroll), so a ScrollState decrease here
-        // proves the loop fires for the left edge on a held drag. No
-        // semantics are read while the gesture is held (that hangs
-        // the test worker).
+        // Long-press the Done card (centre 224dp) and drag it left in
+        // steps, 50ms of event time apart (the move-scroll throttle
+        // is 32ms). Three -70dp moves put the pointer at 14dp
+        // (inside the left edge zone), then two -10dp moves stay in
+        // the zone — three ticks in the zone, so 3 x 24dp = 72dp of
+        // left scroll, with NO clock advance. The scroll is
+        // synchronous on the move event, so the board has already
+        // moved when the gesture ends. (The old form of this test
+        // held at the edge + advanced the main clock 1000ms to drive
+        // the loop — and still saw no scroll. That is the documented
+        // harness limit, not a product failure: the loop cannot tick
+        // during a held gesture in Robolectric. The loop remains for
+        // dwelling and is verified on device; this test proves the
+        // move path instead. No semantics are read while the gesture
+        // is held — that hangs the test worker.)
         composeRule.onNodeWithTag("board_card_c").performTouchInput {
             down(center)
             advanceEventTime(1000)
-            moveBy(Offset(-px(200), 0f))
-            composeRule.mainClock.advanceTimeBy(1000)
+            repeat(3) {
+                moveBy(Offset(-px(70), 0f))
+                advanceEventTime(50)
+            }
+            repeat(2) {
+                moveBy(Offset(-px(10), 0f))
+                advanceEventTime(50)
+            }
             up()
         }
         composeRule.runOnIdle {
@@ -497,14 +510,22 @@ class BoardScrollReproTest {
         }
     }
 
+    /**
+     * l — dragging RIGHT through the edge zone scrolls the board
+     * right (scroll-on-move, S1-4d): the mirror of test i, proving
+     * the new move path works in both directions. (Test k, which
+     * asserted the shift-included drag position when the board
+     * scrolls mid-drag, was removed in S1-4d: test j proved the
+     * deltas are scroll-stable, so k's model was wrong.)
+     */
     @Test(timeout = 60_000)
-    fun `k_drag position jumps by the scroll shift when the board scrolls mid-drag`() {
+    fun `l_dragging right through the edge zone scrolls the board right (scroll-on-move)`() {
         val items = listOf(
             item("a", TaskStatus.TODO),
             item("b", TaskStatus.IN_PROGRESS),
             item("c", TaskStatus.DONE, completed = true)
         )
-        val boardScroll = ScrollState(px(480).toInt())
+        val boardScroll = ScrollState(0)
         val positions = mutableListOf<Offset>()
         setBoard(
             items,
@@ -512,23 +533,27 @@ class BoardScrollReproTest {
             onDragPositionChanged = { positions.add(it) }
         )
         composeRule.runOnIdle {}
-        // Same device sequence as j, but asserting the shift-included
-        // value (44dp). j and k together discriminate the two models:
-        // j passes + k fails => deltas are scroll-stable; j fails +
-        // k passes => the scroll shift enters the deltas.
-        composeRule.onNodeWithTag("board_card_c").performTouchInput {
+        // To do card centre is 136dp; three +70dp moves put the
+        // pointer at 346dp (inside the right edge zone, which starts
+        // at 360 - 48 = 312dp), then two +10dp moves stay in the
+        // zone — three ticks, 50ms apart, so 3 x 24dp = 72dp of
+        // right scroll, with no clock advance.
+        composeRule.onNodeWithTag("board_card_a").performTouchInput {
             down(center)
             advanceEventTime(1000)
-            moveBy(Offset(-px(50), 0f))
-            runBlocking { boardScroll.scrollTo(px(400).toInt()) }
-            composeRule.mainClock.advanceTimeBy(100)
-            moveBy(Offset(-px(50), 0f))
+            repeat(3) {
+                moveBy(Offset(px(70), 0f))
+                advanceEventTime(50)
+            }
+            repeat(2) {
+                moveBy(Offset(px(10), 0f))
+                advanceEventTime(50)
+            }
             up()
         }
         composeRule.runOnIdle {
             assertTrue(positions.isNotEmpty())
-            val last = positions.last()
-            assertTrue(abs(last.x - px(44)) < px(8))
+            assertTrue(boardScroll.value > px(50).toInt())
         }
     }
 }

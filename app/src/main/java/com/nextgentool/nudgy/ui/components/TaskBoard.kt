@@ -4,7 +4,6 @@ import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -118,16 +117,27 @@ private val BOARD_COLUMN_GAP = 12.dp
 private val BOARD_HEIGHT = 520.dp
 
 /**
- * One auto-scroll tick (S1-4c): given the pointer in board-viewport
- * coordinates, scroll the board and the hovered column one step when
- * the pointer dwells near an edge. Extracted from the drag loop so
- * the edge detection + scroll can be driven directly in a test —
- * Robolectric cannot tick the loop's delay during a held gesture
- * (proven by three harness approaches in BoardScrollReproTest), so
- * the loop itself is verified end-to-end on device. The loop just
- * calls this tick every 32ms while a drag is in flight.
+ * One auto-scroll tick (S1-4c, made synchronous in S1-4d): given the
+ * pointer in board-viewport coordinates, scroll the board and the
+ * hovered column one step when the pointer dwells near an edge.
+ * Extracted so the edge detection + scroll can be driven directly
+ * in a test — Robolectric cannot tick the loop's delay during a held
+ * gesture (proven by three harness approaches in
+ * BoardScrollReproTest), so the loop itself is verified end-to-end
+ * on device.
+ *
+ * Synchronous on purpose (S1-4d): it scrolls via
+ * ScrollState.dispatchRawDelta, which applies the delta immediately,
+ * clamped to [0, maxValue] — the same bound scrollBy respects — so
+ * the tick can be called from the drag's onDrag as well as from the
+ * loop, with no coroutine. dispatchRawDelta bypasses nested scroll
+ * and the scroll mutex; that is fine here (the board IS the scrolled
+ * container, there is no fling during a drag, and the loop uses this
+ * same path). The loop calls this tick every 32ms while a drag is in
+ * flight (dwelling); onDrag calls it on movement (see
+ * requestMoveScroll in TaskBoard).
  */
-internal suspend fun boardAutoScrollTick(
+internal fun boardAutoScrollTick(
     pointerViewport: Offset,
     boardSize: IntSize,
     boardScrollState: ScrollState,
@@ -138,18 +148,18 @@ internal suspend fun boardAutoScrollTick(
     scrollStepPx: Float
 ) {
     if (pointerViewport.x > boardSize.width - edgeXPx) {
-        boardScrollState.scrollBy(scrollStepPx)
+        boardScrollState.dispatchRawDelta(scrollStepPx)
     } else if (pointerViewport.x < edgeXPx) {
-        boardScrollState.scrollBy(-scrollStepPx)
+        boardScrollState.dispatchRawDelta(-scrollStepPx)
     }
     val hovered = boardColumnAt(
         pointerViewport.x + boardScrollState.value, pitchPx
     )
     val columnState = columnScrollStates.getValue(hovered)
     if (pointerViewport.y > boardSize.height - edgeYPx) {
-        columnState.scrollBy(scrollStepPx)
+        columnState.dispatchRawDelta(scrollStepPx)
     } else if (pointerViewport.y < edgeYPx) {
-        columnState.scrollBy(-scrollStepPx)
+        columnState.dispatchRawDelta(-scrollStepPx)
     }
 }
 
@@ -232,11 +242,43 @@ fun TaskBoard(
     val onMoveTaskState = rememberUpdatedState(onMoveTask)
     val boardCoordsState = rememberUpdatedState(boardCoords)
 
+    // Scroll-on-move (S1-4d): the delay loop is the only scroll
+    // mechanism that fires while the pointer dwells, but it cannot be
+    // driven in a test and it is the single point of failure for the
+    // moving phase — on the device the left edge never scrolled while
+    // the right edge did, with the tick and the positions both proven
+    // correct. So the drag also scrolls synchronously on movement:
+    // each move event whose pointer sits in an edge zone scrolls one
+    // step, throttled to the loop's 32ms cadence by event time
+    // (change.uptimeMillis). The tick is synchronous (dispatchRawDelta)
+    // so this runs inside onDrag with no coroutine and is directly
+    // testable; the loop stays for dwelling.
+    val lastMoveScrollUptime = remember { mutableStateOf(Long.MIN_VALUE) }
+    val requestMoveScroll: (Offset, Long) -> Unit = { pointer, eventTimeMillis ->
+        if (eventTimeMillis - lastMoveScrollUptime.value >= 32) {
+            lastMoveScrollUptime.value = eventTimeMillis
+            boardAutoScrollTick(
+                pointer,
+                boardSize,
+                boardScroll,
+                columnScrolls,
+                pitchPx,
+                edgeXPx,
+                edgeYPx,
+                scrollStepPx
+            )
+        }
+    }
+    val requestMoveScrollState = rememberUpdatedState(requestMoveScroll)
+
     // Auto-scroll while dragging. A drag session scrolls nothing by
     // itself, and the pointer can sit still at an edge waiting for the
-    // board to come to it — so this is a loop, not a per-move scroll:
-    // it ticks while a drag is in flight and scrolls whenever the
-    // pointer dwells near an edge.
+    // board to come to it — so this is a loop, not only a per-move
+    // scroll: it ticks while a drag is in flight and scrolls whenever
+    // the pointer dwells near an edge. (S1-4d: the same tick is also
+    // called synchronously from onDrag — requestMoveScroll — so the
+    // moving phase no longer depends on this loop alone; the loop
+    // remains for dwelling.)
     LaunchedEffect(drag?.taskId) {
         if (drag == null) return@LaunchedEffect
         while (true) {
@@ -279,6 +321,7 @@ fun TaskBoard(
                     allItemsState = allItemsState,
                     onMoveTaskState = onMoveTaskState,
                     onDragPositionChanged = onDragPositionChanged,
+                    requestMoveScrollState = requestMoveScrollState,
                     onToggle = onToggle,
                     onTaskClick = onTaskClick
                 )
@@ -324,6 +367,7 @@ private fun BoardColumn(
     allItemsState: State<List<TaskListItem>>,
     onMoveTaskState: State<(TaskEntity, TaskStatus) -> Unit>,
     onDragPositionChanged: ((Offset) -> Unit)?,
+    requestMoveScrollState: State<(Offset, Long) -> Unit>,
     onToggle: (TaskEntity) -> Unit,
     onTaskClick: (TaskEntity) -> Unit
 ) {
@@ -392,6 +436,7 @@ private fun BoardColumn(
                         allItemsState = allItemsState,
                         onMoveTaskState = onMoveTaskState,
                         onDragPositionChanged = onDragPositionChanged,
+                        requestMoveScrollState = requestMoveScrollState,
                         isDragging = dragState.value?.taskId == item.task.id,
                         onToggle = { onToggle(item.task) },
                         onClick = { onTaskClick(item.task) }
@@ -413,6 +458,7 @@ private fun BoardTaskCard(
     allItemsState: State<List<TaskListItem>>,
     onMoveTaskState: State<(TaskEntity, TaskStatus) -> Unit>,
     onDragPositionChanged: ((Offset) -> Unit)?,
+    requestMoveScrollState: State<(Offset, Long) -> Unit>,
     isDragging: Boolean,
     onToggle: () -> Unit,
     onClick: () -> Unit
@@ -458,7 +504,7 @@ private fun BoardTaskCard(
                         onDragPositionChanged?.invoke(startViewport)
                     },
                     // Required by the detector (no default in 1.7).
-                    onDrag = { _, dragAmount ->
+                    onDrag = { change, dragAmount ->
                         val current = dragState.value
                         if (current != null && current.taskId == task.id) {
                             val next = current.copy(
@@ -466,6 +512,9 @@ private fun BoardTaskCard(
                             )
                             dragState.value = next
                             onDragPositionChanged?.invoke(next.pointerViewport)
+                            requestMoveScrollState.value(
+                                next.pointerViewport, change.uptimeMillis
+                            )
                         }
                     },
                     onDragEnd = {
