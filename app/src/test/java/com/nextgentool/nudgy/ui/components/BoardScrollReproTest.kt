@@ -1067,4 +1067,38 @@ class BoardScrollReproTest {
         }
     }
 
+
+    /**
+     * q2 — S1-4f diagnostic: the SAME downward drag as test q, but
+     * asserting ONLY that the board did not slide sideways. If this
+     * passes while q fails, the axis gating works (board stayed) and
+     * the vertical scroll itself is not firing in the gesture. If
+     * this fails, the gating does not hold in the gesture and the
+     * board slid away (so boardColumnAt flipped to Done).
+     */
+    @Test(timeout = 60_000)
+    fun `q2_downward drag in a half-visible column does not slide the board (axis-gating check)`() {
+        val items = (1..12).map { item("p$it", TaskStatus.IN_PROGRESS) } +
+            listOf(
+                item("a", TaskStatus.TODO),
+                item("c", TaskStatus.DONE, completed = true)
+            )
+        val boardScroll = ScrollState(0)
+        val columnScrolls = TaskStatus.entries.associateWith { ScrollState(0) }
+        setBoard(items, boardScroll = boardScroll, columnScrolls = columnScrolls)
+        composeRule.runOnIdle {}
+        composeRule.onNodeWithTag("board_card_p1").performTouchInput {
+            down(center + Offset(-px(100), 0f))
+            advanceEventTime(1000)
+            repeat(25) {
+                moveBy(Offset(0f, px(10)))
+                advanceEventTime(50)
+            }
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue(boardScroll.value < px(50).toInt())
+        }
+    }
+
 }
