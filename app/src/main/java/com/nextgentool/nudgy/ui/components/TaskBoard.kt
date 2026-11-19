@@ -456,7 +456,6 @@ private fun BoardColumn(
                         dragState = dragState,
                         boardCoordsState = boardCoordsState,
                         boardScrollState = boardScrollState,
-                        columnScrollState = columnScrollState,
                         pitchPx = pitchPx,
                         allItemsState = allItemsState,
                         onMoveTaskState = onMoveTaskState,
@@ -478,7 +477,6 @@ private fun BoardTaskCard(
     dragState: MutableState<BoardDrag?>,
     boardCoordsState: State<LayoutCoordinates?>,
     boardScrollState: ScrollState,
-    columnScrollState: ScrollState,
     pitchPx: Float,
     allItemsState: State<List<TaskListItem>>,
     onMoveTaskState: State<(TaskEntity, TaskStatus) -> Unit>,
@@ -504,24 +502,30 @@ private fun BoardTaskCard(
                         // Pointer in board-viewport coordinates,
                         // evaluated fresh from the live coordinates.
                         // The card and the board share the same root,
-                        // but both sit inside the scrolling container,
-                        // so their difference is the pointer's position
-                        // in board-CONTENT coordinates — the scroll
-                        // offset cancels in the subtraction. Subtract
-                        // the board scroll (x) and this column's scroll
-                        // (y) to land in viewport coordinates. Later
-                        // moves only add deltas, so this stays right
-                        // even as the board auto-scrolls under the
-                        // finger.
+                        // but both sit inside the board's horizontal
+                        // scroll container, so their X difference is
+                        // the pointer's position in board-CONTENT
+                        // coordinates — the scroll offset cancels in
+                        // the subtraction — so subtract the board
+                        // scroll (x) to land in viewport coordinates.
+                        // The Y difference needs NO such correction:
+                        // the board does NOT sit inside this column's
+                        // vertical scroll, so the card's localToRoot
+                        // already carries the column scroll and the
+                        // difference IS the viewport y. Subtracting
+                        // the column scroll would double-count it and
+                        // put the pointer too high by exactly the
+                        // column scroll (S1-4e: that made the bottom
+                        // edge zone unreachable, so vertical
+                        // auto-scroll never fired). Later moves only
+                        // add deltas, so this stays right even as the
+                        // board auto-scrolls under the finger.
                         val card = cardCoords
                         val board = boardCoordsState.value
                         val startViewport = if (card != null && board != null) {
                             card.localToRoot(offsetInCard) -
                                 board.localToRoot(Offset.Zero) -
-                                Offset(
-                                    boardScrollState.value.toFloat(),
-                                    columnScrollState.value.toFloat()
-                                )
+                                Offset(boardScrollState.value.toFloat(), 0f)
                         } else {
                             offsetInCard
                         }
