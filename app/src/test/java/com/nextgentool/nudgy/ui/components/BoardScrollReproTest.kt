@@ -454,4 +454,81 @@ class BoardScrollReproTest {
             assertTrue(boardScroll.value < px(480).toInt() - px(50).toInt())
         }
     }
+
+    @Test(timeout = 60_000)
+    fun `j_drag position stays exact when the board scrolls mid-drag`() {
+        val items = listOf(
+            item("a", TaskStatus.TODO),
+            item("b", TaskStatus.IN_PROGRESS),
+            item("c", TaskStatus.DONE, completed = true)
+        )
+        val boardScroll = ScrollState(px(480).toInt())
+        val positions = mutableListOf<Offset>()
+        setBoard(
+            items,
+            boardScroll = boardScroll,
+            onDragPositionChanged = { positions.add(it) }
+        )
+        composeRule.runOnIdle {}
+        // Drag the Done card left 50dp (finger 224 -> 174), then scroll
+        // the board left 80dp programmatically (the card moves right
+        // 80dp under the stationary finger — exactly what the
+        // auto-scroll loop does on a device between motion events),
+        // then drag left 50dp more. If the drag deltas are
+        // scroll-stable, the last reported x is the finger's viewport
+        // position, 124dp. If the deltas include the scroll shift,
+        // the reported x jumps by the shift to 44dp. Range assertions
+        // on separate lines so the failing line names the outcome
+        // (CI strips assertion messages).
+        composeRule.onNodeWithTag("board_card_c").performTouchInput {
+            down(center)
+            advanceEventTime(1000)
+            moveBy(Offset(-px(50), 0f))
+            runBlocking { boardScroll.scrollTo(px(400).toInt()) }
+            composeRule.mainClock.advanceTimeBy(100)
+            moveBy(Offset(-px(50), 0f))
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue(positions.isNotEmpty())
+            val last = positions.last()
+            assertTrue(last.x > px(80))
+            assertTrue(last.x < px(150))
+        }
+    }
+
+    @Test(timeout = 60_000)
+    fun `k_drag position jumps by the scroll shift when the board scrolls mid-drag`() {
+        val items = listOf(
+            item("a", TaskStatus.TODO),
+            item("b", TaskStatus.IN_PROGRESS),
+            item("c", TaskStatus.DONE, completed = true)
+        )
+        val boardScroll = ScrollState(px(480).toInt())
+        val positions = mutableListOf<Offset>()
+        setBoard(
+            items,
+            boardScroll = boardScroll,
+            onDragPositionChanged = { positions.add(it) }
+        )
+        composeRule.runOnIdle {}
+        // Same device sequence as j, but asserting the shift-included
+        // value (44dp). j and k together discriminate the two models:
+        // j passes + k fails => deltas are scroll-stable; j fails +
+        // k passes => the scroll shift enters the deltas.
+        composeRule.onNodeWithTag("board_card_c").performTouchInput {
+            down(center)
+            advanceEventTime(1000)
+            moveBy(Offset(-px(50), 0f))
+            runBlocking { boardScroll.scrollTo(px(400).toInt()) }
+            composeRule.mainClock.advanceTimeBy(100)
+            moveBy(Offset(-px(50), 0f))
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue(positions.isNotEmpty())
+            val last = positions.last()
+            assertTrue(abs(last.x - px(44)) < px(8))
+        }
+    }
 }
