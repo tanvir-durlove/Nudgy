@@ -93,7 +93,7 @@ class BoardScrollReproTest {
             item("b", TaskStatus.IN_PROGRESS),
             item("c", TaskStatus.DONE, completed = true)
         )
-        setBoard(items) { task, status -> moved.add(task to status) }
+        setBoard(items, onMoveTask = { task, status -> moved.add(task to status) })
         composeRule.onNodeWithTag("board_column_DONE").performScrollTo()
         val pitch = px(284)
         composeRule.onNodeWithTag("board_card_c").performTouchInput {
