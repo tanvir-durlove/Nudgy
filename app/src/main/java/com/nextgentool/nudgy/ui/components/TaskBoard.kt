@@ -25,14 +25,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -69,11 +72,75 @@ enum class TaskViewMode { LIST, BOARD }
  * Groups filtered list items by Board column. Pure — unit-tested
  * without Compose. The Board shows the SAME filtered items as the List
  * (Feature 2 filters apply in Board too, spec Feature 5).
+ *
+ * [sortByBoardOrder]: true (default) sorts each column by boardOrder
+ * (S1-4g — the Tasks Board's manual order). False keeps the input order
+ * (the My Day Board — plannedStart order, the day's plan, not the
+ * manual order). sortedWith is stable, so ties (rows that never got a
+ * distinct boardOrder, or tests that never set one) keep input order.
  */
-fun groupBoardItems(items: List<TaskListItem>): Map<TaskStatus, List<TaskListItem>> =
+fun groupBoardItems(
+    items: List<TaskListItem>,
+    sortByBoardOrder: Boolean = true
+): Map<TaskStatus, List<TaskListItem>> =
     TaskStatus.entries.associateWith { status ->
-        items.filter { it.task.status == status }
+        val column = items.filter { it.task.status == status }
+        if (sortByBoardOrder) column.sortedWith(compareBy { it.task.boardOrder }) else column
     }
+
+/**
+ * The drop index among a column's OTHER cards, from MEASURED positions.
+ * Pure — unit-tested without Compose.
+ *
+ * [cardCenterViewportYs] are the other cards' vertical centres in
+ * board-viewport px (top = 0); [pointerViewportY] is the pointer in the
+ * same space. The index is the count of centres above the pointer:
+ * above the first centre → 0, between two centres → between them,
+ * below the last centre → size (append). Card heights are never
+ * assumed — the centres come from LayoutCoordinates (see TaskBoard).
+ */
+fun boardDropIndex(cardCenterViewportYs: List<Float>, pointerViewportY: Float): Int =
+    cardCenterViewportYs.count { it < pointerViewportY }
+
+/** The result of resolving a Board drop to a position: the dragged task, the target column, and the drop index among that column's OTHER cards. */
+data class BoardDropTarget(
+    val task: TaskEntity,
+    val status: TaskStatus,
+    val index: Int
+)
+
+/**
+ * Resolves a Board drop against the FULL task list, to a POSITION.
+ * Pure — unit-tested without Compose.
+ *
+ * [allItems] is the Board's items in DISPLAY order (the order the user
+ * sees — boardOrder for the Tasks Board, plannedStart for My Day);
+ * [targetIndex] counts the target column's OTHER cards (dragged card
+ * excluded — the UI counts other cards only, see [boardDropIndex]).
+ *
+ * Returns null for an unknown id, and for a same-column drop at the
+ * card's own position (a no-op — no write). Otherwise the index is
+ * clamped into the target column: below the last other card appends.
+ * Cross-column drops keep the existing setTaskStatus side effects
+ * (Done → complete + reminder cancel + recurrence) in the repository.
+ */
+fun resolveBoardDropPosition(
+    allItems: List<TaskListItem>,
+    draggedId: String?,
+    targetStatus: TaskStatus,
+    targetIndex: Int
+): BoardDropTarget? {
+    if (draggedId == null) return null
+    val task = allItems.firstOrNull { it.task.id == draggedId }?.task ?: return null
+    val targetColumn = allItems.filter { it.task.status == targetStatus }
+    if (task.status == targetStatus) {
+        val others = targetColumn.filter { it.task.id != draggedId }
+        val currentIndex = targetColumn.indexOfFirst { it.task.id == draggedId }
+        if (targetIndex == currentIndex) return null
+        return BoardDropTarget(task, targetStatus, targetIndex.coerceIn(0, others.size))
+    }
+    return BoardDropTarget(task, targetStatus, targetIndex.coerceIn(0, targetColumn.size))
+}
 
 /**
  * Resolves a Board drop against the FULL task list. Pure — unit-tested
@@ -169,8 +236,19 @@ internal fun boardAutoScrollTick(
     }
 }
 
-/** In-flight Board drag: the dragged id + the pointer position in the board viewport (px). */
-private data class BoardDrag(val taskId: String, val pointerViewport: Offset)
+/**
+ * In-flight Board drag: the dragged id, the pointer position in the
+ * board viewport (px), and the drop target live-computed from it
+ * (S1-4g: target column + index among the target column's OTHER cards,
+ * updated on every move and on every auto-scroll tick, so the insertion
+ * indicator and the drop always agree with the finger).
+ */
+private data class BoardDrag(
+    val taskId: String,
+    val pointerViewport: Offset,
+    val targetStatus: TaskStatus,
+    val targetIndex: Int
+)
 
 /**
  * Sprint 1-4b — Kanban board (Feature 5, spec §6), drag fixed.
@@ -195,7 +273,7 @@ private data class BoardDrag(val taskId: String, val pointerViewport: Offset)
 @Composable
 fun TaskBoard(
     items: List<TaskListItem>,
-    onMoveTask: (TaskEntity, TaskStatus) -> Unit,
+    onMoveTask: (TaskEntity, TaskStatus, Int, List<TaskEntity>) -> Unit,
     onToggle: (TaskEntity) -> Unit,
     onTaskClick: (TaskEntity) -> Unit,
     modifier: Modifier = Modifier,
@@ -215,7 +293,12 @@ fun TaskBoard(
     // production — no behaviour change.
     boardScrollState: ScrollState? = null,
     columnScrollStates: Map<TaskStatus, ScrollState>? = null,
-    boardHeight: Dp = BOARD_HEIGHT
+    boardHeight: Dp = BOARD_HEIGHT,
+    // S1-4g — the Board's display order. True (default): columns sort
+    // by boardOrder (Tasks Board). False: the input order is kept (My
+    // Day Board — plannedStart order, the day's plan, not the manual
+    // order). The drop index is always counted in display order.
+    sortByBoardOrder: Boolean = true
 ) {
     val density = LocalDensity.current
     val pitchPx = with(density) { (BOARD_COLUMN_WIDTH + BOARD_COLUMN_GAP).toPx() }
@@ -240,13 +323,49 @@ fun TaskBoard(
     // scroll.
     var boardCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var boardSize by remember { mutableStateOf(IntSize.Zero) }
-    val grouped = remember(items) { groupBoardItems(items) }
+    // S1-4g: every card's live LayoutCoordinates, by id — the drop
+    // index is computed from MEASURED card centres (never an assumed
+    // card height). Written by each card's onGloballyPositioned,
+    // removed on dispose, so a dropped card's stale position can never
+    // be counted.
+    val cardCoordsById = remember { mutableStateMapOf<String, LayoutCoordinates>() }
+    val grouped = remember(items, sortByBoardOrder) {
+        groupBoardItems(items, sortByBoardOrder)
+    }
 
     // Fresh reads for the gesture callbacks (the pointerInput block is
     // keyed on the task id only, so it must not close over stale values).
-    val allItemsState = rememberUpdatedState(items)
     val onMoveTaskState = rememberUpdatedState(onMoveTask)
     val boardCoordsState = rememberUpdatedState(boardCoords)
+    val groupedState = rememberUpdatedState(grouped)
+
+    // S1-4g: the drop target (column + index among OTHER cards) for a
+    // pointer in board-viewport coordinates. Column from X
+    // (boardColumnAt); index from the target column's MEASURED card
+    // centres in the same viewport space (boardDropIndex) — the dragged
+    // card excluded. The pointer and the centres share one coordinate
+    // space (board viewport, S1-4e: no scroll correction on Y), so no
+    // column-content-top offset is needed — it cancels in the
+    // comparison. A card with no coordinates yet (not laid out) is
+    // skipped, never guessed.
+    val computeDropTarget: (String, Offset) -> Pair<TaskStatus, Int> =
+        { draggedId, pointer ->
+            val target = boardColumnAt(pointer.x + boardScroll.value, pitchPx)
+            val board = boardCoords
+            val centers = grouped[target].orEmpty()
+                .filter { it.task.id != draggedId }
+                .mapNotNull { item ->
+                    if (board == null) return@mapNotNull null
+                    val coords = cardCoordsById[item.task.id] ?: return@mapNotNull null
+                    val center = Offset(
+                        coords.size.width / 2f,
+                        coords.size.height / 2f
+                    )
+                    coords.localToRoot(center).y - board.localToRoot(Offset.Zero).y
+                }
+            target to boardDropIndex(centers, pointer.y)
+        }
+    val computeDropTargetState = rememberUpdatedState(computeDropTarget)
 
     // Scroll-on-move (S1-4d): the delay loop is the only scroll
     // mechanism that fires while the pointer dwells, but it cannot be
@@ -306,6 +425,19 @@ fun TaskBoard(
                 edgeYPx,
                 scrollStepPx
             )
+            // S1-4g: the column may have scrolled under a dwelling
+            // pointer — recompute the drop target so the insertion
+            // indicator (and the eventual drop) stays live even when
+            // the finger does not move.
+            val (targetStatus, targetIndex) = computeDropTargetState.value(
+                current.taskId, current.pointerViewport
+            )
+            if (targetStatus != current.targetStatus || targetIndex != current.targetIndex) {
+                dragState.value = current.copy(
+                    targetStatus = targetStatus,
+                    targetIndex = targetIndex
+                )
+            }
             delay(32)
         }
     }
@@ -343,10 +475,19 @@ fun TaskBoard(
                     boardCoordsState = boardCoordsState,
                     boardScrollState = boardScroll,
                     pitchPx = pitchPx,
-                    allItemsState = allItemsState,
                     onMoveTaskState = onMoveTaskState,
                     onDragPositionChanged = onDragPositionChanged,
                     requestMoveScrollState = requestMoveScrollState,
+                    // S1-4g: the live insertion indicator lives only in
+                    // the column under the pointer, at the computed index.
+                    insertionIndex = if (drag?.targetStatus == status) {
+                        drag.targetIndex
+                    } else {
+                        null
+                    },
+                    groupedState = groupedState,
+                    computeDropTargetState = computeDropTargetState,
+                    cardCoordsById = cardCoordsById,
                     onToggle = onToggle,
                     onTaskClick = onTaskClick
                 )
@@ -389,10 +530,15 @@ private fun BoardColumn(
     boardCoordsState: State<LayoutCoordinates?>,
     boardScrollState: ScrollState,
     pitchPx: Float,
-    allItemsState: State<List<TaskListItem>>,
-    onMoveTaskState: State<(TaskEntity, TaskStatus) -> Unit>,
+    onMoveTaskState: State<(TaskEntity, TaskStatus, Int, List<TaskEntity>) -> Unit>,
     onDragPositionChanged: ((Offset) -> Unit)?,
     requestMoveScrollState: State<(Offset, Long) -> Unit>,
+    // S1-4g: the live drop position in THIS column (null = not the
+    // column under the pointer) — the insertion indicator renders here.
+    insertionIndex: Int?,
+    groupedState: State<Map<TaskStatus, List<TaskListItem>>>,
+    computeDropTargetState: State<(String, Offset) -> Pair<TaskStatus, Int>>,
+    cardCoordsById: SnapshotStateMap<String, LayoutCoordinates>,
     onToggle: (TaskEntity) -> Unit,
     onTaskClick: (TaskEntity) -> Unit
 ) {
@@ -442,29 +588,41 @@ private fun BoardColumn(
                     .fillMaxWidth()
                     .verticalScroll(columnScrollState)
             ) {
+                // S1-4g — live insertion indicator (v1): a teal line at
+                // the computed drop index, updated on every move. Live
+                // reflow of the other cards is a follow-up — the line
+                // alone shows where the card will land. In an empty
+                // column the line sits above the empty text (index 0).
                 if (items.isEmpty()) {
+                    if (insertionIndex == 0) BoardInsertionIndicator()
                     Text(
                         text = "No tasks here",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colorResource(R.color.nudgy_muted),
                         modifier = Modifier.padding(vertical = 8.dp)
                     )
-                }
-                items.forEach { item ->
-                    BoardTaskCard(
-                        item = item,
-                        dragState = dragState,
-                        boardCoordsState = boardCoordsState,
-                        boardScrollState = boardScrollState,
-                        pitchPx = pitchPx,
-                        allItemsState = allItemsState,
-                        onMoveTaskState = onMoveTaskState,
-                        onDragPositionChanged = onDragPositionChanged,
-                        requestMoveScrollState = requestMoveScrollState,
-                        isDragging = dragState.value?.taskId == item.task.id,
-                        onToggle = { onToggle(item.task) },
-                        onClick = { onTaskClick(item.task) }
-                    )
+                } else {
+                    for (i in 0..items.size) {
+                        if (insertionIndex == i) BoardInsertionIndicator()
+                        if (i < items.size) {
+                            val item = items[i]
+                            BoardTaskCard(
+                                item = item,
+                                dragState = dragState,
+                                boardCoordsState = boardCoordsState,
+                                boardScrollState = boardScrollState,
+                                onMoveTaskState = onMoveTaskState,
+                                onDragPositionChanged = onDragPositionChanged,
+                                requestMoveScrollState = requestMoveScrollState,
+                                groupedState = groupedState,
+                                computeDropTargetState = computeDropTargetState,
+                                cardCoordsById = cardCoordsById,
+                                isDragging = dragState.value?.taskId == item.task.id,
+                                onToggle = { onToggle(item.task) },
+                                onClick = { onTaskClick(item.task) }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -477,11 +635,12 @@ private fun BoardTaskCard(
     dragState: MutableState<BoardDrag?>,
     boardCoordsState: State<LayoutCoordinates?>,
     boardScrollState: ScrollState,
-    pitchPx: Float,
-    allItemsState: State<List<TaskListItem>>,
-    onMoveTaskState: State<(TaskEntity, TaskStatus) -> Unit>,
+    onMoveTaskState: State<(TaskEntity, TaskStatus, Int, List<TaskEntity>) -> Unit>,
     onDragPositionChanged: ((Offset) -> Unit)?,
     requestMoveScrollState: State<(Offset, Long) -> Unit>,
+    groupedState: State<Map<TaskStatus, List<TaskListItem>>>,
+    computeDropTargetState: State<(String, Offset) -> Pair<TaskStatus, Int>>,
+    cardCoordsById: SnapshotStateMap<String, LayoutCoordinates>,
     isDragging: Boolean,
     onToggle: () -> Unit,
     onClick: () -> Unit
@@ -491,11 +650,19 @@ private fun BoardTaskCard(
     // Offset. The drag start evaluates localToRoot fresh, so the
     // position follows the board's current scroll.
     var cardCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    // S1-4g: publish these coordinates for the drop-index computation
+    // (measured centres) and remove them on dispose.
+    DisposableEffect(task.id) {
+        onDispose { cardCoordsById.remove(task.id) }
+    }
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer { alpha = if (isDragging) 0.35f else 1f }
-            .onGloballyPositioned { cardCoords = it }
+            .onGloballyPositioned {
+                cardCoords = it
+                cardCoordsById[task.id] = it
+            }
             .pointerInput(task.id) {
                 detectDragGesturesAfterLongPress(
                     onDragStart = { offsetInCard ->
@@ -529,15 +696,27 @@ private fun BoardTaskCard(
                         } else {
                             offsetInCard
                         }
-                        dragState.value = BoardDrag(task.id, startViewport)
+                        // S1-4g: the drop target at drag start — the
+                        // card's own slot, so the insertion indicator
+                        // is already showing where it sits.
+                        val (startTarget, startIndex) =
+                            computeDropTargetState.value(task.id, startViewport)
+                        dragState.value = BoardDrag(
+                            task.id, startViewport, startTarget, startIndex
+                        )
                         onDragPositionChanged?.invoke(startViewport)
                     },
                     // Required by the detector (no default in 1.7).
                     onDrag = { change, dragAmount ->
                         val current = dragState.value
                         if (current != null && current.taskId == task.id) {
+                            val pointer = current.pointerViewport + dragAmount
+                            val (targetStatus, targetIndex) =
+                                computeDropTargetState.value(task.id, pointer)
                             val next = current.copy(
-                                pointerViewport = current.pointerViewport + dragAmount
+                                pointerViewport = pointer,
+                                targetStatus = targetStatus,
+                                targetIndex = targetIndex
                             )
                             dragState.value = next
                             onDragPositionChanged?.invoke(next.pointerViewport)
@@ -550,11 +729,28 @@ private fun BoardTaskCard(
                         val info = dragState.value
                         dragState.value = null
                         if (info != null && info.taskId == task.id) {
-                            val contentX =
-                                info.pointerViewport.x + boardScrollState.value
-                            val target = boardColumnAt(contentX, pitchPx)
-                            resolveBoardDrop(allItemsState.value, info.taskId, target)
-                                ?.let { onMoveTaskState.value(it, target) }
+                            // S1-4g: recompute the target from the
+                            // FINAL pointer and the LIVE centres — the
+                            // column may have auto-scrolled under a
+                            // dwelling pointer since the last move.
+                            // The drop resolves to a POSITION now, not
+                            // just a column (resolveBoardDrop stays as
+                            // the S1-4b regression pin, tested pure).
+                            val (targetStatus, targetIndex) =
+                                computeDropTargetState.value(task.id, info.pointerViewport)
+                            val displayedItems = TaskStatus.entries.flatMap {
+                                groupedState.value[it].orEmpty()
+                            }
+                            val visibleOthers = groupedState.value[targetStatus].orEmpty()
+                                .filter { it.task.id != info.taskId }
+                                .map { it.task }
+                            resolveBoardDropPosition(
+                                displayedItems, info.taskId, targetStatus, targetIndex
+                            )?.let { target ->
+                                onMoveTaskState.value(
+                                    target.task, target.status, target.index, visibleOthers
+                                )
+                            }
                         }
                     },
                     onDragCancel = {
@@ -639,6 +835,23 @@ private fun BoardTaskCard(
             }
         }
     }
+}
+
+/**
+ * S1-4g — live insertion indicator: a teal line showing exactly where
+ * the dragged card will land, at the computed drop index. Rendered
+ * inside the target column on every move (and on every auto-scroll
+ * tick while dwelling). Live reflow of the other cards is a follow-up.
+ */
+@Composable
+private fun BoardInsertionIndicator() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(4.dp)
+            .background(colorResource(R.color.nudgy_teal), CircleShape)
+            .testTag("board_insertion_indicator")
+    )
 }
 
 @Composable

@@ -51,7 +51,15 @@ data class TaskEntity(
     /** Template this task was created from (Feature 13); null = not from a template. */
     val templateId: String? = null,
     /** Repeat the reminder every N minutes until completed; null = once (Feature 6). */
-    val reminderRepeatMinutes: Int? = null
+    val reminderRepeatMinutes: Int? = null,
+    /**
+     * Board order (S1-4g, MIGRATION_8_9): the task's position inside its
+     * status column — 0 = top, dense 0..n-1 per status, renumbered on
+     * every drop. Appended LAST so the migration's ADD COLUMN matches
+     * Room's expected column order. Subtasks keep 0 (they have no Board
+     * presence); the Board only ever orders top-level tasks.
+     */
+    val boardOrder: Int = 0
 )
 
 @Entity(tableName = "calendar_events")

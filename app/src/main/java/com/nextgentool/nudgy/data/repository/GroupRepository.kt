@@ -11,6 +11,7 @@ import com.nextgentool.nudgy.data.local.entity.GroupMemberEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
+import com.nextgentool.nudgy.data.model.TaskStatus
 import com.nextgentool.nudgy.reminders.ReminderManager
 import com.nextgentool.nudgy.work.GroupPollWorker
 import com.google.firebase.firestore.DocumentSnapshot
@@ -315,6 +316,10 @@ class GroupRepository(
         if (reminderSet) payload["reminderEpochMillis"] = ReminderManager.dueReminderTriggerMillis(null, dueDateEpochMillis)
         writeGroupItem(groupId, itemId, payload)
         val now = System.currentTimeMillis()
+        // S1-4g: a new group row appends at the END of its column (TODO)
+        // — a default boardOrder of 0 would collide with the column's
+        // top card and break the dense 0..n-1 invariant.
+        val boardOrder = (taskDao.getMaxBoardOrder(creatorUid, TaskStatus.TODO.name) ?: -1) + 1
         val task = TaskEntity(
             id = itemId,
             userId = creatorUid,
@@ -329,7 +334,8 @@ class GroupRepository(
             isSyncedToCloud = true, // group rows must never enter the personal sync
             createdAtEpochMillis = now,
             updatedAtEpochMillis = now,
-            groupId = groupId
+            groupId = groupId,
+            boardOrder = boardOrder
         )
         taskDao.insertTask(task)
         scheduleGroupTaskAlarm(task)
@@ -796,7 +802,16 @@ class GroupRepository(
             isSyncedToCloud = true,
             createdAtEpochMillis = existing?.createdAtEpochMillis ?: System.currentTimeMillis(),
             updatedAtEpochMillis = System.currentTimeMillis(),
-            groupId = groupId
+            groupId = groupId,
+            // S1-4g: the doc carries no status and no order — both are
+            // LOCAL state. A member's local completion (status DONE) and
+            // local Board order must survive reconciliation, or every
+            // snapshot would flip completed group rows back to TODO and
+            // reset their boardOrder to 0. A row never seen before
+            // appends at the END of TODO.
+            status = existing?.status ?: TaskStatus.TODO,
+            boardOrder = existing?.boardOrder
+                ?: ((taskDao.getMaxBoardOrder(userId, TaskStatus.TODO.name) ?: -1) + 1)
         )
         taskDao.insertTask(task)
         scheduleGroupTaskAlarm(task)

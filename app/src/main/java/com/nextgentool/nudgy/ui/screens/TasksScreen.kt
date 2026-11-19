@@ -323,8 +323,8 @@ fun TasksScreen(
                 item(key = "board") {
                     TaskBoard(
                         items = uiState.items,
-                        onMoveTask = { task, status ->
-                            viewModel.setTaskStatus(task, status)
+                        onMoveTask = { task, status, index, visibleItems ->
+                            viewModel.moveTaskToPosition(task, status, index, visibleItems)
                         },
                         onToggle = { viewModel.toggleTask(it) },
                         onTaskClick = { viewModel.selectTask(it.id) }

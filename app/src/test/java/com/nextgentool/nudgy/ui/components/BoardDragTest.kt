@@ -69,7 +69,7 @@ class BoardDragTest {
             Box(modifier = Modifier.fillMaxSize()) {
                 TaskBoard(
                     items = items,
-                    onMoveTask = { task, status -> moved.add(task to status) },
+                    onMoveTask = { task, status, _, _ -> moved.add(task to status) },
                     onToggle = {},
                     onTaskClick = {}
                 )

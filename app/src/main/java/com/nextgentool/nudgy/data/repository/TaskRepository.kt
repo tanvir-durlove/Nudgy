@@ -3,6 +3,7 @@ package com.nextgentool.nudgy.data.repository
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.room.withTransaction
 import com.nextgentool.nudgy.auth.AuthManager
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.local.entity.ProjectEntity
@@ -92,6 +93,15 @@ class TaskRepository @Inject constructor(
         const val MAX_ATTACHMENTS_PER_TASK: Int = 10
     }
 
+    /**
+     * Sprint 1-4g — one status column's display order: boardOrder ASC,
+     * ties by creation time (defensive — the migration backfills dense
+     * unique values, and every move renumbers, so ties should not
+     * survive; a tie must still order deterministically).
+     */
+    private val boardColumnOrder: Comparator<TaskEntity> =
+        compareBy<TaskEntity> { it.boardOrder }.thenBy { it.createdAtEpochMillis }
+
     /** The user whose data this repository serves (guest when signed out). */
     fun currentUserId(): String =
         AuthManager.getActiveUserId(context).ifBlank { AuthManager.GUEST_USER_ID }
@@ -165,6 +175,15 @@ class TaskRepository @Inject constructor(
         templateId: String? = null,
         estimatedMinutes: Int? = null
     ): TaskEntity = withContext(Dispatchers.IO) {
+        // S1-4g (d1): a new top-level task appends at the END of its
+        // column (every create lands in TODO) — creating must never
+        // shove other cards down. Subtasks keep 0 (no Board presence);
+        // the Board only ever orders top-level tasks.
+        val boardOrder = if (parentTaskId == null) {
+            (taskDao.getMaxBoardOrder(userId, TaskStatus.TODO.name) ?: -1) + 1
+        } else {
+            0
+        }
         val task = TaskEntity(
             id = UUID.randomUUID().toString(),
             userId = userId,
@@ -188,7 +207,8 @@ class TaskRepository @Inject constructor(
             parentTaskId = parentTaskId,
             projectId = projectId,
             templateId = templateId,
-            estimatedMinutes = estimatedMinutes
+            estimatedMinutes = estimatedMinutes,
+            boardOrder = boardOrder
         )
         taskDao.insertTask(task)
         if (task.reminderSet) {
@@ -251,14 +271,46 @@ class TaskRepository @Inject constructor(
             resolvedIsCompleted -> task.completedAtEpochMillis
             else -> null
         }
+        // S1-4g: a completion flipped through an edit is a Board move
+        // too — (c1) completing lands on TOP of Done, un-completing
+        // appends at the END of To do. The seed below only fixes the
+        // moved row's sort key; renumberColumn (in the same transaction)
+        // makes both columns dense again. No transition → the stored
+        // boardOrder is untouched (Plan / carry-over edits must not
+        // reshuffle the Board).
+        val completing = resolvedIsCompleted && existing?.isCompleted == false
+        val uncompleting = !resolvedIsCompleted && existing?.isCompleted == true
+        val resolvedBoardOrder = when {
+            completing -> 0
+            // Un-completing appends at the END of its TARGET column
+            // (usually TODO — but the passed status decides, not an
+            // assumption: the detail sheet can move a DONE task to
+            // IN_PROGRESS too).
+            uncompleting -> (taskDao.getMaxBoardOrder(task.userId, task.status.name) ?: -1) + 1
+            else -> task.boardOrder
+        }
         val resolved = task.copy(
             reminderEpochMillis = resolvedReminder,
             isCompleted = resolvedIsCompleted,
             completedAtEpochMillis = resolvedCompletedAt,
             updatedAtEpochMillis = System.currentTimeMillis(),
-            isSyncedToCloud = if (task.groupId != null) task.isSyncedToCloud else false
+            isSyncedToCloud = if (task.groupId != null) task.isSyncedToCloud else false,
+            boardOrder = resolvedBoardOrder
         )
-        taskDao.updateTask(resolved)
+        database.withTransaction {
+            taskDao.updateTask(resolved)
+            if (completing) {
+                renumberColumn(task.userId, TaskStatus.DONE, firstId = task.id)
+                if (existing != null && existing.status != TaskStatus.DONE) {
+                    renumberColumn(task.userId, existing.status)
+                }
+            } else if (uncompleting) {
+                renumberColumn(task.userId, task.status, lastId = task.id)
+                if (existing != null && existing.status != task.status) {
+                    renumberColumn(task.userId, existing.status)
+                }
+            }
+        }
         if (resolvedReminder != null) {
             if (resolvedReminder > System.currentTimeMillis()) {
                 reminderManager.scheduleReminder(task.id, task.title, resolvedReminder)
@@ -315,28 +367,50 @@ class TaskRepository @Inject constructor(
 
     /** Flip completion — and the status with it (DONE ⇔ isCompleted). */
     suspend fun toggleTaskCompletion(task: TaskEntity) = withContext(Dispatchers.IO) {
+        // The flip decision follows the PASSED entity, as before:
+        // ReminderReceiver deliberately passes a copy with
+        // isCompleted = false to force completion.
         val newCompleted = !task.isCompleted
         val newStatus = if (newCompleted) TaskStatus.DONE else TaskStatus.TODO
-        val completedAt = if (newCompleted) System.currentTimeMillis() else null
-        val now = System.currentTimeMillis()
-        // Group v1: member completion is Room-local ONLY.
-        if (task.groupId != null) {
-            taskDao.setTaskStatusAndCompletionLocal(
-                userId = task.userId,
-                id = task.id,
-                status = newStatus.name,
-                isCompleted = newCompleted,
-                completedAt = completedAt,
-                now = now
-            )
+        val fresh = taskDao.getTaskById(task.id) ?: return@withContext
+        if (fresh.parentTaskId != null) {
+            // Subtasks toggle in place — they have no Board column.
+            val completedAt = if (newCompleted) System.currentTimeMillis() else null
+            val now = System.currentTimeMillis()
+            if (fresh.groupId != null) {
+                taskDao.setTaskStatusAndCompletionLocal(
+                    userId = fresh.userId,
+                    id = fresh.id,
+                    status = newStatus.name,
+                    isCompleted = newCompleted,
+                    completedAt = completedAt,
+                    now = now
+                )
+            } else {
+                taskDao.setTaskStatusAndCompletionForUser(
+                    userId = fresh.userId,
+                    id = fresh.id,
+                    status = newStatus.name,
+                    isCompleted = newCompleted,
+                    completedAt = completedAt,
+                    now = now
+                )
+            }
         } else {
-            taskDao.setTaskStatusAndCompletionForUser(
-                userId = task.userId,
-                id = task.id,
-                status = newStatus.name,
-                isCompleted = newCompleted,
-                completedAt = completedAt,
-                now = now
+            // Top-level: a completion is a Board move — (c1) completing
+            // lands on TOP of Done, un-completing appends at the END of
+            // To do — and both columns stay dense (see applyBoardMove).
+            val allTopLevel = taskDao.getAllTasksOnce(fresh.userId)
+                .filter { it.parentTaskId == null }
+            val targetColumn = allTopLevel.filter { it.status == newStatus }
+                .sortedWith(boardColumnOrder)
+            val fullIndex = if (newCompleted) 0 else targetColumn.size
+            applyBoardMove(
+                task = fresh,
+                targetStatus = newStatus,
+                fullIndex = fullIndex,
+                newPlannedStart = fresh.plannedStartEpochMillis,
+                topLevel = allTopLevel
             )
         }
         if (newCompleted) {
@@ -352,32 +426,211 @@ class TaskRepository @Inject constructor(
 
     /** Set the Board/status column directly (S1-4 drag); completion follows. */
     suspend fun setTaskStatus(task: TaskEntity, status: TaskStatus) = withContext(Dispatchers.IO) {
-        val completed = status == TaskStatus.DONE
-        val completedAt = if (completed) System.currentTimeMillis() else null
-        val now = System.currentTimeMillis()
-        if (task.groupId != null) {
-            taskDao.setTaskStatusAndCompletionLocal(
-                userId = task.userId,
-                id = task.id,
-                status = status.name,
-                isCompleted = completed,
-                completedAt = completedAt,
-                now = now
+        val fresh = taskDao.getTaskById(task.id) ?: return@withContext
+        if (fresh.parentTaskId != null) return@withContext // subtasks have no column
+        if (fresh.status == status) return@withContext // already there — no move, no re-stamp
+        val allTopLevel = taskDao.getAllTasksOnce(fresh.userId)
+            .filter { it.parentTaskId == null }
+        val targetColumn = allTopLevel.filter { it.status == status }
+            .sortedWith(boardColumnOrder)
+        // (c1): completing lands on TOP of Done; any other status change
+        // appends at the END of the target column — a move nobody
+        // positioned must not shove other cards down.
+        val fullIndex = if (status == TaskStatus.DONE) 0 else targetColumn.size
+        val moved = applyBoardMove(
+            task = fresh,
+            targetStatus = status,
+            fullIndex = fullIndex,
+            newPlannedStart = fresh.plannedStartEpochMillis,
+            topLevel = allTopLevel
+        )
+        if (!moved) return@withContext
+        if (status == TaskStatus.DONE) {
+            reminderManager.cancelReminder(fresh.id)
+            maybeCreateNextOccurrence(fresh)
+        }
+    }
+
+    /**
+     * Sprint 1-4g — move a card to a position on a Board (Feature 5 reorder).
+     *
+     * [targetIndex] counts VISIBLE cards in the target column — the Board
+     * the user is looking at (a filtered Tasks Board, or the My Day subset
+     * of planned tasks) — NOT the full column. [visibleItems] are that
+     * column's visible cards in display order, EXCLUDING the dragged card
+     * (the UI counts other cards only — see TaskBoard.boardDropIndex).
+     * The visible index is mapped onto the full status column before
+     * writing, so hidden tasks keep their relative order and one board's
+     * reorder never scrambles the other's (spec §5, decision (e2) note).
+     *
+     * [updatePlannedStart] is true only for the My Day Board (e2). The
+     * My Day display order IS plannedStart order, so honouring a drop
+     * there means re-slotting the day: the dragged card takes a new
+     * plannedStart consistent with its drop position — the midpoint of
+     * its new neighbours (30 min before the first / after the last when
+     * it lands at an end, clamped to that day; its own value when it has
+     * no timed neighbour). Other cards' plannedStart values are never
+     * touched, and no time slot is invented or dropped. The Tasks Board
+     * never touches plannedStart. See resolvePlannedStartForDrop.
+     *
+     * Returns false when the drop is a no-op (same position) — no write.
+     * One Room transaction; the Flow re-emits and the Board follows.
+     */
+    suspend fun moveTaskToPosition(
+        task: TaskEntity,
+        targetStatus: TaskStatus,
+        targetIndex: Int,
+        visibleItems: List<TaskEntity>,
+        updatePlannedStart: Boolean = false
+    ): Boolean = withContext(Dispatchers.IO) {
+        val fresh = taskDao.getTaskById(task.id) ?: return@withContext false
+        if (fresh.parentTaskId != null) return@withContext false // subtasks have no column
+        val allTopLevel = taskDao.getAllTasksOnce(fresh.userId)
+            .filter { it.parentTaskId == null }
+        val targetColumn = allTopLevel.filter { it.status == targetStatus }
+            .sortedWith(boardColumnOrder)
+        val targetWithout = targetColumn.filter { it.id != fresh.id }
+        // The visible list the UI counted may be stale (a background
+        // write landed between render and drop) — keep only rows the
+        // column still has, in the UI's display order.
+        val visibleOthers = visibleItems.filter { v -> targetWithout.any { it.id == v.id } }
+        // Same column, and the dragged card is the ONLY visible card:
+        // its visible position cannot change — no-op, whatever the
+        // full column holds.
+        if (targetStatus == fresh.status && visibleOthers.isEmpty()) return@withContext false
+        // (c1): dropping into an empty VISIBLE Done column completes the
+        // task with no position given, so it goes to the TOP of Done.
+        // Any other empty visible column appends at the full column's end.
+        val fullIndex = if (visibleOthers.isEmpty() && targetStatus == TaskStatus.DONE &&
+            fresh.status != TaskStatus.DONE
+        ) {
+            0
+        } else {
+            mapVisibleIndexToFullIndex(targetWithout, visibleOthers, targetIndex)
+        }
+        val newPlannedStart = if (updatePlannedStart) {
+            resolvePlannedStartForDrop(
+                visiblePlannedStarts = visibleOthers.map { it.plannedStartEpochMillis },
+                targetIndex = targetIndex,
+                fallback = fresh.plannedStartEpochMillis
             )
         } else {
-            taskDao.setTaskStatusAndCompletionForUser(
-                userId = task.userId,
-                id = task.id,
-                status = status.name,
-                isCompleted = completed,
-                completedAt = completedAt,
-                now = now
+            fresh.plannedStartEpochMillis
+        }
+        val moved = applyBoardMove(
+            task = fresh,
+            targetStatus = targetStatus,
+            fullIndex = fullIndex,
+            newPlannedStart = newPlannedStart,
+            topLevel = allTopLevel
+        )
+        if (!moved) return@withContext false
+        if (targetStatus == TaskStatus.DONE && fresh.status != TaskStatus.DONE) {
+            reminderManager.cancelReminder(fresh.id)
+            maybeCreateNextOccurrence(fresh)
+        }
+        true
+    }
+
+    /**
+     * The single Room write for a Board move. [fullIndex] is the position
+     * in the FULL target column, dragged card already removed (see
+     * mapVisibleIndexToFullIndex). Same-column drop at the same index is
+     * a no-op (false, no write). Cross-column moves keep every
+     * setTaskStatus side effect — the caller runs reminder cancel +
+     * recurrence afterwards, exactly as setTaskStatus does today.
+     *
+     * All writes run in ONE transaction (withTransaction), so a move can
+     * never leave two rows sharing a boardOrder. Completing an
+     * already-completed task keeps its ORIGINAL completedAt (the
+     * completion time is when it was first completed, not re-stamped on
+     * every re-drop into Done).
+     */
+    private suspend fun applyBoardMove(
+        task: TaskEntity,
+        targetStatus: TaskStatus,
+        fullIndex: Int,
+        newPlannedStart: Long?,
+        topLevel: List<TaskEntity>
+    ): Boolean {
+        val now = System.currentTimeMillis()
+        val completed = targetStatus == TaskStatus.DONE
+        val completedAt = if (completed) {
+            if (task.isCompleted) task.completedAtEpochMillis else now
+        } else {
+            null
+        }
+        val sourceColumn = topLevel.filter { it.status == task.status }
+            .sortedWith(boardColumnOrder)
+        val targetColumn = if (targetStatus == task.status) sourceColumn
+            else topLevel.filter { it.status == targetStatus }.sortedWith(boardColumnOrder)
+        val sourceWithout = sourceColumn.filter { it.id != task.id }
+        val targetWithout = targetColumn.filter { it.id != task.id }
+        val clampedIndex = fullIndex.coerceIn(0, targetWithout.size)
+        if (targetStatus == task.status) {
+            val currentIndex = sourceColumn.indexOfFirst { it.id == task.id }
+            if (currentIndex == clampedIndex) return false
+        }
+        val newTargetOrder = targetWithout.toMutableList().apply { add(clampedIndex, task) }
+        database.withTransaction {
+            // The moved row: status + completion + position (+ plannedStart).
+            if (task.groupId != null) {
+                taskDao.setStatusCompletionBoardOrderLocal(
+                    userId = task.userId, id = task.id, status = targetStatus.name,
+                    isCompleted = completed, completedAt = completedAt,
+                    boardOrder = clampedIndex, plannedStart = newPlannedStart, now = now
+                )
+            } else {
+                taskDao.setStatusCompletionBoardOrderForUser(
+                    userId = task.userId, id = task.id, status = targetStatus.name,
+                    isCompleted = completed, completedAt = completedAt,
+                    boardOrder = clampedIndex, plannedStart = newPlannedStart, now = now
+                )
+            }
+            // Renumber the target column dense 0..n-1 in the new order.
+            newTargetOrder.forEachIndexed { index, row ->
+                if (row.id != task.id) writeBoardOrder(row, index, now)
+            }
+            // Cross-column: close the gap in the source column too.
+            if (targetStatus != task.status) {
+                sourceWithout.forEachIndexed { index, row -> writeBoardOrder(row, index, now) }
+            }
+        }
+        return true
+    }
+
+    /** One row's position write — group rows are never dirty-marked. */
+    private suspend fun writeBoardOrder(row: TaskEntity, boardOrder: Int, now: Long) {
+        if (row.groupId != null) {
+            taskDao.setBoardOrderLocal(row.userId, row.id, boardOrder, now)
+        } else {
+            taskDao.setBoardOrderForUser(row.userId, row.id, boardOrder, now)
+        }
+    }
+
+    /**
+     * Rewrites one status column dense 0..n-1 from its stored boardOrder
+     * (ties: [firstId] first, [lastId] last, then createdAt ASC). Used
+     * when a completion flips OUTSIDE a Board drop (updateTask), where
+     * the moved row's position is a seed, not a computed index. Call
+     * inside a transaction with the triggering write.
+     */
+    private suspend fun renumberColumn(
+        userId: String,
+        status: TaskStatus,
+        firstId: String? = null,
+        lastId: String? = null
+    ) {
+        val column = taskDao.getAllTasksOnce(userId)
+            .filter { it.parentTaskId == null && it.status == status }
+            .sortedWith(
+                compareBy<TaskEntity> { it.boardOrder }
+                    .thenBy { if (it.id == firstId) 0 else 1 }
+                    .thenBy { if (it.id == lastId) 1 else 0 }
+                    .thenBy { it.createdAtEpochMillis }
             )
-        }
-        if (completed) {
-            reminderManager.cancelReminder(task.id)
-            maybeCreateNextOccurrence(task)
-        }
+        val now = System.currentTimeMillis()
+        column.forEachIndexed { index, row -> writeBoardOrder(row, index, now) }
     }
 
     suspend fun deleteTask(userId: String, taskId: String) = withContext(Dispatchers.IO) {
@@ -802,5 +1055,109 @@ class TaskRepository @Inject constructor(
         val endOfDay = calendar.timeInMillis
 
         return Pair(startOfDay, endOfDay)
+    }
+}
+
+// ------------------------------------------------------------------ S1-4g pure helpers
+//
+// Board reorder, testable without Room: the visible→full index mapping
+// and the My Day plannedStart rule (decision (e2), defined in the PR
+// body before implementing).
+
+/**
+ * Maps a drop index counted among VISIBLE cards onto the FULL status
+ * column (dragged card already removed from [fullColumn]).
+ * [visibleOthers] are the target column's visible cards in display
+ * order, dragged card excluded; [targetIndex] counts among them.
+ *
+ * - No visible cards → append at the full column's end (the user gave
+ *   no position; the (c1) top-of-Done exception lives in the caller).
+ * - targetIndex past the last visible card → just after that card in
+ *   the full column (hidden cards after it stay after it).
+ * - Otherwise → just before the visible card at targetIndex.
+ * A visible card the full column no longer has (stale UI list) falls
+ * back to appending — never a crash, never a wrong-column write.
+ */
+/**
+ * Maps the Board's visible drop index onto the FULL status column.
+ *
+ * [columnWithoutDragged] is the target column in board order with the
+ * dragged card already removed — the returned index is an insertion
+ * position in THAT list (applyBoardMove inserts into the same list).
+ * [visibleOthers] is the UI's visible subset of it, in display order;
+ * [targetIndex] counts how many of those sit above the pointer.
+ * A stale visible id falls back to append; an empty visible list
+ * appends at the column's end.
+ */
+internal fun mapVisibleIndexToFullIndex(
+    columnWithoutDragged: List<TaskEntity>,
+    visibleOthers: List<TaskEntity>,
+    targetIndex: Int
+): Int {
+    if (visibleOthers.isEmpty()) return columnWithoutDragged.size
+    if (targetIndex >= visibleOthers.size) {
+        val lastVisible = visibleOthers.last()
+        val fullPos = columnWithoutDragged.indexOfFirst { it.id == lastVisible.id }
+        return if (fullPos < 0) columnWithoutDragged.size else fullPos + 1
+    }
+    val anchor = visibleOthers[targetIndex.coerceAtLeast(0)]
+    val fullPos = columnWithoutDragged.indexOfFirst { it.id == anchor.id }
+    return if (fullPos < 0) columnWithoutDragged.size else fullPos
+}
+
+/** Local midnight starting the day that holds [millis]. */
+internal fun startOfDayMillis(millis: Long): Long {
+    val calendar = Calendar.getInstance()
+    calendar.timeInMillis = millis
+    calendar.set(Calendar.HOUR_OF_DAY, 0)
+    calendar.set(Calendar.MINUTE, 0)
+    calendar.set(Calendar.SECOND, 0)
+    calendar.set(Calendar.MILLISECOND, 0)
+    return calendar.timeInMillis
+}
+
+/** Local 23:59:59.999 ending the day that holds [millis]. */
+internal fun endOfDayMillis(millis: Long): Long {
+    val calendar = Calendar.getInstance()
+    calendar.timeInMillis = millis
+    calendar.set(Calendar.HOUR_OF_DAY, 23)
+    calendar.set(Calendar.MINUTE, 59)
+    calendar.set(Calendar.SECOND, 59)
+    calendar.set(Calendar.MILLISECOND, 999)
+    return calendar.timeInMillis
+}
+
+/**
+ * My Day (e2) — what a drop does to plannedStart. The My Day display
+ * order IS plannedStart order, so honouring a drop position means
+ * re-slotting the day: the dragged card takes a new plannedStart
+ * consistent with its new position among the target column's visible
+ * planned items ([visiblePlannedStarts], display order, dragged card
+ * excluded; null = that card has no planned time).
+ *
+ * - Between two timed neighbours → their midpoint.
+ * - Above the first timed card → 30 min before it, clamped to that
+ *   day's start (never the previous day).
+ * - Below the last timed card → 30 min after it, clamped to that
+ *   day's end (never the next day).
+ * - No timed neighbour at all → [fallback] (the card's own value —
+ *   the drop cannot place it in time, so nothing changes).
+ * Other cards' plannedStart values are never touched; no time slot is
+ * invented or dropped. A dropped card keeps a valid time on its
+ * planned day, so the Timeline never loses it.
+ */
+internal fun resolvePlannedStartForDrop(
+    visiblePlannedStarts: List<Long?>,
+    targetIndex: Int,
+    fallback: Long?
+): Long? {
+    val clampedIndex = targetIndex.coerceIn(0, visiblePlannedStarts.size)
+    val prev = visiblePlannedStarts.take(clampedIndex).lastOrNull { it != null }
+    val next = visiblePlannedStarts.drop(clampedIndex).firstOrNull { it != null }
+    return when {
+        prev != null && next != null -> (prev + next) / 2
+        next != null -> maxOf(next - 30 * 60 * 1000L, startOfDayMillis(next))
+        prev != null -> minOf(prev + 30 * 60 * 1000L, endOfDayMillis(prev))
+        else -> fallback
     }
 }

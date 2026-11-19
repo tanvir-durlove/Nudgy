@@ -335,15 +335,23 @@ fun TodayScreen(
                 )
             } else if (myDayViewMode == TaskViewMode.BOARD) {
                 // Sprint 1-4 — Board over the SAME My Day items. Dragging
-                // a card changes its status; the detail sheet lives on
-                // the Tasks screen, so a tap here does nothing.
+                // a card reorders the day (S1-4g, decision (e2)): the
+                // drop re-slots its plannedStart, so it lands where it
+                // was dropped; the detail sheet lives on the Tasks
+                // screen, so a tap here does nothing. The Board keeps
+                // the My Day (plannedStart) order — boardOrder is only
+                // written, never displayed here.
                 TaskBoard(
                     items = uiState.myDayItems,
-                    onMoveTask = { task, status ->
-                        tasksViewModel.setTaskStatus(task, status)
+                    onMoveTask = { task, status, index, visibleItems ->
+                        tasksViewModel.moveTaskToPosition(
+                            task, status, index, visibleItems,
+                            updatePlannedStart = true
+                        )
                     },
                     onToggle = { todayViewModel.toggleTask(it) },
-                    onTaskClick = {}
+                    onTaskClick = {},
+                    sortByBoardOrder = false
                 )
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
