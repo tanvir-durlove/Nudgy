@@ -47,8 +47,11 @@ import kotlin.math.abs
  * read semantics during an active drag — the preview position is
  * asserted through TaskBoard's onDragPositionChanged hook (the
  * preview is centered on exactly that value, so it is the same
- * assertion). The auto-scroll tests run last (a/b/c/d/e order) so
- * a hang there cannot hide the safe tests' results.
+ * assertion). The auto-scroll holds are split across two touch
+ * blocks (down+move, then clock advance on the free test thread,
+ * then release) so the auto-scroll loop can tick while the pointer
+ * is held. The tests run last (a/b/c/d/e order) so a hang there
+ * cannot hide the safe tests' results.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -127,7 +130,6 @@ class BoardScrollReproTest {
             up()
         }
         composeRule.runOnIdle {
-            println("S14C-DIAG a moved=$moved")
             assertEquals(
                 listOf(items[2].task to TaskStatus.IN_PROGRESS),
                 moved
@@ -160,7 +162,6 @@ class BoardScrollReproTest {
             assertTrue("expected at least one drag position report, got none", positions.isNotEmpty())
             val first = positions.first()
             val tolerance = px(8)
-            println("S14C-DIAG b rendered-scrolled first=$first finger=$finger dx=${first.x - finger.x} dy=${first.y - finger.y}")
             assertTrue(
                 "drag start position $first should be within $tolerance px " +
                     "of finger $finger (board rendered scrolled)",
@@ -186,8 +187,8 @@ class BoardScrollReproTest {
         )
         composeRule.runOnIdle {}
         // The device sequence: layout first, THEN scroll, then drag.
-        // If the cached card/board positions do not follow the scroll,
-        // the drag start is off by exactly the scroll amount.
+        // If the drag-start position does not follow the scroll, it
+        // is off by exactly the scroll amount.
         runBlocking { boardScroll.scrollTo(px(480).toInt()) }
         composeRule.runOnIdle {}
         val finger = fingerOf("board_card_c")
@@ -201,7 +202,6 @@ class BoardScrollReproTest {
             assertTrue("expected at least one drag position report, got none", positions.isNotEmpty())
             val first = positions.first()
             val tolerance = px(8)
-            println("S14C-DIAG c scrolled-after-layout first=$first finger=$finger dx=${first.x - finger.x} dy=${first.y - finger.y}")
             assertTrue(
                 "drag start position $first should be within $tolerance px " +
                     "of finger $finger (board scrolled after layout)",
@@ -233,13 +233,15 @@ class BoardScrollReproTest {
             down(center)
             advanceEventTime(1000)
             moveBy(Offset(dx, 0f))
-            // Hold at the edge: let the auto-scroll loop tick.
-            composeRule.mainClock.advanceTimeBy(1500)
+        }
+        // Hold at the edge with the pointer still down: let the
+        // auto-scroll loop tick.
+        composeRule.mainClock.advanceTimeBy(1500)
+        composeRule.onNodeWithTag("board_card_a").performTouchInput {
             up()
         }
         val doneAfter = composeRule.onNodeWithTag("board_column_DONE")
             .fetchSemanticsNode().boundsInRoot.left
-        println("S14C-DIAG d doneBefore=$doneBefore doneAfter=$doneAfter delta=${doneBefore - doneAfter} threshold=${px(50)}")
         assertTrue(
             "board should have scrolled right while held at the edge " +
                 "(Done left $doneBefore -> $doneAfter)",
@@ -269,13 +271,15 @@ class BoardScrollReproTest {
             down(center)
             advanceEventTime(1000)
             moveBy(Offset(0f, dy))
-            // Hold at the edge: let the auto-scroll loop tick.
-            composeRule.mainClock.advanceTimeBy(1500)
+        }
+        // Hold at the edge with the pointer still down: let the
+        // auto-scroll loop tick.
+        composeRule.mainClock.advanceTimeBy(1500)
+        composeRule.onNodeWithTag("board_card_t1").performTouchInput {
             up()
         }
         val lastAfter = composeRule.onNodeWithTag("board_card_t12")
             .fetchSemanticsNode().boundsInRoot.top
-        println("S14C-DIAG e lastBefore=$lastBefore lastAfter=$lastAfter delta=${lastBefore - lastAfter} threshold=${px(50)}")
         assertTrue(
             "column should have scrolled down while held at the bottom edge " +
                 "(last card top $lastBefore -> $lastAfter)",
