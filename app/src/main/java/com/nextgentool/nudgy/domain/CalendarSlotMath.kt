@@ -2,6 +2,7 @@ package com.nextgentool.nudgy.domain
 
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import kotlin.math.roundToInt
 
 /**
  * Sprint 2-2 — pure slot math for drag-to-slot (Feature 7 (ঘ), spec §6).
