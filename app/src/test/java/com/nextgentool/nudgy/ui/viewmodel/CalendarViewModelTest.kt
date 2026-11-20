@@ -98,8 +98,11 @@ class CalendarViewModelTest {
             calendarRepository.syncGoogleCalendar(userId)
             val viewModel = CalendarViewModel(calendarRepository, taskRepository, groupRepository)
             viewModel.selectDay(tomorrow)
+            // The suggested slot lands asynchronously (refreshSuggestedSlot
+            // runs in the init collect), so wait for it too — asserting
+            // right after the events emission races it.
             val state = viewModel.uiState.first {
-                !it.isLoading && it.selectedDayMillis == startOfDayMillis(tomorrow) && it.events.size == 1
+                !it.isLoading && it.selectedDayMillis == startOfDayMillis(tomorrow) && it.events.size == 1 && it.suggestedSlot != null
             }
             assertEquals("Design review", state.events.single().title)
             // The suggested slot is the repository's rule (35-min gap),

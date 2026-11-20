@@ -225,7 +225,7 @@ class CalendarSyncDedupTest {
         assertEquals(1, provider.insertAttempts)
         val exported = provider.eventById(100L)
         assertNotNull(exported)
-        assertEquals("[nudgy:local-only]", parseExportMarker(exported!!.description))
+        assertEquals("local-only", parseExportMarker(exported!!.description))
         val row = db.calendarDao().getEventByIdForUser(userId, "local-only")
         assertEquals(100L, row?.googleCalendarEventId)
         assertTrue(row?.isFromGoogleCalendar == true)
