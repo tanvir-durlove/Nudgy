@@ -133,6 +133,17 @@ class CalendarDragTest {
         val scrollPx = (cardCenter0.y - cardTargetY).coerceAtLeast(0f).toInt()
         runBlocking { scrollState.scrollTo(scrollPx) }
         composeRule.runOnIdle { }
+        // Diagnostic (round 8): prove the card is actually where the
+        // scroll was supposed to put it — if it is not, the press
+        // below misses the card and no drag can start.
+        val cardCenterAfter = composeRule.onNodeWithTag("strip_card_t1")
+            .fetchSemanticsNode().boundsInRoot.center
+        val tolerance = with(composeRule.density) { 10.dp.toPx() }
+        assertTrue(
+            "card centre y=${cardCenterAfter.y} should be within $tolerance px of $cardTargetY " +
+                "(was ${cardCenter0.y} before scrolling $scrollPx px, scroll value now ${scrollState.value})",
+            kotlin.math.abs(cardCenterAfter.y - cardTargetY) < tolerance,
+        )
         // Re-measure fresh after the real scroll.
         return composeRule.onNodeWithTag("calendar_grid")
             .fetchSemanticsNode().boundsInRoot.top
