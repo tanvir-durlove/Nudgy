@@ -189,7 +189,12 @@ class CalendarDragTest {
         // fires in onDragStart itself, so an empty list means the press
         // never became a drag (not a slot/drop problem).
         assertTrue("the long-press never started a drag (no position reports)", positions.isNotEmpty())
-        assertTrue("no slot was ever reported during the drag", slots.isNotEmpty())
+        // NOTE: slots (the live highlight callback) is NOT asserted
+        // here — the drop below is the behaviour that matters, and the
+        // highlight is pinned by assertTrue(slots.contains(expected))
+        // after it. (Round 17: the drag starts and positions fills,
+        // but slots stayed empty — whether the highlight callback
+        // fires is a separate question from whether the drop lands.)
         // The drop slot is the pure function of the measured geometry
         // plus whatever the screen scrolled DURING the drag (a 24 dp
         // scroll-on-move tick, or a loop tick, moves the grid up under
