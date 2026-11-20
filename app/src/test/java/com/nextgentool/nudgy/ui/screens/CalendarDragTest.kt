@@ -170,9 +170,13 @@ class CalendarDragTest {
         val scrolledBeforeDrag = scrollState.value
         val hourPx = with(composeRule.density) { 64.dp.toPx() }
         val dayStart = startOfDayMillis(System.currentTimeMillis())
-        // Target 01:30 — the centre of a 15-minute snap bucket, so a few
-        // px of measurement error is absorbed by the snap.
-        val targetY = gridTop + 1.5f * hourPx
+        // Target 03:00 — the centre of a 15-minute snap bucket, so a few
+        // px of measurement error is absorbed by the snap. Round 22
+        // proved the drop lands at 02:00 for a 01:30 target (+30 min /
+        // +32 dp). Targeting 03:00 distinguishes a CONSTANT +32 dp
+        // offset (lands 03:30) from a RATIO error (lands 04:00, x4/3
+        // — a density mismatch between the test and the screen).
+        val targetY = gridTop + 3.0f * hourPx
         // The Board's proven gesture, exactly: down(center), hold past
         // the long-press timeout, one move, release. (Rounds 9–16 used
         // down(pressPos) + stepped moves; the isolation diagnostics
@@ -226,25 +230,11 @@ class CalendarDragTest {
         // wrong slot (the pointer or the slot math is off). The two
         // cases fail on different lines.
         assertTrue("the drag should have dropped the task (drops is empty)", drops.isNotEmpty())
-        // Round 22 oracle: the drop lands at the wrong slot and the
-        // CI log strips values, so identify the ACTUAL slot with a
-        // chain of assertNotEquals — one candidate per line, 00:00 to
-        // 06:00 in 15-minute steps. The FIRST failing line IS the
-        // slot (assertNotEquals fails exactly when the drop equals
-        // that candidate). If every line passes, the slot is past
-        // 06:00 and the assertEquals below fails instead.
+        // Round 23 oracle: with a 03:00 target, a CONSTANT +32 dp
+        // offset lands at 03:30 and a RATIO (x4/3) error lands at
+        // 04:00. One assertNotEquals per candidate; the first failing
+        // line IS the slot.
         val slot = drops[0].second
-        assertNotEquals(dayAt(0, 0), slot)
-        assertNotEquals(dayAt(0, 15), slot)
-        assertNotEquals(dayAt(0, 30), slot)
-        assertNotEquals(dayAt(0, 45), slot)
-        assertNotEquals(dayAt(1, 0), slot)
-        assertNotEquals(dayAt(1, 15), slot)
-        assertNotEquals(dayAt(1, 30), slot)
-        assertNotEquals(dayAt(1, 45), slot)
-        assertNotEquals(dayAt(2, 0), slot)
-        assertNotEquals(dayAt(2, 15), slot)
-        assertNotEquals(dayAt(2, 30), slot)
         assertNotEquals(dayAt(2, 45), slot)
         assertNotEquals(dayAt(3, 0), slot)
         assertNotEquals(dayAt(3, 15), slot)
@@ -252,13 +242,6 @@ class CalendarDragTest {
         assertNotEquals(dayAt(3, 45), slot)
         assertNotEquals(dayAt(4, 0), slot)
         assertNotEquals(dayAt(4, 15), slot)
-        assertNotEquals(dayAt(4, 30), slot)
-        assertNotEquals(dayAt(4, 45), slot)
-        assertNotEquals(dayAt(5, 0), slot)
-        assertNotEquals(dayAt(5, 15), slot)
-        assertNotEquals(dayAt(5, 30), slot)
-        assertNotEquals(dayAt(5, 45), slot)
-        assertNotEquals(dayAt(6, 0), slot)
         assertEquals(listOf(t1 to expected), drops)
         // The highlight (slots) is NOT asserted here — round 17 showed
         // it stays empty while the drag otherwise works, which is a
