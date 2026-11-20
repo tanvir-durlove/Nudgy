@@ -180,7 +180,11 @@ class CalendarDragTest {
         composeRule.onNodeWithTag("strip_card_t1").performTouchInput {
             down(center)
             advanceEventTime(1000)
-            moveBy(Offset(0f, targetY - center.y))
+            // The delta uses the PRE-MEASURED card centre (cardCenter),
+            // not the live `center` re-evaluated here: if the card
+            // shifts when the drag starts (preview appears, card dims),
+            // the live centre moves and the pointer ends off-target.
+            moveBy(Offset(0f, targetY - cardCenter.y))
             up()
         }
         composeRule.runOnIdle { }
