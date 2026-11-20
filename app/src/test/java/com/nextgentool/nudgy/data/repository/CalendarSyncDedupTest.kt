@@ -86,6 +86,38 @@ class CalendarSyncDedupTest {
         assertTrue(message, condition())
     }
 
+    // ------------------------------------------------------------ diagnostics
+    // Round-7 CI: the same 10 sync tests failed even with the gateway
+    // fake (no ContentResolver anywhere). The only early exit before
+    // the gateway is the READ_CALENDAR permission check, so these two
+    // pinpoint whether Robolectric grants it or the sync path itself
+    // drops the rows. Temporary — removed once the cause is proven.
+
+    @Test
+    fun `diagnostic calendar permissions are granted in Robolectric`() {
+        assertEquals(
+            android.content.pm.PackageManager.PERMISSION_GRANTED,
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.READ_CALENDAR
+            )
+        )
+        assertEquals(
+            android.content.pm.PackageManager.PERMISSION_GRANTED,
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.WRITE_CALENDAR
+            )
+        )
+    }
+
+    @Test
+    fun `diagnostic sync returns the imported count`() = runTest {
+        val start = tomorrowAt(10)
+        provider.addEvent(
+            FakeGoogleEvent(id = 42L, title = "Design review", start = start, end = start + 60 * 60 * 1000L)
+        )
+        assertEquals(1, repository.syncGoogleCalendar(userId))
+    }
+
     // ------------------------------------------------------------ pure helpers
 
     @Test
