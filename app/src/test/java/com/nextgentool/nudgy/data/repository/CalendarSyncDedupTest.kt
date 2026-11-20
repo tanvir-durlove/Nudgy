@@ -18,7 +18,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import org.robolectric.shadows.ShadowContentResolver
 import java.util.Calendar
 
 /**
@@ -50,8 +49,19 @@ class CalendarSyncDedupTest {
         db = Room.inMemoryDatabaseBuilder(context, NudgyDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        provider = FakeCalendarProvider()
-        ShadowContentResolver.registerProviderInternal("com.android.calendar", provider)
+        // The documented registration: Robolectric.buildContentProvider.
+        // ShadowContentResolver.registerProviderInternal is marked
+        // "internal-only, do not use" — and round 5 proved it does not
+        // stick: a direct query returned null even though setUp called
+        // it. buildContentProvider attaches the provider (attachInfo)
+        // and registers it through the supported path.
+        val info = android.content.pm.ProviderInfo().apply {
+            authority = "com.android.calendar"
+        }
+        provider = org.robolectric.Robolectric
+            .buildContentProvider(FakeCalendarProvider::class.java)
+            .create(info)
+            .get()
         fakeSync = FakeCalendarEventSync()
         repository = CalendarRepository(context, db, fakeSync)
         taskRepository = TaskRepository(context, db)

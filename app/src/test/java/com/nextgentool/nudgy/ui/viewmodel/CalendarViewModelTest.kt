@@ -27,7 +27,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import org.robolectric.shadows.ShadowContentResolver
 import java.util.Calendar
 
 /**
@@ -56,8 +55,15 @@ class CalendarViewModelTest {
         db = Room.inMemoryDatabaseBuilder(context, NudgyDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        provider = FakeCalendarProvider()
-        ShadowContentResolver.registerProviderInternal("com.android.calendar", provider)
+        // The documented registration (see CalendarSyncDedupTest):
+        // registerProviderInternal does not stick in this setup.
+        val info = android.content.pm.ProviderInfo().apply {
+            authority = "com.android.calendar"
+        }
+        provider = org.robolectric.Robolectric
+            .buildContentProvider(FakeCalendarProvider::class.java)
+            .create(info)
+            .get()
         calendarRepository = CalendarRepository(context, db, FakeCalendarEventSync())
         taskRepository = TaskRepository(context, db)
         groupRepository = GroupRepository(context, db)
