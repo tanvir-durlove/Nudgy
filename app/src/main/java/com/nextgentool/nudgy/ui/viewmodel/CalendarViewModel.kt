@@ -66,27 +66,41 @@ class CalendarViewModel @Inject constructor(
     private val errorMessage = MutableStateFlow<String?>(null)
     private val suggestedSlot = MutableStateFlow<FocusTimeSlot?>(null)
 
-    val uiState: StateFlow<CalendarUiState> = combine(
+    // The day's events, switching flow whenever the selected day
+    // changes. Kept out of the combine below so its arguments stay
+    // plain flows (the TasksViewModel nesting pattern).
+    private val dayEvents: kotlinx.coroutines.flow.Flow<List<CalendarEventEntity>> =
         selectedDay.flatMapLatest { day ->
             calendarRepository.observeEventsForDay(userId, day)
+        }
+
+    // NOTE: a single 6-flow combine does NOT resolve in this codebase
+    // (the compiler falls back to the vararg overload — proven by two
+    // failed CI rounds on this file). Nested combines, exactly like
+    // TasksViewModel: an inner 5-flow combine builds the state, an
+    // outer 2-flow combine fills in the suggested slot.
+    val uiState: StateFlow<CalendarUiState> = combine(
+        combine(
+            dayEvents,
+            groupRepository.observeGroups(),
+            selectedDay,
+            isSyncing,
+            errorMessage
+        ) { events: List<CalendarEventEntity>, groups: List<GroupEntity>, day: Long, syncing: Boolean, error: String? ->
+            CalendarUiState(
+                isLoading = false,
+                events = events,
+                suggestedSlot = null,
+                isCalendarConnected = calendarRepository.hasCalendarPermissions(),
+                isSyncing = syncing,
+                errorMessage = error,
+                selectedDayMillis = day,
+                groupNames = groups.associate { it.groupId to it.name }
+            )
         },
-        groupRepository.observeGroups(),
-        selectedDay,
-        isSyncing,
-        errorMessage,
         suggestedSlot
-    ) { events: List<CalendarEventEntity>, groups: List<GroupEntity>, day: Long, syncing: Boolean, error: String?, slot: FocusTimeSlot? ->
-        CalendarUiState(
-            isLoading = false,
-            events = events,
-            suggestedSlot = slot,
-            isCalendarConnected = calendarRepository.hasCalendarPermissions(),
-            isSyncing = syncing,
-            errorMessage = error,
-            selectedDayMillis = day,
-            groupNames = groups.associate { it.groupId to it.name }
-        )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CalendarUiState())
+    ) { state, slot -> state.copy(suggestedSlot = slot) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CalendarUiState())
 
     init {
         // Recompute the suggested slot whenever the selected day, the
