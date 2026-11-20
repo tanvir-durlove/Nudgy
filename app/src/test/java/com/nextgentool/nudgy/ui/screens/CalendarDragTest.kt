@@ -5,10 +5,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
@@ -29,20 +29,21 @@ import java.util.Calendar
  * Sprint 2-2 — gesture tests for drag-to-slot (CalendarScreen + CalendarDrag).
  *
  * The harness mirrors BoardDragTest (same long-press + moveBy pattern,
- * default real clock, `down(center)` + `advanceEventTime(1000)`).
+ * default real clock, `down(position)` + `advanceEventTime(1000)`).
  * The exact y→slot mapping is pinned by the pure CalendarSlotMathTest;
  * these tests pin the wiring: the strip card drags, the slot under the
  * finger is reported, the drop hands the task + the slot the geometry
  * predicts, and a release outside the grid drops nothing.
  *
  * The expected slot is computed from MEASURED geometry (the grid's
- * boundsInRoot top, the card's center, the screen scroll value after
- * the gesture) through the same pure slotStartForY — so the test stays
- * deterministic whatever the test viewport height is: if the drag
- * scrolled the screen (one 24 dp tick from scroll-on-move, or a loop
- * tick), the scroll is inside the expectation instead of breaking it.
- * Never read semantics mid-gesture (it hangs the test worker); the
- * live slot is read from the onDragSlotChanged callback.
+ * boundsInRoot top from the fresh first layout, the card's centre, the
+ * screen scroll value after the gesture) through the same pure
+ * slotStartForY — so the test stays deterministic whatever the test
+ * viewport height is: if the drag scrolled the screen (one 24 dp tick
+ * from scroll-on-move, or a loop tick), the scroll is inside the
+ * expectation instead of breaking it. Never read semantics mid-gesture
+ * (it hangs the test worker); the live slot is read from the
+ * onDragSlotChanged callback.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -105,6 +106,41 @@ class CalendarDragTest {
         }
     }
 
+    /**
+     * Brings the strip card into view for a drag — WITHOUT performScrollTo.
+     *
+     * Round 3 proved performScrollTo + boundsInRoot cannot be trusted
+     * here: the strip card sits inside a horizontalScroll Row, and
+     * after the programmatic scroll the semantics bounds are stale
+     * (the S1-4c lesson) — down(center) then presses the card's OLD
+     * position and the drag never starts (both drag tests failed while
+     * every non-drag test passed). Instead: measure the card + grid
+     * ONCE from the fresh first layout, scroll synchronously with
+     * dispatchRawDelta (the same call the auto-scroll tick uses), and
+     * press with an EXPLICIT position computed from the fresh
+     * measurement + the known scroll — never a re-read of the stale
+     * bounds.
+     *
+     * Returns the card's centre (viewport px, after the scroll) and the
+     * grid's top (viewport px, BEFORE the scroll — the expected-slot
+     * formula adds the final scroll value back).
+     */
+    private fun prepareDrag(scrollState: ScrollState): Pair<Offset, Float> {
+        val cardCenter0 = composeRule.onNodeWithTag("strip_card_t1")
+            .fetchSemanticsNode().boundsInRoot.center
+        val gridTop0 = composeRule.onNodeWithTag("calendar_grid")
+            .fetchSemanticsNode().boundsInRoot.top
+        // Park the card ~150 dp from the top: the grid below it is then
+        // well inside the viewport, and the 01:30 target stays out of
+        // the bottom edge zone.
+        val cardTargetY = with(composeRule.density) { 150.dp.toPx() }
+        val scrollPx = (cardCenter0.y - cardTargetY).coerceAtLeast(0f)
+        scrollState.dispatchRawDelta(scrollPx)
+        composeRule.runOnIdle { }
+        val cardCenter = Offset(cardCenter0.x, cardCenter0.y - scrollState.value)
+        return cardCenter to gridTop0
+    }
+
     @Test
     fun `long-press drag from the strip drops at the measured slot`() {
         val t1 = task("t1", dayAt(15))
@@ -117,23 +153,19 @@ class CalendarDragTest {
             onDragSlotChanged = { slots.add(it) },
             screenScrollState = scrollState,
         )
-        // The strip sits below the fold in the test viewport; scroll it
-        // into view first (the proven CalendarScreenTest pattern).
-        composeRule.onNodeWithTag("strip_card_t1").performScrollTo()
         composeRule.runOnIdle { }
+        val (cardCenter, gridTop0) = prepareDrag(scrollState)
         val hourPx = with(composeRule.density) { 64.dp.toPx() }
         val dayStart = startOfDayMillis(System.currentTimeMillis())
-        val gridTop = composeRule.onNodeWithTag("calendar_grid")
-            .fetchSemanticsNode().boundsInRoot.top
-        val cardCenter = composeRule.onNodeWithTag("strip_card_t1")
-            .fetchSemanticsNode().boundsInRoot.center
         // Target 01:30 — the centre of a 15-minute snap bucket, so a few
-        // px of measurement error is absorbed by the snap.
+        // px of measurement error is absorbed by the snap. The grid top
+        // after the prepare scroll is gridTop0 minus what was scrolled.
+        val gridTop = gridTop0 - scrollState.value
         val targetY = gridTop + 1.5f * hourPx
         val delta = Offset(0f, targetY - cardCenter.y)
 
         composeRule.onNodeWithTag("strip_card_t1").performTouchInput {
-            down(center)
+            down(cardCenter)
             advanceEventTime(1000)
             moveBy(delta)
             up()
@@ -145,7 +177,7 @@ class CalendarDragTest {
         // scroll-on-move tick, or a loop tick, moves the grid up under
         // the finger by exactly that many px).
         val expected = slotStartForY(
-            targetY - gridTop + scrollState.value,
+            targetY - gridTop0 + scrollState.value,
             hourPx,
             dayStart,
         )
@@ -161,15 +193,17 @@ class CalendarDragTest {
     fun `drag released above the grid drops nothing`() {
         val t1 = task("t1", dayAt(15))
         val drops = mutableListOf<Pair<TaskEntity, Long>>()
+        val scrollState = ScrollState(0)
         setContent(
             strip = listOf(t1),
             onDropTask = { task, slot -> drops.add(task to slot) },
+            screenScrollState = scrollState,
         )
-        composeRule.onNodeWithTag("strip_card_t1").performScrollTo()
         composeRule.runOnIdle { }
+        val (cardCenter, _) = prepareDrag(scrollState)
 
         composeRule.onNodeWithTag("strip_card_t1").performTouchInput {
-            down(center)
+            down(cardCenter)
             advanceEventTime(1000)
             moveBy(Offset(0f, -600f))
             up()
@@ -188,12 +222,12 @@ class CalendarDragTest {
             onDropTask = { _, _ -> },
             screenScrollState = scrollState,
         )
-        composeRule.onNodeWithTag("strip_card_t1").performScrollTo()
         composeRule.runOnIdle { }
+        val (cardCenter, _) = prepareDrag(scrollState)
         val scrolledBefore = scrollState.value
 
         composeRule.onNodeWithTag("strip_card_t1").performTouchInput {
-            down(center)
+            down(cardCenter)
             advanceEventTime(1000)
             moveBy(Offset(0f, 600f))
             up()

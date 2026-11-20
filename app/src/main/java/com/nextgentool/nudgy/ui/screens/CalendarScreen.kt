@@ -667,6 +667,10 @@ fun CalendarScreen(
                             Surface(
                                 modifier = Modifier
                                     .weight(1f)
+                                    // Sprint 2-2: the grid renders the same
+                                    // event title as a block, so the schedule
+                                    // row needs its own tag for tests.
+                                    .testTag("schedule_event_${event.id}")
                                     .then(
                                         // Sprint 2-1 (Q8(a)): tap a personal
                                         // event to edit it. Group rows are
