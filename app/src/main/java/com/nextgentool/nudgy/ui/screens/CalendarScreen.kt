@@ -1,5 +1,6 @@
 package com.nextgentool.nudgy.ui.screens
 
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -47,18 +49,34 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
+import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.repository.FocusTimeSlot
+import com.nextgentool.nudgy.domain.PendingDropConflict
+import com.nextgentool.nudgy.domain.slotBlockMinutes
+import com.nextgentool.nudgy.domain.slotStartForY
+import com.nextgentool.nudgy.domain.startOfDayMillis
+import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 import com.nextgentool.nudgy.ui.theme.NudgyAccent
 import com.nextgentool.nudgy.ui.theme.NudgyCard
 import com.nextgentool.nudgy.ui.theme.NudgyCardBorder
@@ -103,6 +121,27 @@ fun CalendarScreen(
     onDeleteEvent: (eventId: String) -> Unit = {},
     onSelectDay: (Long) -> Unit = {},
     groupNames: Map<String, String> = emptyMap(),
+    // Sprint 2-2 — drag-to-slot: the strip (Q4(b)) and the blocks already
+    // on the selected day's grid come from the ViewModel; a drop hands
+    // the task + slot start back (the ViewModel writes plannedStart /
+    // plannedDate and owns the busy-slot warn, Q3(a)).
+    stripTasks: List<TaskEntity> = emptyList(),
+    placedTasks: List<TaskEntity> = emptyList(),
+    pendingConflict: PendingDropConflict? = null,
+    onDropTask: (task: TaskEntity, slotStartMillis: Long) -> Unit = { _, _ -> },
+    onAcceptSuggestedSlot: () -> Unit = {},
+    onDismissConflict: () -> Unit = {},
+    // Test observability (S2-2, the Board's S1-4c seams): the live drag
+    // pointer (screen-viewport px) and the live slot under it, reported
+    // synchronously from the gesture callbacks — asserting them asserts
+    // the preview position and the highlight without reading semantics
+    // mid-gesture (which hangs the test worker). Null in production.
+    onDragPositionChanged: ((Offset) -> Unit)? = null,
+    onDragSlotChanged: ((Long?) -> Unit)? = null,
+    // Test seam (S2-2, like the Board's boardScrollState): an
+    // externally owned screen scroll state, so a test can assert the
+    // drag auto-scroll moved the screen. Null/default in production.
+    screenScrollState: ScrollState? = null,
     modifier: Modifier = Modifier
 ) {
     var showAddEventDialog by remember { mutableStateOf(false) }
@@ -159,6 +198,104 @@ fun CalendarScreen(
         monthFormatter.format(cal.time).uppercase()
     }
 
+    // Sprint 2-2 — the selected day's midnight (the grid starts here).
+    val dayStartMillis = remember(selectedDayMillis) { startOfDayMillis(selectedDayMillis) }
+
+    // Sprint 2-2 — week-nav fix: tapping the prev/next-week chevron
+    // changes the displayed day (daysList recomputes) but never called
+    // onSelectDay, so the ViewModel kept the old day and the strip /
+    // grid / events showed the wrong day. Sync it whenever the
+    // displayed day changes; the tap path calls it too (harmless).
+    LaunchedEffect(selectedDayMillis) { onSelectDay(selectedDayMillis) }
+
+    // Sprint 2-2 — drag-to-slot state machine (the Board's S1-4b
+    // pattern: manual long-press drag + floating preview + live slot
+    // highlight + auto-scroll, never platform DnD). The screen owns
+    // the drag; the strip cards only report gesture events.
+    val density = LocalDensity.current
+    val hourHeightPx = with(density) { CALENDAR_HOUR_HEIGHT.toPx() }
+    val edgePx = with(density) { 56.dp.toPx() }
+    val scrollStepPx = with(density) { 24.dp.toPx() }
+    val previewHalfWidthPx = with(density) { 100.dp.toPx() }
+    val previewWidthPx = with(density) { 200.dp.toPx() }
+    val previewYOffsetPx = with(density) { 28.dp.toPx() }
+
+    val screenScroll = screenScrollState ?: rememberScrollState()
+    var viewportSize by remember { mutableStateOf(IntSize.Zero) }
+    var boxCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var gridCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val dragState = remember { mutableStateOf<CalendarDrag?>(null) }
+    val drag = dragState.value
+    val boxCoordsState = rememberUpdatedState(boxCoords)
+    val gridCoordsState = rememberUpdatedState(gridCoords)
+
+    // The slot under a pointer in screen-viewport coordinates, from
+    // the grid's LIVE coordinates (evaluated fresh — the grid moves
+    // under a dwelling pointer while the screen auto-scrolls). Null
+    // when the pointer is outside the grid (above it, in the strip, or
+    // below it) — no highlight, and a release there drops nothing.
+    // The strip card and the grid both sit inside the screen's
+    // vertical scroll, so the scroll offset cancels in the
+    // localToRoot subtraction (the Board's X case, S1-4c): the
+    // difference IS the pointer's position in grid coordinates, and
+    // no further scroll correction is needed — the grid does not
+    // scroll internally.
+    val computeSlot: (Offset) -> Long? = { pointer ->
+        val grid = gridCoordsState.value
+        val box = boxCoordsState.value
+        if (grid == null || box == null) {
+            null
+        } else {
+            val gridViewportTop =
+                grid.localToRoot(Offset.Zero).y - box.localToRoot(Offset.Zero).y
+            val gridHeightPx = 24f * hourHeightPx
+            val gridLocalY = pointer.y - gridViewportTop
+            if (gridLocalY < 0f || gridLocalY > gridHeightPx) null
+            else slotStartForY(gridLocalY, hourHeightPx, dayStartMillis)
+        }
+    }
+    val computeSlotState = rememberUpdatedState(computeSlot)
+
+    // Scroll-on-move (S1-4d pattern): the delay loop is the only scroll
+    // mechanism that fires while the pointer dwells, but it cannot be
+    // driven in a test — so the drag also scrolls synchronously on
+    // movement, throttled to the loop's 32ms cadence by event time.
+    // Throttle state is a nullable Long, NOT Long.MIN_VALUE (the first
+    // subtraction overflows negative and would never fire — S1-4d).
+    val lastMoveScrollUptime = remember { mutableStateOf<Long?>(null) }
+    val requestMoveScroll: (Offset, Long) -> Unit = { pointer, eventTimeMillis ->
+        val last = lastMoveScrollUptime.value
+        if (last == null || eventTimeMillis - last >= 32) {
+            lastMoveScrollUptime.value = eventTimeMillis
+            calendarAutoScrollTick(pointer, viewportSize, screenScroll, edgePx, scrollStepPx)
+        }
+    }
+    val requestMoveScrollState = rememberUpdatedState(requestMoveScroll)
+
+    // Auto-scroll while dragging (S1-4c/d pattern): the pointer can sit
+    // still at an edge waiting for the screen to come to it, so this is
+    // a loop, not only a per-move scroll. The slot is recomputed on
+    // every tick from the live grid coordinates, so the highlight (and
+    // the eventual drop) stays live even when the finger does not move.
+    // Robolectric cannot tick this loop's delay during a held gesture
+    // (proven by three harness approaches for the Board) — the loop is
+    // verified end-to-end on device; the tick itself is pure-tested.
+    LaunchedEffect(drag?.taskId) {
+        if (drag == null) return@LaunchedEffect
+        while (true) {
+            val current = dragState.value ?: break
+            calendarAutoScrollTick(
+                current.pointerViewport, viewportSize, screenScroll, edgePx, scrollStepPx
+            )
+            val slot = computeSlotState.value(current.pointerViewport)
+            if (slot != current.slotStartMillis) {
+                dragState.value = current.copy(slotStartMillis = slot)
+                onDragSlotChanged?.invoke(slot)
+            }
+            delay(32)
+        }
+    }
+
     val displayEvents = remember(events, selectedDayMillis) {
         val (startOfDay, endOfDay) = run {
             val cal = Calendar.getInstance().apply { timeInMillis = selectedDayMillis }
@@ -199,10 +336,22 @@ fun CalendarScreen(
         }
     }
 
-    Column(
+    // Sprint 2-2 — the outer Box is the viewport: its size (measured
+    // here, outside the scroll) is what the auto-scroll edge zones
+    // compare against, and its coordinates anchor the drag pointer.
+    // Measuring the scrolling Column instead would report the CONTENT
+    // height and put the bottom edge zone out of reach (the Board's
+    // S1-4d boardSize lesson).
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .onSizeChanged { viewportSize = it }
+            .onGloballyPositioned { boxCoords = it }
+    ) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(screenScroll)
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
@@ -686,6 +835,128 @@ fun CalendarScreen(
 
         // (No bottom clearance spacer: the floating mascot button is gone;
         // Scaffold innerPadding + navigationBarsPadding handle the nav bar.)
+
+        // Sprint 2-2 — drag-to-slot: the strip above the day grid.
+        CalendarTaskStrip(
+            tasks = stripTasks,
+            draggingTaskId = drag?.taskId,
+            onDragStart = { task, offsetInCard, cardCoords ->
+                // Pointer in screen-viewport coordinates, evaluated
+                // fresh from the live coordinates (the Board's S1-4c
+                // fix: never a cached Offset).
+                val card = cardCoords
+                val box = boxCoordsState.value
+                val startViewport = if (card != null && box != null) {
+                    card.localToRoot(offsetInCard) - box.localToRoot(Offset.Zero)
+                } else {
+                    offsetInCard
+                }
+                val slot = computeSlotState.value(startViewport)
+                dragState.value = CalendarDrag(
+                    task.id, startViewport, slot, slotBlockMinutes(task)
+                )
+                onDragPositionChanged?.invoke(startViewport)
+                onDragSlotChanged?.invoke(slot)
+            },
+            onDragMove = { dragAmount, uptimeMillis ->
+                val current = dragState.value
+                if (current != null) {
+                    val pointer = current.pointerViewport + dragAmount
+                    val slot = computeSlotState.value(pointer)
+                    dragState.value = current.copy(pointerViewport = pointer, slotStartMillis = slot)
+                    onDragPositionChanged?.invoke(pointer)
+                    onDragSlotChanged?.invoke(slot)
+                    requestMoveScrollState.value(pointer, uptimeMillis)
+                }
+            },
+            onDragEnd = { task ->
+                val info = dragState.value
+                dragState.value = null
+                if (info != null && info.taskId == task.id) {
+                    // Recompute the slot from the FINAL pointer and the
+                    // LIVE grid coordinates — the screen may have
+                    // auto-scrolled under a dwelling pointer since the
+                    // last move (the Board's S1-4g onDragEnd rule).
+                    val slot = computeSlotState.value(info.pointerViewport)
+                    if (slot != null) onDropTask(task, slot)
+                }
+            },
+            onDragCancel = { task ->
+                if (dragState.value?.taskId == task.id) dragState.value = null
+            }
+        )
+
+        // Sprint 2-2 — the day time-grid.
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.large,
+            color = NudgyCard,
+            border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = "TIME GRID",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = NudgyAccent
+                )
+                Text(
+                    text = "Your day, hour by hour",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    color = NudgyCharcoal
+                )
+                CalendarHourGrid(
+                    dayStartMillis = dayStartMillis,
+                    events = displayEvents,
+                    placedTasks = placedTasks,
+                    highlight = if (drag?.slotStartMillis != null) {
+                        drag.slotStartMillis to drag.durationMinutes
+                    } else {
+                        null
+                    },
+                    modifier = Modifier.onGloballyPositioned { gridCoords = it }
+                )
+            }
+        }
+    }
+    // Floating preview under the finger while dragging (the Board's
+    // pattern): centred on the pointer, clamped inside the viewport.
+    val draggedTask = drag?.let { d -> stripTasks.firstOrNull { it.id == d.taskId } }
+    if (drag != null && draggedTask != null) {
+        Surface(
+            modifier = Modifier
+                .offset {
+                    val x = (drag.pointerViewport.x - previewHalfWidthPx).roundToInt()
+                        .coerceIn(0, (viewportSize.width - previewWidthPx).roundToInt().coerceAtLeast(0))
+                    val y = (drag.pointerViewport.y - previewYOffsetPx).roundToInt().coerceAtLeast(0)
+                    IntOffset(x, y)
+                }
+                .width(200.dp)
+                .testTag("calendar_drag_preview"),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 6.dp
+        ) {
+            Text(
+                text = draggedTask.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = NudgyCharcoal,
+                maxLines = 2,
+                modifier = Modifier.padding(12.dp)
+            )
+        }
+    }
+    }
+
+    // Sprint 2-2 — the busy-slot dialog (Q3(a)).
+    if (pendingConflict != null) {
+        CalendarBusySlotDialog(
+            pending = pendingConflict,
+            onAccept = onAcceptSuggestedSlot,
+            onDismiss = onDismissConflict
+        )
     }
 
         // Delete confirmation: one tap used to delete instantly — and for a
