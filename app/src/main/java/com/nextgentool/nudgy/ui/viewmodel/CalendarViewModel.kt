@@ -3,6 +3,7 @@ package com.nextgentool.nudgy.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
+import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.data.repository.FocusTimeSlot
@@ -74,7 +75,7 @@ class CalendarViewModel @Inject constructor(
         isSyncing,
         errorMessage,
         suggestedSlot
-    ) { events, groups, day, syncing, error, slot ->
+    ) { events: List<CalendarEventEntity>, groups: List<GroupEntity>, day: Long, syncing: Boolean, error: String?, slot: FocusTimeSlot? ->
         CalendarUiState(
             isLoading = false,
             events = events,
