@@ -236,4 +236,118 @@ class ShareIntentViewModelTest {
         assertNull(vm.pendingShare.value)
         assertTrue(taskRepository.observeAllTasks("test-user-1").first().isEmpty())
     }
+
+    // -------------------------------------- Sprint 2-4: date link / insert
+
+    private fun dateLinkIntent(
+        date: String = "2026-11-20",
+        time: String? = "15:00",
+        title: String? = "Doctor"
+    ): Intent = Intent(Intent.ACTION_VIEW).apply {
+        val query = listOfNotNull(
+            "d=$date",
+            time?.let { "t=$it" },
+            title?.let { "title=$it" }
+        ).joinToString("&")
+        data = android.net.Uri.parse("https://tanvir-durlove.github.io/nudgy/date?$query")
+    }
+
+    private fun insertEventIntent(
+        title: String? = "Design review",
+        begin: Long? = 1_764_000_000_000L,
+        end: Long? = 1_764_003_600_000L
+    ): Intent = Intent(Intent.ACTION_INSERT).apply {
+        setDataAndType(
+            android.provider.CalendarContract.Events.CONTENT_URI,
+            "vnd.android.cursor.dir/event"
+        )
+        title?.let { putExtra(android.provider.CalendarContract.Events.TITLE, it) }
+        begin?.let { putExtra(android.provider.CalendarContract.EXTRA_EVENT_BEGIN_TIME, it) }
+        end?.let { putExtra(android.provider.CalendarContract.EXTRA_EVENT_END_TIME, it) }
+    }
+
+    @Test
+    fun `handleIntent with a date link sets pendingDateLink`() = runTest {
+        val vm = viewModel()
+        assertTrue(vm.handleIntent(dateLinkIntent()))
+        val pending = vm.pendingDateLink.value
+        assertEquals("2026-11-20", pending?.date)
+        assertEquals("15:00", pending?.time)
+        assertEquals("Doctor", pending?.title)
+        // The share lane is untouched by a link.
+        assertNull(vm.pendingShare.value)
+    }
+
+    @Test
+    fun `double date link opens one jump - the second is consumed, not queued`() = runTest {
+        val vm = viewModel()
+        val intent = dateLinkIntent()
+        assertTrue(vm.handleIntent(intent))
+        assertFalse(vm.handleIntent(intent))
+        assertEquals("2026-11-20", vm.pendingDateLink.value?.date)
+    }
+
+    @Test
+    fun `consumeDateLink clears pending and a new link is accepted after`() = runTest {
+        val vm = viewModel()
+        assertTrue(vm.handleIntent(dateLinkIntent()))
+        vm.consumeDateLink()
+        assertNull(vm.pendingDateLink.value)
+        assertTrue(vm.handleIntent(dateLinkIntent(date = "2026-11-21", time = null, title = null)))
+        assertEquals("2026-11-21", vm.pendingDateLink.value?.date)
+        assertNull(vm.pendingDateLink.value?.time)
+    }
+
+    @Test
+    fun `a restored SavedStateHandle blocks re-parsing the same date link`() = runTest {
+        val link = IncomingIntent.DateLink("2026-11-20", "15:00", "Doctor")
+        val vm1 = viewModel()
+        assertTrue(vm1.handleIntent(dateLinkIntent()))
+        // Simulate a process-death restore: a fresh ViewModel whose
+        // SavedStateHandle already carries the consumed key.
+        val restored = SavedStateHandle(
+            initialState = mapOf(
+                ShareIntentViewModel.KEY_CONSUMED_DATE_LINK to
+                    ShareIntentViewModel.dateLinkKey(link)
+            )
+        )
+        val vm2 = viewModel(restored)
+        assertFalse(vm2.handleIntent(dateLinkIntent()))
+        assertNull(vm2.pendingDateLink.value)
+    }
+
+    @Test
+    fun `handleIntent with ACTION_INSERT sets pendingInsertEvent`() = runTest {
+        val vm = viewModel()
+        assertTrue(vm.handleIntent(insertEventIntent()))
+        val pending = vm.pendingInsertEvent.value
+        assertEquals("Design review", pending?.title)
+        assertEquals(1_764_000_000_000L, pending?.beginMillis)
+        assertEquals(1_764_003_600_000L, pending?.endMillis)
+        assertNull(vm.pendingShare.value)
+    }
+
+    @Test
+    fun `consumeInsertEvent clears pending and a new insert is accepted after`() = runTest {
+        val vm = viewModel()
+        assertTrue(vm.handleIntent(insertEventIntent()))
+        vm.consumeInsertEvent()
+        assertNull(vm.pendingInsertEvent.value)
+        assertTrue(vm.handleIntent(insertEventIntent(title = "Standup")))
+        assertEquals("Standup", vm.pendingInsertEvent.value?.title)
+    }
+
+    @Test
+    fun `a group-join VIEW intent is not claimed by the handler`() = runTest {
+        val vm = viewModel()
+        val joinIntent = Intent(Intent.ACTION_VIEW).apply {
+            data = android.net.Uri.parse(
+                "https://tanvir-durlove.github.io/nudgy/join?code=ABC123"
+            )
+        }
+        assertFalse(vm.handleIntent(joinIntent))
+        assertNull(vm.pendingDateLink.value)
+        assertNull(vm.pendingInsertEvent.value)
+        assertNull(vm.pendingShare.value)
+    }
 }

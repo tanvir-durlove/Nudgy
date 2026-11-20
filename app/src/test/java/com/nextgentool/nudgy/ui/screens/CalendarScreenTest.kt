@@ -8,13 +8,16 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.repository.FocusTimeSlot
+import com.nextgentool.nudgy.intent.IncomingIntent
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Locale
 
 /**
  * Sprint 2-1 — smoke tests for the wired Calendar screen: it renders
@@ -145,5 +148,81 @@ class CalendarScreenTest {
             )
         }
         composeRule.onNodeWithText("Syncing…").assertIsDisplayed()
+    }
+
+    // ------------------------------------------------------ Sprint 2-4
+
+    @Test
+    fun `date link jumps to the link day and highlights its slot`() {
+        // Target: five days from today (next week), 15:00 slot.
+        val target = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, 5) }
+        val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(target.time)
+        val dayName = SimpleDateFormat("EEE", Locale.getDefault()).format(target.time)
+        composeRule.setContent {
+            CalendarScreen(
+                events = emptyList(),
+                pendingDateLink = IncomingIntent.DateLink(
+                    date = dateStr,
+                    time = "15:00",
+                    title = null
+                )
+            )
+        }
+        composeRule.waitForIdle()
+
+        // The schedule header proves the strip jumped to the link's
+        // day (not today), and the grid carries the 15:00 highlight.
+        composeRule.onNodeWithText("$dayName’s schedule").assertExists()
+        composeRule.onNodeWithText("3:00 PM – 3:30 PM").assertExists()
+    }
+
+    @Test
+    fun `date link without a time jumps to the day with no slot highlight`() {
+        val target = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, 5) }
+        val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(target.time)
+        val dayName = SimpleDateFormat("EEE", Locale.getDefault()).format(target.time)
+        composeRule.setContent {
+            CalendarScreen(
+                events = emptyList(),
+                pendingDateLink = IncomingIntent.DateLink(
+                    date = dateStr,
+                    time = null,
+                    title = null
+                )
+            )
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("$dayName’s schedule").assertExists()
+        composeRule.onNodeWithText("3:00 PM – 3:30 PM").assertDoesNotExist()
+    }
+
+    @Test
+    fun `create-event intent opens the add-event dialog prefilled`() {
+        val begin = Calendar.getInstance().apply {
+            add(Calendar.DAY_OF_MONTH, 2)
+            set(Calendar.HOUR_OF_DAY, 14)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        composeRule.setContent {
+            CalendarScreen(
+                events = emptyList(),
+                pendingInsertEvent = IncomingIntent.InsertEvent(
+                    title = "Design review",
+                    beginMillis = begin,
+                    endMillis = begin + 60 * 60_000L,
+                    location = "Room 4B",
+                    description = null
+                )
+            )
+        }
+        composeRule.waitForIdle()
+
+        // The dialog opened, prefilled from the intent.
+        composeRule.onNodeWithText("Add Event").assertExists()
+        composeRule.onNodeWithText("Design review").assertExists()
+        composeRule.onNodeWithText("Room 4B").assertExists()
     }
 }
