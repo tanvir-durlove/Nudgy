@@ -220,8 +220,11 @@ class CalendarScreenTest {
         }
         composeRule.waitForIdle()
 
-        // The dialog opened, prefilled from the intent.
-        composeRule.onNodeWithText("Add Event").assertExists()
+        // The dialog opened, prefilled from the intent. The title is
+        // "Schedule Event" (the create title, line 1134 — not "Add
+        // Event"); the intent's values appear once each, in the dialog
+        // fields only (no events are passed, so nothing else matches).
+        composeRule.onNodeWithText("Schedule Event").assertIsDisplayed()
         composeRule.onNodeWithText("Design review").assertExists()
         composeRule.onNodeWithText("Room 4B").assertExists()
     }
