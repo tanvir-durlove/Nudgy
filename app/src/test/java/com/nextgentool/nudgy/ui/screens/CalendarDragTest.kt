@@ -13,7 +13,6 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
@@ -51,7 +50,11 @@ import java.util.Calendar
  * onDragSlotChanged callback.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+// The viewport is 1000 dp tall (w360dp-h1000dp) so the strip and the
+// grid top are in view from the first layout — no scrolling is needed
+// to press the card, and no scroll mechanism in Robolectric reliably
+// brings it into a pressable state (see prepareDrag).
+@Config(sdk = [36], qualifiers = "w360dp-h1000dp")
 class CalendarDragTest {
 
     @get:Rule
@@ -112,33 +115,30 @@ class CalendarDragTest {
     }
 
     /**
-     * The strip card's position for a drag — bring the card into view
-     * with the framework's scroll action, then measure fresh.
+     * The strip card's position for a drag — measured fresh from the
+     * first layout, no scrolling needed.
      *
-     * Rounds 12–14 proved the strip drags alone AND inside a plain
-     * verticalScroll Column, but NEVER on a pre-scrolled screen: a
-     * ScrollState(initial = …) breaks long-press hit-testing in
-     * Robolectric (the S1-4c stale-bounds family — the touch at the
-     * card's measured position never reaches the card's detector).
-     * performScrollTo drives the real scroll and re-places the
-     * content (S15SmokeTest relies on it), so the card is genuinely
-     * in view and the press lands on it. Returns the press position
-     * (the card's centre, viewport px) and the grid's top (viewport
-     * px).
+     * Rounds 9–15 proved NO scroll mechanism brings the card into a
+     * pressable state in Robolectric: a programmatic scrollTo moves
+     * the ScrollState value but does not re-place the content; a
+     * pre-scrolled ScrollState(initial = …) breaks long-press
+     * hit-testing; performScrollTo leaves the bounds stale (this
+     * round — the card is still reported below the fold). The
+     * @Config qualifiers below make the test viewport 1000 dp tall,
+     * so the strip (~510 dp) and the grid top (~575 dp) are in view
+     * from the first layout and the bounds are fresh. Returns the
+     * press position (the card's centre, viewport px) and the grid's
+     * top (viewport px).
      */
     private fun prepareDrag(scrollState: ScrollState): Pair<Offset, Float> {
-        // Scroll the strip card into view the way the existing smoke
-        // tests do, then measure fresh from the settled layout.
-        composeRule.onNodeWithTag("strip_card_t1").performScrollTo()
-        composeRule.runOnIdle { }
         val cardCenter = composeRule.onNodeWithTag("strip_card_t1")
             .fetchSemanticsNode().boundsInRoot.center
         val gridTop = composeRule.onNodeWithTag("calendar_grid")
             .fetchSemanticsNode().boundsInRoot.top
         val viewportHeight = composeRule.onRoot()
             .fetchSemanticsNode().boundsInRoot.height
-        // Directional checks: if the card is not in view after the
-        // scroll, the press below would miss it.
+        // Directional checks: the card and the grid top must be in
+        // view (the viewport is 1000 dp tall, so they should be).
         assertTrue(
             "card centre y=${cardCenter.y} should be below the top edge",
             cardCenter.y > 0f,
