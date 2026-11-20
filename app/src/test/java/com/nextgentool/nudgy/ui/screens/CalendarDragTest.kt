@@ -2,7 +2,10 @@ package com.nextgentool.nudgy.ui.screens
 
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -283,6 +286,48 @@ class CalendarDragTest {
             "the drag should have auto-scrolled the screen (was $scrolledBefore, now ${scrollState.value})",
             scrollState.value > scrolledBefore,
         )
+    }
+
+    @Test
+    fun `diagnostic — strip drag inside a vertical scroll column`() {
+        // Bisection (round 12): the strip drags in isolation, but not
+        // on the full screen. The screen's one structural difference
+        // is the verticalScroll Column around everything — this renders
+        // the strip inside a plain verticalScroll Column (strip at the
+        // top, in view, no pre-scroll) to isolate that variable.
+        val t1 = task("t1", dayAt(15))
+        val starts = mutableListOf<Offset>()
+        composeRule.setContent {
+            Box(modifier = Modifier.fillMaxSize()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    CalendarTaskStrip(
+                        tasks = listOf(t1),
+                        draggingTaskId = null,
+                        onDragStart = { _, offset, _ -> starts.add(offset) },
+                        onDragMove = { _, _ -> },
+                        onDragEnd = {},
+                        onDragCancel = {},
+                    )
+                }
+            }
+        }
+        composeRule.runOnIdle { }
+        composeRule.onNodeWithTag("strip_card_t1").performTouchInput {
+            down(center)
+            advanceEventTime(1000)
+            moveBy(Offset(0f, 100f))
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue(
+                "strip drag should start inside a vertical scroll column",
+                starts.isNotEmpty()
+            )
+        }
     }
 
     @Test
