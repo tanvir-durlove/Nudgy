@@ -68,7 +68,7 @@
                  /nudgy/date link opens the Calendar on that date (and
                  highlights the slot when t is present). Same host as
                  the join link — no new assetlinks entry needed; the
-                 file already lists both fingerprints (upload + debug).
+                 file already lists both fingerprints (upload + app-signing).
                  Verified pre-merge via the Digital Asset Links API
                  (linked: true for both fingerprints). -->
             <intent-filter android:autoVerify="true">
