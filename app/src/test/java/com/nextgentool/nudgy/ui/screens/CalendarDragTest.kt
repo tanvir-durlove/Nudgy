@@ -16,7 +16,6 @@ import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.domain.PendingDropConflict
 import com.nextgentool.nudgy.domain.slotStartForY
 import com.nextgentool.nudgy.domain.startOfDayMillis
-import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -108,44 +107,55 @@ class CalendarDragTest {
     }
 
     /**
-     * Brings the strip card into view for a drag — mirroring Board test c
-     * (the proven sequence: layout, THEN scroll, then drag).
+     * The screen's scroll state for a drag test: pre-scrolled ~360 dp
+     * so the strip card is in view on the first layout (see
+     * prepareDrag — a programmatic scrollTo does not re-place the
+     * content in Robolectric).
+     */
+    private fun preScrolledState() =
+        ScrollState(with(composeRule.density) { 360.dp.toPx() }.toInt())
+
+    /**
+     * The strip card's position for a drag — the Board's proven
+     * pattern (tests a/b): render PRE-scrolled, so the first layout
+     * already has the card in view and the bounds are fresh.
      *
-     * Round 9's diagnostic re-read bounds AFTER the scroll — but bounds
-     * are stale after a programmatic scroll (the S1-4c lesson), so that
-     * assertion measured the cache, not the card. The ground truth is
-     * the ScrollState value: the card's true position is the FRESH
-     * pre-scroll measurement minus the scroll that actually happened.
-     * Returns the press position (the card's centre, viewport px) and
-     * the grid's top (viewport px, after the scroll).
+     * Rounds 9/10 proved a programmatic scrollTo does NOT re-place
+     * the screen's content in Robolectric: the ScrollState value
+     * moves but the bounds stay stale, so no press after it can hit
+     * the card. A ScrollState(initial = …) scrolls the FIRST layout,
+     * so the card is genuinely in view.
+     *
+     * The initial scroll (~360 dp) parks the strip card ~150 dp from
+     * the top — its content position is ~510 dp (header + week strip
+     * + connect card + schedule; no suggested-focus card in this
+     * state, it only renders when suggestedSlot != null) — with the
+     * grid top and the 01:30 target in view. Returns the press
+     * position (the card's centre, viewport px) and the grid's top
+     * (viewport px).
      */
     private fun prepareDrag(scrollState: ScrollState): Pair<Offset, Float> {
-        // Fresh measurements from the first layout (no scroll yet, so
-        // the bounds are current).
-        val cardCenter0 = composeRule.onNodeWithTag("strip_card_t1")
+        // Fresh measurements from the first layout (the screen
+        // rendered pre-scrolled, so the card is in view and the
+        // bounds are current).
+        val cardCenter = composeRule.onNodeWithTag("strip_card_t1")
             .fetchSemanticsNode().boundsInRoot.center
-        val gridTop0 = composeRule.onNodeWithTag("calendar_grid")
+        val gridTop = composeRule.onNodeWithTag("calendar_grid")
             .fetchSemanticsNode().boundsInRoot.top
-        // Park the card ~150 dp from the top: the grid below it is then
-        // well inside the viewport, and the 01:30 target stays out of
-        // the bottom edge zone.
-        val cardTargetY = with(composeRule.density) { 150.dp.toPx() }
-        val scrollPx = (cardCenter0.y - cardTargetY).coerceAtLeast(0f).toInt()
-        runBlocking { scrollState.scrollTo(scrollPx) }
-        composeRule.runOnIdle { }
-        // Ground truth: the scroll value itself. If the scroll did not
-        // happen, the press below would land below the fold and no drag
-        // could start — so assert it moved (when a scroll was needed).
-        if (scrollPx > 0) {
-            assertTrue(
-                "scrollTo($scrollPx) should have moved the scroll value (is ${scrollState.value})",
-                scrollState.value > 0,
-            )
-        }
-        val scrolled = scrollState.value.toFloat()
-        val pressPos = Offset(cardCenter0.x, cardCenter0.y - scrolled)
-        val gridTop = gridTop0 - scrolled
-        return pressPos to gridTop
+        val viewportHeight = composeRule.onRoot()
+            .fetchSemanticsNode().boundsInRoot.height
+        // Directional checks: if the ~360 dp estimate was wrong, the
+        // failing line says which way — above the top edge (scrolled
+        // too far) or below the bottom edge (not far enough).
+        assertTrue(
+            "card centre y=${cardCenter.y} should be below the top edge (initial scroll too far?)",
+            cardCenter.y > 0f,
+        )
+        assertTrue(
+            "card centre y=${cardCenter.y} should be inside the viewport (height $viewportHeight; initial scroll not far enough?)",
+            cardCenter.y < viewportHeight,
+        )
+        return cardCenter to gridTop
     }
 
     @Test
@@ -154,7 +164,7 @@ class CalendarDragTest {
         val drops = mutableListOf<Pair<TaskEntity, Long>>()
         val slots = mutableListOf<Long?>()
         val positions = mutableListOf<Offset>()
-        val scrollState = ScrollState(0)
+        val scrollState = preScrolledState()
         setContent(
             strip = listOf(t1),
             onDropTask = { task, slot -> drops.add(task to slot) },
@@ -212,7 +222,7 @@ class CalendarDragTest {
     fun `drag released above the grid drops nothing`() {
         val t1 = task("t1", dayAt(15))
         val drops = mutableListOf<Pair<TaskEntity, Long>>()
-        val scrollState = ScrollState(0)
+        val scrollState = preScrolledState()
         setContent(
             strip = listOf(t1),
             onDropTask = { task, slot -> drops.add(task to slot) },
@@ -241,7 +251,7 @@ class CalendarDragTest {
     fun `drag to the bottom edge scrolls the screen`() {
         val t1 = task("t1", dayAt(15))
         val positions = mutableListOf<Offset>()
-        val scrollState = ScrollState(0)
+        val scrollState = preScrolledState()
         setContent(
             strip = listOf(t1),
             onDropTask = { _, _ -> },
