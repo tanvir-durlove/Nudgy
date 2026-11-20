@@ -96,7 +96,7 @@ fun CalendarScreen(
     onDismissError: () -> Unit = {},
     onConnectGoogleCalendar: () -> Unit = {},
     onSyncNow: () -> Unit = {},
-    onBlockFocusTime: (startTime: Long, endTime: Long, title: String) -> Unit,
+    onBlockFocusTime: (startTime: Long, endTime: Long, title: String) -> Unit = { _, _, _ -> },
     onAddEvent: (title: String, startTime: Long, endTime: Long, location: String?, type: String) -> Unit = { _, _, _, _, _ -> },
     // Sprint 2-1 (Q8(a)): edit an event — same dialog as add, prefilled.
     onUpdateEvent: (eventId: String, title: String, startTime: Long, endTime: Long, location: String?, type: String) -> Unit = { _, _, _, _, _, _ -> },
