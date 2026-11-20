@@ -21,6 +21,7 @@ import com.nextgentool.nudgy.domain.PendingDropConflict
 import com.nextgentool.nudgy.domain.slotStartForY
 import com.nextgentool.nudgy.domain.startOfDayMillis
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -225,6 +226,39 @@ class CalendarDragTest {
         // wrong slot (the pointer or the slot math is off). The two
         // cases fail on different lines.
         assertTrue("the drag should have dropped the task (drops is empty)", drops.isNotEmpty())
+        // Round 22 oracle: the drop lands at the wrong slot and the
+        // CI log strips values, so identify the ACTUAL slot with a
+        // chain of assertNotEquals — one candidate per line, 00:00 to
+        // 06:00 in 15-minute steps. The FIRST failing line IS the
+        // slot (assertNotEquals fails exactly when the drop equals
+        // that candidate). If every line passes, the slot is past
+        // 06:00 and the assertEquals below fails instead.
+        val slot = drops[0].second
+        assertNotEquals(dayAt(0, 0), slot)
+        assertNotEquals(dayAt(0, 15), slot)
+        assertNotEquals(dayAt(0, 30), slot)
+        assertNotEquals(dayAt(0, 45), slot)
+        assertNotEquals(dayAt(1, 0), slot)
+        assertNotEquals(dayAt(1, 15), slot)
+        assertNotEquals(dayAt(1, 30), slot)
+        assertNotEquals(dayAt(1, 45), slot)
+        assertNotEquals(dayAt(2, 0), slot)
+        assertNotEquals(dayAt(2, 15), slot)
+        assertNotEquals(dayAt(2, 30), slot)
+        assertNotEquals(dayAt(2, 45), slot)
+        assertNotEquals(dayAt(3, 0), slot)
+        assertNotEquals(dayAt(3, 15), slot)
+        assertNotEquals(dayAt(3, 30), slot)
+        assertNotEquals(dayAt(3, 45), slot)
+        assertNotEquals(dayAt(4, 0), slot)
+        assertNotEquals(dayAt(4, 15), slot)
+        assertNotEquals(dayAt(4, 30), slot)
+        assertNotEquals(dayAt(4, 45), slot)
+        assertNotEquals(dayAt(5, 0), slot)
+        assertNotEquals(dayAt(5, 15), slot)
+        assertNotEquals(dayAt(5, 30), slot)
+        assertNotEquals(dayAt(5, 45), slot)
+        assertNotEquals(dayAt(6, 0), slot)
         assertEquals(listOf(t1 to expected), drops)
         // The highlight (slots) is NOT asserted here — round 17 showed
         // it stays empty while the drag otherwise works, which is a
