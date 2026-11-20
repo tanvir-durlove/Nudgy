@@ -13,6 +13,7 @@ import com.nextgentool.nudgy.data.model.TaskCategory
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.intent.IncomingIntent
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -39,6 +40,7 @@ import org.robolectric.annotation.Config
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
+@OptIn(ExperimentalCoroutinesApi::class)
 class ShareIntentViewModelTest {
 
     private lateinit var db: NudgyDatabase
