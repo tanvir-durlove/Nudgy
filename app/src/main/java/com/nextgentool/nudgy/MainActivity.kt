@@ -1,9 +1,12 @@
 package com.nextgentool.nudgy
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import com.nextgentool.nudgy.ui.navigation.NudgyApp
+import com.nextgentool.nudgy.ui.viewmodel.ShareIntentViewModel
 import dagger.hilt.android.AndroidEntryPoint
 
 /**
@@ -23,11 +26,42 @@ import dagger.hilt.android.AndroidEntryPoint
  * screens use hiltViewModel(), and without it the app crashes on first
  * use ("does not implement GeneratedComponentManager", S1-1 2026-11-16).
  * MainActivityEntryPointTest fails if it is ever dropped.
+ *
+ * Sprint 2-3 — share-to-task (Feature 12, spec §5): this is the
+ * single intent owner. The Activity parses nothing itself; it feeds
+ * its initial intent (onCreate) and every later intent (onNewIntent,
+ * singleTop) to ShareIntentViewModel, which decides what to claim.
+ * The group-join deep link is NOT handled here — it still routes via
+ * the NavHost deep link (GROUP_JOIN_DEEP_LINK).
  */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    private val shareIntentViewModel: ShareIntentViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleIncomingIntent(intent)
         setContent { NudgyApp() }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // Without setIntent, getIntent() keeps returning the ORIGINAL
+        // intent — the new one would never be seen.
+        setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
+    /**
+     * Hands the intent to the share flow. When a NEW share is
+     * accepted, the Activity's intent is cleared — a plain rotation
+     * then never re-offers it (the ViewModel's SavedStateHandle flag
+     * is the second layer, covering process-death restore).
+     */
+    private fun handleIncomingIntent(intent: Intent?) {
+        if (shareIntentViewModel.handleIntent(intent)) {
+            setIntent(Intent())
+        }
     }
 }
