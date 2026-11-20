@@ -34,11 +34,22 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.Nudgy.Splash">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Sprint 2-3 — share-to-task (Feature 12): another app
+                 sharing text lands here; MainActivity hands the intent
+                 to ShareIntentViewModel, which opens the prefilled
+                 task sheet. Text only (Q6(a)) — no image/file type. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
             <!-- App Links: group-join deep link. Verification (autoVerify)
                  needs the matching assetlinks.json on tanvir-durlove.github.io. -->

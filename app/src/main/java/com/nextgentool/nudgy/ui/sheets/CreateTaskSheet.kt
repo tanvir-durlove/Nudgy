@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
+import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.ui.theme.NudgyAccent
 import com.nextgentool.nudgy.ui.theme.NudgyCard
 import com.nextgentool.nudgy.ui.theme.NudgyCardBorder
@@ -95,11 +96,20 @@ fun CreateTaskSheet(
     headerTitle: String = "New Task",
     headerSubtitle: String? = null,
     saveButtonText: String = "Add Task",
+    // Sprint 2-3 — share-to-task prefill (Feature 12, Q5(a)): a share
+    // opens this sheet with its title/description already filled.
+    // initialHasNoDueDate = the share carries NO due date (Q5(a)) and
+    // must not silently invent one — the sheet gains a "No date"
+    // state for it instead of defaulting to today.
+    initialTitle: String = "",
+    initialDescription: String = "",
+    initialHasNoDueDate: Boolean = false,
+    initialReminderSet: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var title by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
+    var title by remember { mutableStateOf(initialTitle) }
+    var description by remember { mutableStateOf(initialDescription) }
     var priority by remember { mutableStateOf(Priority.MEDIUM) }
     var category by remember { mutableStateOf(TaskCategory.WORK) }
     var selectedDayOption by remember { mutableIntStateOf(0) } // Shortcuts: 0: Today, 1: Tomorrow, 2: In 2 Days (a picked date overrides these)
@@ -107,7 +117,10 @@ fun CreateTaskSheet(
     var customHour by remember { mutableIntStateOf(14) }
     var customMinute by remember { mutableIntStateOf(0) }
     var hasCustomTime by remember { mutableStateOf(false) }
-    var reminderSet by remember { mutableStateOf(true) }
+    // Sprint 2-3 — "No date" state (share flow): choosing any day
+    // or a custom date clears it; picking it clears any custom date.
+    var hasNoDueDate by remember { mutableStateOf(initialHasNoDueDate) }
+    var reminderSet by remember { mutableStateOf(initialReminderSet) }
     var hasCustomDate by remember { mutableStateOf(false) }
 
     // C10: surface the notification-permission state in the reminder
@@ -251,6 +264,9 @@ fun CreateTaskSheet(
                                     set(Calendar.MILLISECOND, 0)
                                 }.timeInMillis
                                 hasCustomDate = true
+                                // Sprint 2-3 — picking a date is a due
+                                // date: it clears the "No date" state.
+                                hasNoDueDate = false
                             }
                             showM3DatePicker = false
                         }) { Text("OK") }
@@ -276,13 +292,14 @@ fun CreateTaskSheet(
             ) {
                 val dayOptions = listOf("Today", "Tomorrow", "In 2 days")
                 dayOptions.forEachIndexed { index, label ->
-                    val isSelected = !hasCustomDate && selectedDayOption == index
+                    val isSelected = !hasNoDueDate && !hasCustomDate && selectedDayOption == index
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .clip(CircleShape)
                             .background(if (isSelected) MaterialTheme.colorScheme.inverseSurface else NudgyChipBackground)
                             .clickable {
+                                hasNoDueDate = false
                                 hasCustomDate = false
                                 selectedDayOption = index
                             }
@@ -297,6 +314,28 @@ fun CreateTaskSheet(
                             fontSize = 13.sp
                         )
                     }
+                }
+                // Sprint 2-3 — "No date": a share carries no due date
+                // (Q5(a)), and the user can always opt out of one.
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(CircleShape)
+                        .background(if (hasNoDueDate) MaterialTheme.colorScheme.inverseSurface else NudgyChipBackground)
+                        .clickable {
+                            hasNoDueDate = true
+                            hasCustomDate = false
+                        }
+                        .height(48.dp)
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No date",
+                        color = if (hasNoDueDate) MaterialTheme.colorScheme.inverseOnSurface else NudgyCharcoal,
+                        fontWeight = if (hasNoDueDate) FontWeight.Bold else FontWeight.Normal,
+                        fontSize = 13.sp
+                    )
                 }
                 // Custom-date picker entry (shown only when no custom date is picked;
                 // once picked, the banner row below shows it with Change).
@@ -320,7 +359,8 @@ fun CreateTaskSheet(
             }
 
             // Pick a specific date banner — only when the picked date is NOT a chip option.
-            if (hasCustomDate) {
+            // Sprint 2-3 — never under "No date" (tapping it clears hasCustomDate).
+            if (hasCustomDate && !hasNoDueDate) {
             Spacer(modifier = Modifier.height(8.dp))
             Row(
                 modifier = Modifier
@@ -500,7 +540,9 @@ fun CreateTaskSheet(
             previewCalendar.set(Calendar.SECOND, 0)
             previewCalendar.set(Calendar.MILLISECOND, 0)
             val willRollToTomorrow = previewCalendar.timeInMillis <= System.currentTimeMillis()
-            if (willRollToTomorrow) {
+            // Sprint 2-3 — no warning under "No date": there is no
+            // time to roll, and the task saves with NO_DUE_DATE.
+            if (!hasNoDueDate && willRollToTomorrow) {
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
                     text = "⚠ This time has already passed today — it will be scheduled for tomorrow at the same time.",
@@ -719,29 +761,37 @@ fun CreateTaskSheet(
             Button(
                 onClick = {
                     if (title.isNotBlank()) {
-                        val calendar = effectiveDueCalendar()
-                        val (finalHour, finalMinute) = if (hasCustomTime) {
-                            customHour to customMinute
+                        // Sprint 2-3 — a share carries no due date
+                        // (Q5(a)): "No date" saves NO_DUE_DATE instead
+                        // of inventing today 2 PM, and skips the
+                        // past-time roll entirely.
+                        val computedDueTime = if (hasNoDueDate) {
+                            TaskRepository.NO_DUE_DATE
                         } else {
-                            when (selectedTimeOption) {
-                                0 -> 9 to 0
-                                1 -> 14 to 0
-                                else -> 19 to 0
+                            val calendar = effectiveDueCalendar()
+                            val (finalHour, finalMinute) = if (hasCustomTime) {
+                                customHour to customMinute
+                            } else {
+                                when (selectedTimeOption) {
+                                    0 -> 9 to 0
+                                    1 -> 14 to 0
+                                    else -> 19 to 0
+                                }
                             }
-                        }
-                        calendar.set(Calendar.HOUR_OF_DAY, finalHour)
-                        calendar.set(Calendar.MINUTE, finalMinute)
-                        calendar.set(Calendar.SECOND, 0)
-                        calendar.set(Calendar.MILLISECOND, 0)
+                            calendar.set(Calendar.HOUR_OF_DAY, finalHour)
+                            calendar.set(Calendar.MINUTE, finalMinute)
+                            calendar.set(Calendar.SECOND, 0)
+                            calendar.set(Calendar.MILLISECOND, 0)
 
-                        // Past time chosen for today -> roll to tomorrow so
-                        // the reminder can actually fire (the sheet warns
-                        // about this next to the time picker).
-                        if (calendar.timeInMillis <= System.currentTimeMillis()) {
-                            calendar.add(Calendar.DAY_OF_YEAR, 1)
-                        }
+                            // Past time chosen for today -> roll to tomorrow so
+                            // the reminder can actually fire (the sheet warns
+                            // about this next to the time picker).
+                            if (calendar.timeInMillis <= System.currentTimeMillis()) {
+                                calendar.add(Calendar.DAY_OF_YEAR, 1)
+                            }
 
-                        val computedDueTime = calendar.timeInMillis
+                            calendar.timeInMillis
+                        }
                         val desc = if (description.isNotBlank()) description.trim() else null
 
                         onSaveTask(

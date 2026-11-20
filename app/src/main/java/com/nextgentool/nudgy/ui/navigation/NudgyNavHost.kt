@@ -46,8 +46,10 @@ import com.nextgentool.nudgy.ui.screens.SettingsShell
 import com.nextgentool.nudgy.ui.screens.TasksScreen
 import com.nextgentool.nudgy.ui.screens.TemplatesScreen
 import com.nextgentool.nudgy.ui.screens.TodayScreen
+import com.nextgentool.nudgy.ui.sheets.CreateTaskSheet
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
 import com.nextgentool.nudgy.ui.viewmodel.CalendarViewModel
+import com.nextgentool.nudgy.ui.viewmodel.ShareIntentViewModel
 
 /**
  * Sprint 0 — NavHost + bottom navigation for the scratch rebuild (v2).
@@ -67,11 +69,40 @@ import com.nextgentool.nudgy.ui.viewmodel.CalendarViewModel
 @Composable
 fun NudgyApp() {
     val navController = rememberNavController()
+    // Sprint 2-3 — share-to-task (Feature 12): the Activity-scoped
+    // view model (the Activity is the ViewModelStoreOwner at this
+    // root, so this is the SAME instance MainActivity feeds intents
+    // into). The sheet renders over whatever tab the user was on —
+    // the share flow is route-independent.
+    val shareViewModel: ShareIntentViewModel = hiltViewModel()
+    val pendingShare by shareViewModel.pendingShare.collectAsState()
     NudgyTheme {
         Scaffold(
             bottomBar = { NudgyBottomNav(navController) }
         ) { innerPadding ->
             NudgyNavHost(navController, Modifier.padding(innerPadding))
+        }
+        val share = pendingShare
+        if (share != null) {
+            CreateTaskSheet(
+                onDismiss = { shareViewModel.dismissShare() },
+                onSaveTask = { title, description, due, priority, category, reminderSet ->
+                    shareViewModel.confirmShare(
+                        title = title,
+                        description = description,
+                        dueEpochMillis = due,
+                        priority = priority,
+                        category = category,
+                        reminderSet = reminderSet
+                    )
+                },
+                headerTitle = "New Task",
+                headerSubtitle = "Shared from another app",
+                initialTitle = share.title,
+                initialDescription = share.description ?: "",
+                initialHasNoDueDate = true,
+                initialReminderSet = false
+            )
         }
     }
 }
