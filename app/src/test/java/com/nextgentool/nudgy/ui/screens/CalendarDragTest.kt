@@ -286,6 +286,40 @@ class CalendarDragTest {
     }
 
     @Test
+    fun `diagnostic — strip drag starts in isolation, without the screen scroll`() {
+        // Bisection (round 11): the drag never starts on the full
+        // screen even though the card is in view and pressed at its
+        // centre. This renders ONLY the strip (no vertical screen
+        // scroll, no grid) — if the drag starts here, the screen's
+        // nested scrollables are swallowing the long-press; if it
+        // does not, the strip card's own detector is broken.
+        val t1 = task("t1", dayAt(15))
+        val starts = mutableListOf<Offset>()
+        composeRule.setContent {
+            Box(modifier = Modifier.fillMaxSize()) {
+                CalendarTaskStrip(
+                    tasks = listOf(t1),
+                    draggingTaskId = null,
+                    onDragStart = { _, offset, _ -> starts.add(offset) },
+                    onDragMove = { _, _ -> },
+                    onDragEnd = {},
+                    onDragCancel = {},
+                )
+            }
+        }
+        composeRule.runOnIdle { }
+        composeRule.onNodeWithTag("strip_card_t1").performTouchInput {
+            down(center)
+            advanceEventTime(1000)
+            moveBy(Offset(0f, 100f))
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue("strip drag should start in isolation", starts.isNotEmpty())
+        }
+    }
+
+    @Test
     fun `busy dialog accept invokes the accept callback`() {
         val t1 = task("t1", dayAt(15))
         var accepted = 0
