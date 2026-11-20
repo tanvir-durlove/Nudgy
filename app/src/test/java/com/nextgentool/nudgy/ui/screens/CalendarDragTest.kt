@@ -165,25 +165,22 @@ class CalendarDragTest {
             screenScrollState = scrollState,
         )
         composeRule.runOnIdle { }
-        val (pressPos, gridTop) = prepareDrag(scrollState)
+        val (_, gridTop) = prepareDrag(scrollState)
         val scrolledBeforeDrag = scrollState.value
         val hourPx = with(composeRule.density) { 64.dp.toPx() }
         val dayStart = startOfDayMillis(System.currentTimeMillis())
         // Target 01:30 — the centre of a 15-minute snap bucket, so a few
         // px of measurement error is absorbed by the snap.
         val targetY = gridTop + 1.5f * hourPx
-        // Press at the card's TRUE centre (fresh measurement minus the
-        // scroll that happened), not down(center) on stale bounds.
+        // The Board's proven gesture, exactly: down(center), hold past
+        // the long-press timeout, one move, release. (Rounds 9–16 used
+        // down(pressPos) + stepped moves; the isolation diagnostics
+        // that pass use this form.)
 
         composeRule.onNodeWithTag("strip_card_t1").performTouchInput {
-            down(pressPos)
+            down(center)
             advanceEventTime(1000)
-            // Move in steps, the way a real finger travels, so the
-            // gesture is seen as a drag, not a jump.
-            val steps = 5
-            val delta = Offset(0f, (targetY - pressPos.y) / steps)
-            repeat(steps) { moveBy(delta) }
-            advanceEventTime(100)
+            moveBy(Offset(0f, targetY - center.y))
             up()
         }
         composeRule.runOnIdle { }
@@ -221,21 +218,15 @@ class CalendarDragTest {
             screenScrollState = scrollState,
         )
         composeRule.runOnIdle { }
-        val (pressPos, _) = prepareDrag(scrollState)
+        prepareDrag(scrollState)
         // Lift the finger to the top of the viewport — well above the
-        // grid (no slot there). (Not "just above the grid top": after
-        // performScrollTo the card sits at the viewport bottom, so a
-        // release just above the grid could be auto-scrolled INTO the
-        // grid during the drag.)
+        // grid (no slot there).
         val releaseY = with(composeRule.density) { 20.dp.toPx() }
 
         composeRule.onNodeWithTag("strip_card_t1").performTouchInput {
-            down(pressPos)
+            down(center)
             advanceEventTime(1000)
-            val steps = 5
-            val delta = Offset(0f, (releaseY - pressPos.y) / steps)
-            repeat(steps) { moveBy(delta) }
-            advanceEventTime(100)
+            moveBy(Offset(0f, releaseY - center.y))
             up()
         }
         composeRule.runOnIdle { }
@@ -255,7 +246,7 @@ class CalendarDragTest {
             screenScrollState = scrollState,
         )
         composeRule.runOnIdle { }
-        val (pressPos, _) = prepareDrag(scrollState)
+        prepareDrag(scrollState)
         val scrolledBefore = scrollState.value
         // Move a full viewport height down: the pointer ends far past
         // the bottom edge zone whatever the density is (a fixed 600 px
@@ -263,12 +254,9 @@ class CalendarDragTest {
         val rootHeight = composeRule.onRoot().fetchSemanticsNode().boundsInRoot.height
 
         composeRule.onNodeWithTag("strip_card_t1").performTouchInput {
-            down(pressPos)
+            down(center)
             advanceEventTime(1000)
-            val steps = 20
-            val delta = Offset(0f, rootHeight / steps)
-            repeat(steps) { moveBy(delta) }
-            advanceEventTime(100)
+            moveBy(Offset(0f, rootHeight))
             up()
         }
         composeRule.runOnIdle { }
