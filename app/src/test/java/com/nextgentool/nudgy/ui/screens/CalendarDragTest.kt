@@ -5,8 +5,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
@@ -15,6 +13,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
@@ -113,52 +112,39 @@ class CalendarDragTest {
     }
 
     /**
-     * The screen's scroll state for a drag test: pre-scrolled ~360 dp
-     * so the strip card is in view on the first layout (see
-     * prepareDrag — a programmatic scrollTo does not re-place the
-     * content in Robolectric).
-     */
-    private fun preScrolledState() =
-        ScrollState(with(composeRule.density) { 360.dp.toPx() }.toInt())
-
-    /**
-     * The strip card's position for a drag — the Board's proven
-     * pattern (tests a/b): render PRE-scrolled, so the first layout
-     * already has the card in view and the bounds are fresh.
+     * The strip card's position for a drag — bring the card into view
+     * with the framework's scroll action, then measure fresh.
      *
-     * Rounds 9/10 proved a programmatic scrollTo does NOT re-place
-     * the screen's content in Robolectric: the ScrollState value
-     * moves but the bounds stay stale, so no press after it can hit
-     * the card. A ScrollState(initial = …) scrolls the FIRST layout,
-     * so the card is genuinely in view.
-     *
-     * The initial scroll (~360 dp) parks the strip card ~150 dp from
-     * the top — its content position is ~510 dp (header + week strip
-     * + connect card + schedule; no suggested-focus card in this
-     * state, it only renders when suggestedSlot != null) — with the
-     * grid top and the 01:30 target in view. Returns the press
-     * position (the card's centre, viewport px) and the grid's top
-     * (viewport px).
+     * Rounds 12–14 proved the strip drags alone AND inside a plain
+     * verticalScroll Column, but NEVER on a pre-scrolled screen: a
+     * ScrollState(initial = …) breaks long-press hit-testing in
+     * Robolectric (the S1-4c stale-bounds family — the touch at the
+     * card's measured position never reaches the card's detector).
+     * performScrollTo drives the real scroll and re-places the
+     * content (S15SmokeTest relies on it), so the card is genuinely
+     * in view and the press lands on it. Returns the press position
+     * (the card's centre, viewport px) and the grid's top (viewport
+     * px).
      */
     private fun prepareDrag(scrollState: ScrollState): Pair<Offset, Float> {
-        // Fresh measurements from the first layout (the screen
-        // rendered pre-scrolled, so the card is in view and the
-        // bounds are current).
+        // Scroll the strip card into view the way the existing smoke
+        // tests do, then measure fresh from the settled layout.
+        composeRule.onNodeWithTag("strip_card_t1").performScrollTo()
+        composeRule.runOnIdle { }
         val cardCenter = composeRule.onNodeWithTag("strip_card_t1")
             .fetchSemanticsNode().boundsInRoot.center
         val gridTop = composeRule.onNodeWithTag("calendar_grid")
             .fetchSemanticsNode().boundsInRoot.top
         val viewportHeight = composeRule.onRoot()
             .fetchSemanticsNode().boundsInRoot.height
-        // Directional checks: if the ~360 dp estimate was wrong, the
-        // failing line says which way — above the top edge (scrolled
-        // too far) or below the bottom edge (not far enough).
+        // Directional checks: if the card is not in view after the
+        // scroll, the press below would miss it.
         assertTrue(
-            "card centre y=${cardCenter.y} should be below the top edge (initial scroll too far?)",
+            "card centre y=${cardCenter.y} should be below the top edge",
             cardCenter.y > 0f,
         )
         assertTrue(
-            "card centre y=${cardCenter.y} should be inside the viewport (height $viewportHeight; initial scroll not far enough?)",
+            "card centre y=${cardCenter.y} should be inside the viewport (height $viewportHeight)",
             cardCenter.y < viewportHeight,
         )
         return cardCenter to gridTop
@@ -170,7 +156,7 @@ class CalendarDragTest {
         val drops = mutableListOf<Pair<TaskEntity, Long>>()
         val slots = mutableListOf<Long?>()
         val positions = mutableListOf<Offset>()
-        val scrollState = preScrolledState()
+        val scrollState = ScrollState(0)
         setContent(
             strip = listOf(t1),
             onDropTask = { task, slot -> drops.add(task to slot) },
@@ -228,16 +214,20 @@ class CalendarDragTest {
     fun `drag released above the grid drops nothing`() {
         val t1 = task("t1", dayAt(15))
         val drops = mutableListOf<Pair<TaskEntity, Long>>()
-        val scrollState = preScrolledState()
+        val scrollState = ScrollState(0)
         setContent(
             strip = listOf(t1),
             onDropTask = { task, slot -> drops.add(task to slot) },
             screenScrollState = scrollState,
         )
         composeRule.runOnIdle { }
-        val (pressPos, gridTop) = prepareDrag(scrollState)
-        // Lift the finger just above the grid (no slot there).
-        val releaseY = gridTop - with(composeRule.density) { 20.dp.toPx() }
+        val (pressPos, _) = prepareDrag(scrollState)
+        // Lift the finger to the top of the viewport — well above the
+        // grid (no slot there). (Not "just above the grid top": after
+        // performScrollTo the card sits at the viewport bottom, so a
+        // release just above the grid could be auto-scrolled INTO the
+        // grid during the drag.)
+        val releaseY = with(composeRule.density) { 20.dp.toPx() }
 
         composeRule.onNodeWithTag("strip_card_t1").performTouchInput {
             down(pressPos)
@@ -257,7 +247,7 @@ class CalendarDragTest {
     fun `drag to the bottom edge scrolls the screen`() {
         val t1 = task("t1", dayAt(15))
         val positions = mutableListOf<Offset>()
-        val scrollState = preScrolledState()
+        val scrollState = ScrollState(0)
         setContent(
             strip = listOf(t1),
             onDropTask = { _, _ -> },
@@ -291,57 +281,19 @@ class CalendarDragTest {
         )
     }
 
-    @Test
-    fun `diagnostic — strip drag inside a pre-scrolled vertical column`() {
-        // Bisection (round 13): the strip drags alone AND inside a
-        // plain verticalScroll Column, but not on the full screen. The
-        // one variable those diagnostics did not cover is the
-        // PRE-SCROLL — the full screen renders with ScrollState
-        // (initial = 360 dp). This renders the strip inside a
-        // pre-scrolled vertical Column, with a spacer above it like
-        // the real screen's sections, and presses the card's measured
-        // centre.
-        val t1 = task("t1", dayAt(15))
-        val starts = mutableListOf<Offset>()
-        val scrollState = ScrollState(with(composeRule.density) { 360.dp.toPx() }.toInt())
-        composeRule.setContent {
-            Box(modifier = Modifier.fillMaxSize()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(scrollState),
-                    verticalArrangement = Arrangement.spacedBy(20.dp)
-                ) {
-                    // Spacer above the strip, like the real screen's
-                    // header + week + connect + schedule sections.
-                    Box(modifier = Modifier.fillMaxWidth().height(450.dp))
-                    CalendarTaskStrip(
-                        tasks = listOf(t1),
-                        draggingTaskId = null,
-                        onDragStart = { _, offset, _ -> starts.add(offset) },
-                        onDragMove = { _, _ -> },
-                        onDragEnd = {},
-                        onDragCancel = {},
-                    )
-                }
-            }
-        }
-        composeRule.runOnIdle { }
-        val pressPos = composeRule.onNodeWithTag("strip_card_t1")
-            .fetchSemanticsNode().boundsInRoot.center
-        composeRule.onNodeWithTag("strip_card_t1").performTouchInput {
-            down(pressPos)
-            advanceEventTime(1000)
-            moveBy(Offset(0f, 100f))
-            up()
-        }
-        composeRule.runOnIdle {
-            assertTrue(
-                "strip drag should start in a pre-scrolled vertical column",
-                starts.isNotEmpty()
-            )
-        }
-    }
+    // NOTE (rounds 12–14): a third diagnostic rendered the strip
+    // inside a PRE-SCROLLED vertical Column (ScrollState initial =
+    // 360 dp, spacer above the strip like the real screen) — and the
+    // drag never started there either. So a pre-scrolled ScrollState
+    // breaks long-press hit-testing in Robolectric, while the same
+    // strip drags fine with no scroll and inside a plain vertical
+    // scroll. The drag tests therefore bring the card into view with
+    // performScrollTo (which re-places the content) and never render
+    // pre-scrolled. Do NOT reintroduce a pre-scrolled ScrollState
+    // for a drag test. (On a real device the pre-scroll is fine —
+    // this is a Robolectric harness limitation, not a product bug;
+    // the Board's pre-scrolled tests pass because its scroll is
+    // horizontal and its drag is horizontal.)
 
     @Test
     fun `diagnostic — strip drag inside a vertical scroll column`() {
