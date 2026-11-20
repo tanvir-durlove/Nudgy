@@ -145,10 +145,12 @@ class CalendarDragTest {
         val t1 = task("t1", dayAt(15))
         val drops = mutableListOf<Pair<TaskEntity, Long>>()
         val slots = mutableListOf<Long?>()
+        val positions = mutableListOf<Offset>()
         val scrollState = ScrollState(0)
         setContent(
             strip = listOf(t1),
             onDropTask = { task, slot -> drops.add(task to slot) },
+            onDragPositionChanged = { positions.add(it) },
             onDragSlotChanged = { slots.add(it) },
             screenScrollState = scrollState,
         )
@@ -171,6 +173,11 @@ class CalendarDragTest {
         }
         composeRule.runOnIdle { }
 
+        // Bisect first: did the drag even start? onDragPositionChanged
+        // fires in onDragStart itself, so an empty list means the press
+        // never became a drag (not a slot/drop problem).
+        assertTrue("the long-press never started a drag (no position reports)", positions.isNotEmpty())
+        assertTrue("no slot was ever reported during the drag", slots.isNotEmpty())
         // The drop slot is the pure function of the measured geometry
         // plus whatever the screen scrolled during the drag (a 24 dp
         // scroll-on-move tick, or a loop tick, moves the grid up under
@@ -181,7 +188,6 @@ class CalendarDragTest {
             dayStart,
         )
         assertEquals(listOf(t1 to expected), drops)
-        assertTrue(slots.isNotEmpty())
         // The highlight showed the dropped slot during the drag. (contains,
         // not last: a loop tick landing after the release could append one
         // more callback; the drop slot itself is pinned above.)
@@ -215,24 +221,32 @@ class CalendarDragTest {
     @Test
     fun `drag to the bottom edge scrolls the screen`() {
         val t1 = task("t1", dayAt(15))
+        val positions = mutableListOf<Offset>()
         val scrollState = ScrollState(0)
         setContent(
             strip = listOf(t1),
             onDropTask = { _, _ -> },
+            onDragPositionChanged = { positions.add(it) },
             screenScrollState = scrollState,
         )
         composeRule.runOnIdle { }
         val (cardCenter, _) = prepareDrag(scrollState)
         val scrolledBefore = scrollState.value
+        // Move a full viewport height down: the pointer ends far past
+        // the bottom edge zone whatever the density is (a fixed 600 px
+        // is only ~228 dp at xxhdpi and may never reach the zone).
+        val rootHeight = composeRule.onRoot().fetchSemanticsNode().boundsInRoot.height
 
         composeRule.onNodeWithTag("strip_card_t1").performTouchInput {
             down(cardCenter)
             advanceEventTime(1000)
-            moveBy(Offset(0f, 600f))
+            moveBy(Offset(0f, rootHeight))
             up()
         }
         composeRule.runOnIdle { }
 
+        // Bisect first: did the drag even start?
+        assertTrue("the long-press never started a drag (no position reports)", positions.isNotEmpty())
         assertTrue(
             "the drag should have auto-scrolled the screen (was $scrolledBefore, now ${scrollState.value})",
             scrollState.value > scrolledBefore,
