@@ -262,6 +262,47 @@ class CalendarDragTest {
     }
 
     @Test
+    fun `round 25 diagnostic — reported pointer ends at the target Y`() {
+        // Round 25, option B: assert the screen's OWN reported pointer
+        // directly. positions holds onDragPositionChanged reports in box
+        // coords; the gesture moves the pointer by (targetY -
+        // cardCenter.y), so the last report should be targetY. If this
+        // PASSES, the pointer is right and the grid-top computation is
+        // wrong; if it FAILS, the pointer itself is wrong in the
+        // harness. Same 05:30 target as the main test (clear of the
+        // bottom edge zone), so the drop is exact there and only the
+        // pointer is under test. One assert, 1 px tolerance (~0.5 dp):
+        // absorbs float rounding only — the offsets under investigation
+        // are +32 dp / +16 dp, so a real pointer error fails this by a
+        // wide margin. (The CI log strips values, so the verdict is
+        // pass/fail only; that is the point of this test.)
+        val t1 = task("t1", dayAt(15))
+        val positions = mutableListOf<Offset>()
+        val scrollState = ScrollState(0)
+        setContent(
+            strip = listOf(t1),
+            onDropTask = { _, _ -> },
+            onDragPositionChanged = { positions.add(it) },
+            screenScrollState = scrollState,
+        )
+        composeRule.runOnIdle { }
+        val (cardCenter, gridTop) = prepareDrag(scrollState)
+        val hourPx = with(composeRule.density) { 64.dp.toPx() }
+        val targetY = gridTop + 5.5f * hourPx
+
+        composeRule.onNodeWithTag("strip_card_t1").performTouchInput {
+            down(center)
+            advanceEventTime(1000)
+            moveBy(Offset(0f, targetY - cardCenter.y))
+            up()
+        }
+        composeRule.runOnIdle { }
+
+        assertTrue("the long-press never started a drag (no position reports)", positions.isNotEmpty())
+        assertEquals(targetY, positions.last().y, 1f)
+    }
+
+    @Test
     fun `round 24 diagnostic — drop equals the live highlight slot`() {
         // Round 24, second data point: the drop (onDragEnd's live
         // recompute) against the last `slots` entry (the live
