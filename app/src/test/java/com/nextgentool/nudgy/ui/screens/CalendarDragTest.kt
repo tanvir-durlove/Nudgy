@@ -205,6 +205,11 @@ class CalendarDragTest {
             hourPx,
             dayStart,
         )
+        // Bisect the drop: no drop at all (onDragEnd saw a null slot,
+        // so the pointer never reached the grid) vs a drop at the
+        // wrong slot (the pointer or the slot math is off). The two
+        // cases fail on different lines.
+        assertTrue("the drag should have dropped the task (drops is empty)", drops.isNotEmpty())
         assertEquals(listOf(t1 to expected), drops)
         // The highlight showed the dropped slot during the drag. (contains,
         // not last: a loop tick landing after the release could append one
