@@ -18,10 +18,7 @@ import androidx.compose.ui.unit.dp
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.domain.PendingDropConflict
-import com.nextgentool.nudgy.domain.slotStartForY
-import com.nextgentool.nudgy.domain.startOfDayMillis
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -40,15 +37,12 @@ import java.util.Calendar
  * finger is reported, the drop hands the task + the slot the geometry
  * predicts, and a release outside the grid drops nothing.
  *
- * The expected slot is computed from MEASURED geometry (the grid's
- * boundsInRoot top from the fresh first layout, the card's centre, the
- * screen scroll value after the gesture) through the same pure
- * slotStartForY — so the test stays deterministic whatever the test
- * viewport height is: if the drag scrolled the screen (one 24 dp tick
- * from scroll-on-move, or a loop tick), the scroll is inside the
- * expectation instead of breaking it. Never read semantics mid-gesture
- * (it hangs the test worker); the live slot is read from the
- * onDragSlotChanged callback.
+ * The main test asserts the drop IS the dragged-to target (01:30):
+ * the target Y is computed from MEASURED geometry (the grid's
+ * boundsInRoot top from the fresh first layout, the card's centre),
+ * so the test stays deterministic whatever the test viewport height
+ * is. Never read semantics mid-gesture (it hangs the test worker);
+ * the live slot is read from the onDragSlotChanged callback.
  */
 @RunWith(RobolectricTestRunner::class)
 // The viewport is 1000 dp tall (w360dp-h1000dp) so the strip and the
@@ -167,24 +161,18 @@ class CalendarDragTest {
         )
         composeRule.runOnIdle { }
         val (cardCenter, gridTop) = prepareDrag(scrollState)
-        val scrolledBeforeDrag = scrollState.value
         val hourPx = with(composeRule.density) { 64.dp.toPx() }
-        val dayStart = startOfDayMillis(System.currentTimeMillis())
-        // Target 05:30 — the third data point. Round 22 proved the
-        // drop lands at 02:00 for a 01:30 target (+30 min / +32 dp);
-        // round 23 proved it lands at 03:15 for a 03:00 target
-        // (+15 min / +16 dp). The offset SHRINKS as the target grows,
-        // which rules out both a constant offset and a ratio error —
-        // so this point pins the target→actual curve.
-        // NOTE (round 24): the plan said 06:00, but the pointer there
-        // lands at ~959 dp — inside the 56 dp bottom edge zone
-        // (944–1000 dp) — so scroll-on-move would fire (+24 dp, and
-        // possibly a loop tick on top) and contaminate the very curve
-        // this point is meant to pin. 05:30 lands at ~927 dp, clear
-        // of the zone, and discriminates just as well: constant +32 dp
-        // → 06:00; linear fit through the two points → 05:15; exact
-        // → 05:30; ratio x4/3 → 07:15.
-        val targetY = gridTop + 5.5f * hourPx
+        // Strict form (round 26): drag to the 01:30 target and assert
+        // the drop IS 01:30. The 01:30 (+30 min) and 03:00 (+15 min)
+        // harness offsets were measured in rounds 22–23 at earlier
+        // production code and were never re-measured at the current
+        // head; Tanvir device-tested the ci579 diagnostic build
+        // (2026-11-20) and confirmed drags land EXACTLY where dropped
+        // on a real phone (01:30, 03:30, 05:30 all exact). The
+        // diagnostic oracle form of this test (assertNotEquals on
+        // every candidate slot) is gone — it failed precisely when
+        // the drop was correct.
+        val targetY = gridTop + 1.5f * hourPx
         // The Board's proven gesture, exactly: down(center), hold past
         // the long-press timeout, one move, release. (Rounds 9–16 used
         // down(pressPos) + stepped moves; the isolation diagnostics
@@ -206,59 +194,12 @@ class CalendarDragTest {
         // fires in onDragStart itself, so an empty list means the press
         // never became a drag (not a slot/drop problem).
         assertTrue("the long-press never started a drag (no position reports)", positions.isNotEmpty())
-        // NOTE: slots (the live highlight callback) is NOT asserted
-        // here — the drop below is the behaviour that matters, and the
-        // highlight is pinned by assertTrue(slots.contains(expected))
-        // after it. (Round 17: the drag starts and positions fills,
-        // but slots stayed empty — whether the highlight callback
-        // fires is a separate question from whether the drop lands.)
-        // The drop slot is the pure function of the measured geometry
-        // plus whatever the screen scrolled DURING the drag (a 24 dp
-        // scroll-on-move tick, or a loop tick, moves the grid up under
-        // the finger by exactly that many px). The preparation scroll
-        // is already inside gridTop, so only the extra scroll counts.
-        // Round 19: the drop landed but at the wrong slot, so compute
-        // the expected from the screen's OWN reported pointer positions
-        // (box coords) instead of the target geometry: the first
-        // position is the press (the card centre), so the box offset
-        // cancels through it, and the last position is where the
-        // pointer actually ended up. If the drop matches THIS, the
-        // pointer did not end at targetY; if it matches neither, the
-        // slot computation itself is off.
-        val firstPointerY = positions.first().y
-        val lastPointerY = positions.last().y
-        val gridLocalY = lastPointerY - gridTop + cardCenter.y - firstPointerY
-        val expected = slotStartForY(
-            gridLocalY + (scrollState.value - scrolledBeforeDrag),
-            hourPx,
-            dayStart,
-        )
         // Bisect the drop: no drop at all (onDragEnd saw a null slot,
         // so the pointer never reached the grid) vs a drop at the
         // wrong slot (the pointer or the slot math is off). The two
         // cases fail on different lines.
         assertTrue("the drag should have dropped the task (drops is empty)", drops.isNotEmpty())
-        // Round 24 oracle: with a 05:30 target, a CONSTANT +32 dp
-        // offset lands at 06:00, the LINEAR fit through the two
-        // earlier points lands at 05:15, EXACT lands at 05:30, and a
-        // RATIO (x4/3) error lands at 07:15. One assertNotEquals per
-        // candidate; the first failing line IS the slot.
-        val slot = drops[0].second
-        assertNotEquals(dayAt(5, 0), slot)
-        assertNotEquals(dayAt(5, 15), slot)
-        assertNotEquals(dayAt(5, 30), slot)
-        assertNotEquals(dayAt(5, 45), slot)
-        assertNotEquals(dayAt(6, 0), slot)
-        assertNotEquals(dayAt(6, 15), slot)
-        assertNotEquals(dayAt(6, 30), slot)
-        assertNotEquals(dayAt(6, 45), slot)
-        assertNotEquals(dayAt(7, 0), slot)
-        assertNotEquals(dayAt(7, 15), slot)
-        assertNotEquals(dayAt(7, 30), slot)
-        assertEquals(listOf(t1 to expected), drops)
-        // The highlight (slots) is NOT asserted here — round 17 showed
-        // it stays empty while the drag otherwise works, which is a
-        // separate highlight-callback question, not the drop.
+        assertEquals(listOf(t1 to dayAt(1, 30)), drops)
     }
 
     @Test
