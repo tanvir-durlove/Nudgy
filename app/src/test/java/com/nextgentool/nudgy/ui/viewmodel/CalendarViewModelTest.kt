@@ -50,6 +50,15 @@ class CalendarViewModelTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
+        // Round 8 proved Robolectric does NOT grant calendar permissions
+        // by default (even though the manifest declares them), so every
+        // sync returned 0 at the permission check. Grant them explicitly
+        // for these tests — the production permission checks are unchanged.
+        org.robolectric.Shadows.shadowOf(context as android.app.Application)
+            .grantPermissions(
+                android.Manifest.permission.READ_CALENDAR,
+                android.Manifest.permission.WRITE_CALENDAR
+            )
         context.getSharedPreferences("nudgy_auth_prefs", Context.MODE_PRIVATE)
             .edit().putString("active_user_id", "test-user-1").apply()
         db = Room.inMemoryDatabaseBuilder(context, NudgyDatabase::class.java)
