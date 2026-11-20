@@ -7,6 +7,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
+import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
 import com.nextgentool.nudgy.data.repository.TaskRepository
@@ -69,8 +70,8 @@ class ShareIntentViewModelTest {
         }
 
     private suspend fun waitForTasks(
-        predicate: (List<com.nextgentool.nudgy.data.local.TaskEntity>) -> Boolean
-    ): List<com.nextgentool.nudgy.data.local.TaskEntity> =
+        predicate: (List<TaskEntity>) -> Boolean
+    ): List<TaskEntity> =
         taskRepository.observeAllTasks("test-user-1").first(predicate)
 
     // ------------------------------------------------------- handle / pending
