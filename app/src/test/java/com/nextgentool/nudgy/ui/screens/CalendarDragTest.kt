@@ -170,13 +170,21 @@ class CalendarDragTest {
         val scrolledBeforeDrag = scrollState.value
         val hourPx = with(composeRule.density) { 64.dp.toPx() }
         val dayStart = startOfDayMillis(System.currentTimeMillis())
-        // Target 03:00 — the centre of a 15-minute snap bucket, so a few
-        // px of measurement error is absorbed by the snap. Round 22
-        // proved the drop lands at 02:00 for a 01:30 target (+30 min /
-        // +32 dp). Targeting 03:00 distinguishes a CONSTANT +32 dp
-        // offset (lands 03:30) from a RATIO error (lands 04:00, x4/3
-        // — a density mismatch between the test and the screen).
-        val targetY = gridTop + 3.0f * hourPx
+        // Target 05:30 — the third data point. Round 22 proved the
+        // drop lands at 02:00 for a 01:30 target (+30 min / +32 dp);
+        // round 23 proved it lands at 03:15 for a 03:00 target
+        // (+15 min / +16 dp). The offset SHRINKS as the target grows,
+        // which rules out both a constant offset and a ratio error —
+        // so this point pins the target→actual curve.
+        // NOTE (round 24): the plan said 06:00, but the pointer there
+        // lands at ~959 dp — inside the 56 dp bottom edge zone
+        // (944–1000 dp) — so scroll-on-move would fire (+24 dp, and
+        // possibly a loop tick on top) and contaminate the very curve
+        // this point is meant to pin. 05:30 lands at ~927 dp, clear
+        // of the zone, and discriminates just as well: constant +32 dp
+        // → 06:00; linear fit through the two points → 05:15; exact
+        // → 05:30; ratio x4/3 → 07:15.
+        val targetY = gridTop + 5.5f * hourPx
         // The Board's proven gesture, exactly: down(center), hold past
         // the long-press timeout, one move, release. (Rounds 9–16 used
         // down(pressPos) + stepped moves; the isolation diagnostics
@@ -230,22 +238,66 @@ class CalendarDragTest {
         // wrong slot (the pointer or the slot math is off). The two
         // cases fail on different lines.
         assertTrue("the drag should have dropped the task (drops is empty)", drops.isNotEmpty())
-        // Round 23 oracle: with a 03:00 target, a CONSTANT +32 dp
-        // offset lands at 03:30 and a RATIO (x4/3) error lands at
-        // 04:00. One assertNotEquals per candidate; the first failing
-        // line IS the slot.
+        // Round 24 oracle: with a 05:30 target, a CONSTANT +32 dp
+        // offset lands at 06:00, the LINEAR fit through the two
+        // earlier points lands at 05:15, EXACT lands at 05:30, and a
+        // RATIO (x4/3) error lands at 07:15. One assertNotEquals per
+        // candidate; the first failing line IS the slot.
         val slot = drops[0].second
-        assertNotEquals(dayAt(2, 45), slot)
-        assertNotEquals(dayAt(3, 0), slot)
-        assertNotEquals(dayAt(3, 15), slot)
-        assertNotEquals(dayAt(3, 30), slot)
-        assertNotEquals(dayAt(3, 45), slot)
-        assertNotEquals(dayAt(4, 0), slot)
-        assertNotEquals(dayAt(4, 15), slot)
+        assertNotEquals(dayAt(5, 0), slot)
+        assertNotEquals(dayAt(5, 15), slot)
+        assertNotEquals(dayAt(5, 30), slot)
+        assertNotEquals(dayAt(5, 45), slot)
+        assertNotEquals(dayAt(6, 0), slot)
+        assertNotEquals(dayAt(6, 15), slot)
+        assertNotEquals(dayAt(6, 30), slot)
+        assertNotEquals(dayAt(6, 45), slot)
+        assertNotEquals(dayAt(7, 0), slot)
+        assertNotEquals(dayAt(7, 15), slot)
+        assertNotEquals(dayAt(7, 30), slot)
         assertEquals(listOf(t1 to expected), drops)
         // The highlight (slots) is NOT asserted here — round 17 showed
         // it stays empty while the drag otherwise works, which is a
         // separate highlight-callback question, not the drop.
+    }
+
+    @Test
+    fun `round 24 diagnostic — drop equals the live highlight slot`() {
+        // Round 24, second data point: the drop (onDragEnd's live
+        // recompute) against the last `slots` entry (the live
+        // highlight, computed on the move through the same
+        // computeSlot). If they AGREE, the bug is in the shared
+        // pointer/grid geometry — both paths use the same wrong slot.
+        // If they DISAGREE, onDragEnd's recompute differs from the
+        // move-time compute, and the bug is in what changes at
+        // release. Same 05:30 target as the main test (clear of the
+        // bottom edge zone, so no scroll-on-move fires).
+        val t1 = task("t1", dayAt(15))
+        val drops = mutableListOf<Pair<TaskEntity, Long>>()
+        val slots = mutableListOf<Long?>()
+        val scrollState = ScrollState(0)
+        setContent(
+            strip = listOf(t1),
+            onDropTask = { task, slot -> drops.add(task to slot) },
+            onDragSlotChanged = { slots.add(it) },
+            screenScrollState = scrollState,
+        )
+        composeRule.runOnIdle { }
+        val (cardCenter, gridTop) = prepareDrag(scrollState)
+        val hourPx = with(composeRule.density) { 64.dp.toPx() }
+        val targetY = gridTop + 5.5f * hourPx
+
+        composeRule.onNodeWithTag("strip_card_t1").performTouchInput {
+            down(center)
+            advanceEventTime(1000)
+            moveBy(Offset(0f, targetY - cardCenter.y))
+            up()
+        }
+        composeRule.runOnIdle { }
+
+        assertTrue("the drag should have dropped the task (drops is empty)", drops.isNotEmpty())
+        assertTrue("the live highlight should have fired (slots is empty)", slots.isNotEmpty())
+        assertEquals(slots.last(), drops[0].second)
     }
 
     @Test
