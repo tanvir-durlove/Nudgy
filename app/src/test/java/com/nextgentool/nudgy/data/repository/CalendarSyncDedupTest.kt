@@ -88,6 +88,49 @@ class CalendarSyncDedupTest {
         assertTrue(message, condition())
     }
 
+    // ------------------------------------------------------------ diagnostics
+    // Round-4 CI: every sync-touching test failed while the pure and
+    // group-refuse tests passed. These two pinpoint whether the fake
+    // provider is reachable at all (registration) or the sync path
+    // itself drops the rows. They are temporary — removed once the
+    // cause is proven.
+
+    @Test
+    fun `diagnostic provider answers a direct Instances query`() {
+        val start = tomorrowAt(10)
+        provider.addEvent(
+            FakeGoogleEvent(id = 42L, title = "Design review", start = start, end = start + 60 * 60 * 1000L)
+        )
+        val now = System.currentTimeMillis()
+        val uri = android.provider.CalendarContract.Instances.CONTENT_URI.buildUpon().apply {
+            appendPath((now - 7 * 24 * 60 * 60 * 1000L).toString())
+            appendPath((now + 30 * 24 * 60 * 60 * 1000L).toString())
+        }.build()
+        val cursor = context.contentResolver.query(
+            uri,
+            arrayOf(
+                android.provider.CalendarContract.Instances.EVENT_ID,
+                android.provider.CalendarContract.Instances.TITLE,
+                android.provider.CalendarContract.Instances.BEGIN,
+                android.provider.CalendarContract.Instances.END
+            ),
+            null, null, null
+        )
+        assertNotNull("direct Instances query returned null — provider not registered", cursor)
+        cursor!!.use {
+            assertEquals(1, it.count)
+        }
+    }
+
+    @Test
+    fun `diagnostic sync returns the imported count`() = runTest {
+        val start = tomorrowAt(10)
+        provider.addEvent(
+            FakeGoogleEvent(id = 42L, title = "Design review", start = start, end = start + 60 * 60 * 1000L)
+        )
+        assertEquals(1, repository.syncGoogleCalendar(userId))
+    }
+
     // ------------------------------------------------------------ pure helpers
 
     @Test

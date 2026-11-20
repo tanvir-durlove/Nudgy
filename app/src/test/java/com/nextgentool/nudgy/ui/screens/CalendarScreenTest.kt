@@ -71,9 +71,11 @@ class CalendarScreenTest {
                 isCalendarConnected = true
             )
         }
-        composeRule.onNodeWithText("Design review").assertIsDisplayed()
-        composeRule.onNodeWithText("SUGGESTED FOCUS TIME").assertIsDisplayed()
-        composeRule.onNodeWithText("Sync now").assertIsDisplayed()
+        // The event list and the focus card sit below the fold in the
+        // test viewport: assertExists (in the tree), not assertIsDisplayed.
+        composeRule.onNodeWithText("Design review").assertExists()
+        composeRule.onNodeWithText("SUGGESTED FOCUS TIME").assertExists()
+        composeRule.onNodeWithText("Sync now").assertExists()
     }
 
     @Test
