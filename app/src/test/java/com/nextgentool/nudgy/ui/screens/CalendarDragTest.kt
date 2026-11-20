@@ -4,6 +4,8 @@ import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
@@ -286,6 +288,58 @@ class CalendarDragTest {
             "the drag should have auto-scrolled the screen (was $scrolledBefore, now ${scrollState.value})",
             scrollState.value > scrolledBefore,
         )
+    }
+
+    @Test
+    fun `diagnostic — strip drag inside a pre-scrolled vertical column`() {
+        // Bisection (round 13): the strip drags alone AND inside a
+        // plain verticalScroll Column, but not on the full screen. The
+        // one variable those diagnostics did not cover is the
+        // PRE-SCROLL — the full screen renders with ScrollState
+        // (initial = 360 dp). This renders the strip inside a
+        // pre-scrolled vertical Column, with a spacer above it like
+        // the real screen's sections, and presses the card's measured
+        // centre.
+        val t1 = task("t1", dayAt(15))
+        val starts = mutableListOf<Offset>()
+        val scrollState = ScrollState(with(composeRule.density) { 360.dp.toPx() }.toInt())
+        composeRule.setContent {
+            Box(modifier = Modifier.fillMaxSize()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(scrollState),
+                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
+                    // Spacer above the strip, like the real screen's
+                    // header + week + connect + schedule sections.
+                    Box(modifier = Modifier.fillMaxWidth().height(450.dp))
+                    CalendarTaskStrip(
+                        tasks = listOf(t1),
+                        draggingTaskId = null,
+                        onDragStart = { _, offset, _ -> starts.add(offset) },
+                        onDragMove = { _, _ -> },
+                        onDragEnd = {},
+                        onDragCancel = {},
+                    )
+                }
+            }
+        }
+        composeRule.runOnIdle { }
+        val pressPos = composeRule.onNodeWithTag("strip_card_t1")
+            .fetchSemanticsNode().boundsInRoot.center
+        composeRule.onNodeWithTag("strip_card_t1").performTouchInput {
+            down(pressPos)
+            advanceEventTime(1000)
+            moveBy(Offset(0f, 100f))
+            up()
+        }
+        composeRule.runOnIdle {
+            assertTrue(
+                "strip drag should start in a pre-scrolled vertical column",
+                starts.isNotEmpty()
+            )
+        }
     }
 
     @Test
