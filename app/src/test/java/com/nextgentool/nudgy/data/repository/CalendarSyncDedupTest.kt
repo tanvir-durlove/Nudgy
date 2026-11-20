@@ -23,8 +23,8 @@ import java.util.Calendar
 /**
  * Sprint 2-1 (§7) — the idempotency gate. Every test here proves a
  * "one row / one doc / one Google event" invariant against a fake
- * `com.android.calendar` provider and a recording Firestore seam, so
- * no Firebase client, network, or real calendar is ever touched.
+ * provider gateway and a recording Firestore seam, so no Firebase
+ * client, network, or real calendar is ever touched.
  *
  * The user is a signed-in (non-guest) test id: the guest path
  * early-returns before the Firestore seam, which would hide the
@@ -36,7 +36,7 @@ class CalendarSyncDedupTest {
 
     private lateinit var context: Context
     private lateinit var db: NudgyDatabase
-    private lateinit var provider: FakeCalendarProvider
+    private lateinit var provider: FakeCalendarProviderGateway
     private lateinit var fakeSync: FakeCalendarEventSync
     private lateinit var repository: CalendarRepository
     private lateinit var taskRepository: TaskRepository
@@ -49,21 +49,9 @@ class CalendarSyncDedupTest {
         db = Room.inMemoryDatabaseBuilder(context, NudgyDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        // The documented registration: Robolectric.buildContentProvider.
-        // ShadowContentResolver.registerProviderInternal is marked
-        // "internal-only, do not use" — and round 5 proved it does not
-        // stick: a direct query returned null even though setUp called
-        // it. buildContentProvider attaches the provider (attachInfo)
-        // and registers it through the supported path.
-        val info = android.content.pm.ProviderInfo().apply {
-            authority = "com.android.calendar"
-        }
-        provider = org.robolectric.Robolectric
-            .buildContentProvider(FakeCalendarProvider::class.java)
-            .create(info)
-            .get()
+        provider = FakeCalendarProviderGateway()
         fakeSync = FakeCalendarEventSync()
-        repository = CalendarRepository(context, db, fakeSync)
+        repository = CalendarRepository(context, db, fakeSync, provider)
         taskRepository = TaskRepository(context, db)
     }
 
@@ -96,49 +84,6 @@ class CalendarSyncDedupTest {
             Thread.sleep(50)
         }
         assertTrue(message, condition())
-    }
-
-    // ------------------------------------------------------------ diagnostics
-    // Round-4 CI: every sync-touching test failed while the pure and
-    // group-refuse tests passed. These two pinpoint whether the fake
-    // provider is reachable at all (registration) or the sync path
-    // itself drops the rows. They are temporary — removed once the
-    // cause is proven.
-
-    @Test
-    fun `diagnostic provider answers a direct Instances query`() {
-        val start = tomorrowAt(10)
-        provider.addEvent(
-            FakeGoogleEvent(id = 42L, title = "Design review", start = start, end = start + 60 * 60 * 1000L)
-        )
-        val now = System.currentTimeMillis()
-        val uri = android.provider.CalendarContract.Instances.CONTENT_URI.buildUpon().apply {
-            appendPath((now - 7 * 24 * 60 * 60 * 1000L).toString())
-            appendPath((now + 30 * 24 * 60 * 60 * 1000L).toString())
-        }.build()
-        val cursor = context.contentResolver.query(
-            uri,
-            arrayOf(
-                android.provider.CalendarContract.Instances.EVENT_ID,
-                android.provider.CalendarContract.Instances.TITLE,
-                android.provider.CalendarContract.Instances.BEGIN,
-                android.provider.CalendarContract.Instances.END
-            ),
-            null, null, null
-        )
-        assertNotNull("direct Instances query returned null — provider not registered", cursor)
-        cursor!!.use {
-            assertEquals(1, it.count)
-        }
-    }
-
-    @Test
-    fun `diagnostic sync returns the imported count`() = runTest {
-        val start = tomorrowAt(10)
-        provider.addEvent(
-            FakeGoogleEvent(id = 42L, title = "Design review", start = start, end = start + 60 * 60 * 1000L)
-        )
-        assertEquals(1, repository.syncGoogleCalendar(userId))
     }
 
     // ------------------------------------------------------------ pure helpers
@@ -185,7 +130,8 @@ class CalendarSyncDedupTest {
             .allowMainThreadQueries()
             .build()
         val fakeSyncB = FakeCalendarEventSync()
-        val repositoryB = CalendarRepository(context, dbB, fakeSyncB)
+        // Same Google calendar (same gateway), different local DB.
+        val repositoryB = CalendarRepository(context, dbB, fakeSyncB, provider)
         try {
             repository.syncGoogleCalendar(userId)
             repositoryB.syncGoogleCalendar(userId)

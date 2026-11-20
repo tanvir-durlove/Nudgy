@@ -1,8 +1,6 @@
 package com.nextgentool.nudgy.data.repository
 
 import android.Manifest
-import android.content.ContentUris
-import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
 import android.provider.CalendarContract
@@ -31,7 +29,6 @@ import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
-import java.util.TimeZone
 import java.util.UUID
 
 data class FocusTimeSlot(
@@ -73,15 +70,19 @@ fun parseExportMarker(description: String?): String? =
 class CalendarRepository(
     private val context: Context,
     private val database: NudgyDatabase = NudgyDatabase.getInstance(context),
-    // Sprint 2-1 — test seam (see CalendarEventSync). Production passes
-    // nothing and gets the real Firestore implementation; tests inject a
-    // fake so no Firebase client is ever touched on the JVM.
-    eventSyncParam: CalendarEventSync? = null
+    // Sprint 2-1 — test seams (see CalendarEventSync and
+    // CalendarProviderGateway). Production passes nothing and gets the
+    // real implementations; tests inject fakes so no Firebase client
+    // and no device calendar provider are ever touched on the JVM.
+    eventSyncParam: CalendarEventSync? = null,
+    providerGatewayParam: CalendarProviderGateway? = null
 ) {
     private val calendarDao = database.calendarDao()
     private val repoScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val eventSync: CalendarEventSync =
         eventSyncParam ?: RealCalendarEventSync(context, repoScope)
+    private val providerGateway: CalendarProviderGateway =
+        providerGatewayParam ?: RealCalendarProviderGateway(context)
     private var snapshotListener: ListenerRegistration? = null
     /** Single-flight for Google sync (§7): two concurrent syncs must not
      *  import the same occurrence twice. */
@@ -294,8 +295,7 @@ class CalendarRepository(
             return false
         }
         return try {
-            val deleteUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, googleEventId)
-            val rows = context.contentResolver.delete(deleteUri, null, null)
+            val rows = providerGateway.deleteEvent(googleEventId)
             if (rows == 0) {
                 Log.w(TAG, "Google Calendar delete removed 0 rows for event $googleEventId (already gone?)")
                 false
@@ -329,35 +329,12 @@ class CalendarRepository(
         // phones that is the device-local calendar (primary-flagged, never
         // syncs to Google) or a read-only Google calendar (Holidays etc.),
         // so app-created events never reached Google Calendar.
-        val projection = arrayOf(
-            CalendarContract.Calendars._ID,
-            CalendarContract.Calendars.ACCOUNT_TYPE,
-            CalendarContract.Calendars.IS_PRIMARY,
-            CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL
-        )
-        val uri = CalendarContract.Calendars.CONTENT_URI
         var fallbackId: Long? = null
-        try {
-            context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
-                val idIndex = cursor.getColumnIndex(CalendarContract.Calendars._ID)
-                val typeIndex = cursor.getColumnIndex(CalendarContract.Calendars.ACCOUNT_TYPE)
-                val primaryIndex = cursor.getColumnIndex(CalendarContract.Calendars.IS_PRIMARY)
-                val accessIndex = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL)
-
-                while (cursor.moveToNext()) {
-                    if (idIndex < 0) continue
-                    val acctType = if (typeIndex >= 0) cursor.getString(typeIndex) else null
-                    if (acctType != "com.google") continue
-                    val access = if (accessIndex >= 0) cursor.getInt(accessIndex) else 0
-                    if (access < CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR) continue
-                    val calId = cursor.getLong(idIndex)
-                    val isPrimary = if (primaryIndex >= 0) cursor.getInt(primaryIndex) == 1 else false
-                    if (isPrimary) return calId
-                    if (fallbackId == null) fallbackId = calId
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error finding primary Google Calendar ID: ${e.message}")
+        for (calendar in providerGateway.queryCalendars()) {
+            if (calendar.accountType != "com.google") continue
+            if (calendar.accessLevel < CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR) continue
+            if (calendar.isPrimary) return calendar.id
+            if (fallbackId == null) fallbackId = calendar.id
         }
         return fallbackId
     }
@@ -387,31 +364,20 @@ class CalendarRepository(
             return null
         }
         val calId = getPrimaryGoogleCalendarId() ?: return null
-        return try {
-            val description = buildString {
-                append("Scheduled via Nudgy ($eventType)")
-                if (localId != null) append(" ").append(exportMarker(localId))
-            }
-            val values = ContentValues().apply {
-                put(CalendarContract.Events.CALENDAR_ID, calId)
-                put(CalendarContract.Events.TITLE, title)
-                put(CalendarContract.Events.DTSTART, startEpochMillis)
-                put(CalendarContract.Events.DTEND, endEpochMillis)
-                put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
-                if (!location.isNullOrBlank()) {
-                    put(CalendarContract.Events.EVENT_LOCATION, location)
-                }
-                put(CalendarContract.Events.DESCRIPTION, description)
-                put(CalendarContract.Events.HAS_ALARM, 1)
-            }
-            val uri = context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
-            val insertedId = uri?.lastPathSegment?.toLongOrNull()
-            Log.d(TAG, "Successfully exported event '$title' to Google Calendar, ID: $insertedId")
-            insertedId
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to export event to Google Calendar: ${e.message}")
-            null
+        val description = buildString {
+            append("Scheduled via Nudgy ($eventType)")
+            if (localId != null) append(" ").append(exportMarker(localId))
         }
+        return providerGateway.insertEvent(
+            ProviderEventValues(
+                calendarId = calId,
+                title = title,
+                startEpochMillis = startEpochMillis,
+                endEpochMillis = endEpochMillis,
+                location = location,
+                description = description
+            )
+        )
     }
 
     /**
@@ -434,65 +400,25 @@ class CalendarRepository(
         val searchStart = now - (7 * 24 * 60 * 60 * 1000L) // past 7 days
         val searchEnd = now + (30 * 24 * 60 * 60 * 1000L) // next 30 days
 
-        // Query Instances (not Events) so recurring series expand into their
-        // individual occurrences inside the window.
-        val instancesUri = CalendarContract.Instances.CONTENT_URI.buildUpon().apply {
-            appendPath(searchStart.toString())
-            appendPath(searchEnd.toString())
-        }.build()
-
-        val projection = arrayOf(
-            CalendarContract.Instances.EVENT_ID,
-            CalendarContract.Instances.TITLE,
-            CalendarContract.Instances.BEGIN,
-            CalendarContract.Instances.END,
-            CalendarContract.Instances.EVENT_LOCATION,
-            CalendarContract.Instances.ALL_DAY,
-            CalendarContract.Instances.CALENDAR_ID,
-            // Sprint 2-1 (§7): DESCRIPTION carries the [nudgy:<id>]
-            // marker of our own exports — the import parses it to link
-            // (or re-create) the local row instead of exporting twice.
-            CalendarContract.Instances.DESCRIPTION
-        )
-        // No selection: deleted events simply have no instances in this
-        // view, and the reconciliation below keys off their absence.
-        val selection: String? = null
-
         // Holiday calendars (e.g. "Holidays in Bangladesh") are read-only
         // Google calendars whose events would otherwise pollute the
         // schedule. Exclude them by calendar id: the name contains
         // "holiday" AND access is below contributor, so writable calendars
         // are never treated as holidays, even if oddly named. If this
         // lookup fails, the set stays empty and sync behaves as before.
-        val holidayCalendarIds = mutableSetOf<Long>()
-        try {
-            context.contentResolver.query(
-                CalendarContract.Calendars.CONTENT_URI,
-                arrayOf(
-                    CalendarContract.Calendars._ID,
-                    CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
-                    CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL
-                ),
-                null, null, null
-            )?.use { calCursor ->
-                val hIdIndex = calCursor.getColumnIndex(CalendarContract.Calendars._ID)
-                val hNameIndex = calCursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME)
-                val hAccessIndex = calCursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL)
-                while (calCursor.moveToNext()) {
-                    if (hIdIndex < 0) continue
-                    val hName = if (hNameIndex >= 0) calCursor.getString(hNameIndex) else null
-                    val hAccess = if (hAccessIndex >= 0) calCursor.getInt(hAccessIndex) else 0
-                    if (hName != null && hName.contains("holiday", ignoreCase = true) &&
-                        hAccess < CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR
-                    ) {
-                        holidayCalendarIds.add(calCursor.getLong(hIdIndex))
-                    }
-                }
+        val holidayCalendarIds = providerGateway.queryCalendars()
+            .filter { calendar ->
+                calendar.displayName != null &&
+                    calendar.displayName.contains("holiday", ignoreCase = true) &&
+                    calendar.accessLevel < CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error finding holiday calendars: ${e.message}")
-        }
+            .map { it.id }
+            .toMutableSet()
 
+        // Query Instances (not Events) so recurring series expand into
+        // their individual occurrences inside the window. No selection:
+        // deleted events simply have no instances in this view, and the
+        // reconciliation below keys off their absence.
         try {
             // Remote occurrences, keyed by (google event id, occurrence start)
             // so each occurrence of a recurring series is tracked separately.
@@ -501,50 +427,31 @@ class CalendarRepository(
             // the Google description of our own exports carries
             // [nudgy:<localId>], which links the occurrence to its row.
             val markerByKey = HashMap<Pair<Long, Long>, String>()
-            context.contentResolver.query(
-                instancesUri,
-                projection,
-                selection,
-                null,
-                "${CalendarContract.Instances.BEGIN} ASC"
-            )?.use { cursor ->
-                val idIndex = cursor.getColumnIndex(CalendarContract.Instances.EVENT_ID)
-                val calIdIndex = cursor.getColumnIndex(CalendarContract.Instances.CALENDAR_ID)
-                val titleIndex = cursor.getColumnIndex(CalendarContract.Instances.TITLE)
-                val beginIndex = cursor.getColumnIndex(CalendarContract.Instances.BEGIN)
-                val endIndex = cursor.getColumnIndex(CalendarContract.Instances.END)
-                val locIndex = cursor.getColumnIndex(CalendarContract.Instances.EVENT_LOCATION)
-                val allDayIndex = cursor.getColumnIndex(CalendarContract.Instances.ALL_DAY)
-                val descIndex = cursor.getColumnIndex(CalendarContract.Instances.DESCRIPTION)
-
-                while (cursor.moveToNext()) {
-                    val gId = cursor.getLong(idIndex)
-                    if (calIdIndex >= 0 && cursor.getLong(calIdIndex) in holidayCalendarIds) continue
-                    val rawTitle = cursor.getString(titleIndex) ?: "Untitled Event"
-                    val start = cursor.getLong(beginIndex)
-                    var end = cursor.getLong(endIndex)
-                    if (end <= start) end = start + (45 * 60 * 1000L)
-                    val loc = if (locIndex >= 0) cursor.getString(locIndex) else null
-                    val isAllDay = if (allDayIndex >= 0) cursor.getInt(allDayIndex) == 1 else false
-                    if (descIndex >= 0) {
-                        parseExportMarker(cursor.getString(descIndex))?.let { markerId ->
-                            markerByKey[gId to start] = markerId
-                        }
-                    }
-
-                    remote[gId to start] = CalendarEventEntity(
-                        id = "",
-                        userId = userId,
-                        title = rawTitle,
-                        startEpochMillis = start,
-                        endEpochMillis = end,
-                        locationOrLink = loc ?: "Google Calendar",
-                        eventType = if (rawTitle.contains("Focus", ignoreCase = true) || rawTitle.contains("Deep work", ignoreCase = true)) "FOCUS_TIME" else "MEETING",
-                        isAllDay = isAllDay,
-                        googleCalendarEventId = gId,
-                        isFromGoogleCalendar = true
-                    )
+            for (instance in providerGateway.queryInstances(searchStart, searchEnd)) {
+                val gId = instance.googleEventId
+                if (instance.calendarId in holidayCalendarIds) continue
+                val rawTitle = instance.title ?: "Untitled Event"
+                val start = instance.beginEpochMillis
+                var end = instance.endEpochMillis
+                if (end <= start) end = start + (45 * 60 * 1000L)
+                val loc = instance.location
+                val isAllDay = instance.allDay
+                parseExportMarker(instance.description)?.let { markerId ->
+                    markerByKey[gId to start] = markerId
                 }
+
+                remote[gId to start] = CalendarEventEntity(
+                    id = "",
+                    userId = userId,
+                    title = rawTitle,
+                    startEpochMillis = start,
+                    endEpochMillis = end,
+                    locationOrLink = loc ?: "Google Calendar",
+                    eventType = if (rawTitle.contains("Focus", ignoreCase = true) || rawTitle.contains("Deep work", ignoreCase = true)) "FOCUS_TIME" else "MEETING",
+                    isAllDay = isAllDay,
+                    googleCalendarEventId = gId,
+                    isFromGoogleCalendar = true
+                )
             }
 
             // Sprint 2-1 (§7): before importing, (1) retry any local
@@ -831,17 +738,15 @@ class CalendarRepository(
             return false
         }
         return try {
-            val uri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, googleEventId)
-            val values = ContentValues().apply {
-                put(CalendarContract.Events.TITLE, title)
-                put(CalendarContract.Events.DTSTART, startEpochMillis)
-                put(CalendarContract.Events.DTEND, endEpochMillis)
-                put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
-                if (!location.isNullOrBlank()) {
-                    put(CalendarContract.Events.EVENT_LOCATION, location)
-                }
-            }
-            val rows = context.contentResolver.update(uri, values, null, null)
+            val rows = providerGateway.updateEvent(
+                googleEventId,
+                ProviderEventValues(
+                    title = title,
+                    startEpochMillis = startEpochMillis,
+                    endEpochMillis = endEpochMillis,
+                    location = location
+                )
+            )
             if (rows == 0) {
                 Log.w(TAG, "Google Calendar update changed 0 rows for event $googleEventId")
                 false

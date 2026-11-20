@@ -6,7 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.data.repository.FakeCalendarEventSync
-import com.nextgentool.nudgy.data.repository.FakeCalendarProvider
+import com.nextgentool.nudgy.data.repository.FakeCalendarProviderGateway
 import com.nextgentool.nudgy.data.repository.FakeGoogleEvent
 import com.nextgentool.nudgy.data.repository.GroupRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
@@ -42,7 +42,7 @@ class CalendarViewModelTest {
 
     private lateinit var context: Context
     private lateinit var db: NudgyDatabase
-    private lateinit var provider: FakeCalendarProvider
+    private lateinit var provider: FakeCalendarProviderGateway
     private lateinit var calendarRepository: CalendarRepository
     private lateinit var taskRepository: TaskRepository
     private lateinit var groupRepository: GroupRepository
@@ -55,16 +55,8 @@ class CalendarViewModelTest {
         db = Room.inMemoryDatabaseBuilder(context, NudgyDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        // The documented registration (see CalendarSyncDedupTest):
-        // registerProviderInternal does not stick in this setup.
-        val info = android.content.pm.ProviderInfo().apply {
-            authority = "com.android.calendar"
-        }
-        provider = org.robolectric.Robolectric
-            .buildContentProvider(FakeCalendarProvider::class.java)
-            .create(info)
-            .get()
-        calendarRepository = CalendarRepository(context, db, FakeCalendarEventSync())
+        provider = FakeCalendarProviderGateway()
+        calendarRepository = CalendarRepository(context, db, FakeCalendarEventSync(), provider)
         taskRepository = TaskRepository(context, db)
         groupRepository = GroupRepository(context, db)
     }
