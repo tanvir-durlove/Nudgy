@@ -93,6 +93,9 @@ class CalendarViewModelDropTest {
 
     private fun todayString(): String = LocalDate.now(ZoneId.systemDefault()).toString()
 
+    private fun tomorrowString(): String =
+        LocalDate.now(ZoneId.systemDefault()).plusDays(1).toString()
+
     private suspend fun insertTask(
         id: String,
         due: Long,
@@ -125,13 +128,20 @@ class CalendarViewModelDropTest {
         val testDispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(testDispatcher)
         try {
-            val due = dayAt(0, 15)
+            // Tomorrow, not today: the test also asserts the reminder
+            // stays at due - 2h, and the product rule
+            // (ReminderManager.dueReminderTriggerMillis) moves the
+            // reminder to the due time once the 2h lead has passed. A
+            // 15:00 due TODAY makes this test fail on any run after
+            // 13:00 (proven by three red runs on 2026-11-20); tomorrow
+            // keeps the lead in the future at any hour.
+            val due = dayAt(1, 15)
             val task = insertTask("t1", due)
             val viewModel = viewModel()
             viewModel.selectDay(due)
             waitForStrip(viewModel, "t1")
 
-            val slot = dayAt(0, 10, 30)
+            val slot = dayAt(1, 10, 30)
             viewModel.dropTaskAtSlot(task, slot)
 
             // The drop writes in viewModelScope, so wait for the state to
@@ -139,7 +149,7 @@ class CalendarViewModelDropTest {
             val state = viewModel.uiState.first { it.placedTasks.any { t -> t.id == "t1" } }
             val after = db.taskDao().getTaskById("t1")!!
             assertEquals(slot, after.plannedStartEpochMillis)
-            assertEquals(todayString(), after.plannedDate)
+            assertEquals(tomorrowString(), after.plannedDate)
             // Nothing else moved: due, status, boardOrder, estimate, reminder.
             assertEquals(due, after.dueDateEpochMillis)
             assertEquals("TODO", after.status.name)

@@ -71,10 +71,16 @@ import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.repository.FocusTimeSlot
+import com.nextgentool.nudgy.domain.DEFAULT_SLOT_MINUTES
 import com.nextgentool.nudgy.domain.PendingDropConflict
+import com.nextgentool.nudgy.domain.dayIndexInWeek
+import com.nextgentool.nudgy.domain.minutesOfTime
+import com.nextgentool.nudgy.domain.parseStrictDate
 import com.nextgentool.nudgy.domain.slotBlockMinutes
 import com.nextgentool.nudgy.domain.slotStartForY
 import com.nextgentool.nudgy.domain.startOfDayMillis
+import com.nextgentool.nudgy.domain.weekOffsetForDay
+import com.nextgentool.nudgy.intent.IncomingIntent
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 import com.nextgentool.nudgy.ui.theme.NudgyAccent
@@ -142,11 +148,27 @@ fun CalendarScreen(
     // externally owned screen scroll state, so a test can assert the
     // drag auto-scroll moved the screen. Null/default in production.
     screenScrollState: ScrollState? = null,
+    // Sprint 2-4 — a pending date link / create-event intent (from
+    // the Activity-scoped ShareIntentViewModel, via NudgyApp). The
+    // screen jumps to the link's day (+ slot highlight) and opens the
+    // add-event dialog prefilled, then consumes them. Null when none.
+    pendingDateLink: IncomingIntent.DateLink? = null,
+    onDateLinkConsumed: () -> Unit = {},
+    pendingInsertEvent: IncomingIntent.InsertEvent? = null,
+    onInsertEventConsumed: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showAddEventDialog by remember { mutableStateOf(false) }
     var eventPendingDelete by remember { mutableStateOf<CalendarEventEntity?>(null) }
     var eventPendingEdit by remember { mutableStateOf<CalendarEventEntity?>(null) }
+    // Sprint 2-4 — the create-event intent being prefilled into the
+    // add-event dialog (set by the insert effect below, cleared on
+    // dialog dismiss / save).
+    var eventPendingInsert by remember { mutableStateOf<IncomingIntent.InsertEvent?>(null) }
+    // Sprint 2-4 — the slot a date link highlighted (slot start +
+    // display minutes), or null. Cleared on any manual day/week move
+    // or drag start — it is a one-shot cue, not a booking.
+    var linkHighlight by remember { mutableStateOf<Pair<Long, Int>?>(null) }
     var isBlockingTime by remember { mutableStateOf(false) }
 
     LaunchedEffect(events) {
@@ -207,6 +229,46 @@ fun CalendarScreen(
     // grid / events showed the wrong day. Sync it whenever the
     // displayed day changes; the tap path calls it too (harmless).
     LaunchedEffect(selectedDayMillis) { onSelectDay(selectedDayMillis) }
+
+    // Sprint 2-4 — jump the week strip to a day (a date link's day,
+    // or a create-event intent's begin day). The strip owns the week
+    // state — the ViewModel's selectDay alone cannot move it, and the
+    // screen's own LaunchedEffect(selectedDayMillis) above then syncs
+    // the ViewModel (strip / grid / events all follow).
+    fun jumpToDay(dayStartMillis: Long, highlightSlotMillis: Long?) {
+        weekOffset = weekOffsetForDay(dayStartMillis)
+        selectedDayIndex = dayIndexInWeek(dayStartMillis)
+        linkHighlight = highlightSlotMillis?.let { it to DEFAULT_SLOT_MINUTES }
+    }
+
+    // Sprint 2-4 — a date link opens the Calendar on its day (and
+    // highlights the slot when `t` is present). Consumed right after
+    // acting, so a rotation never re-jumps. The parser already
+    // validated d/t — the null branches are defense-in-depth only.
+    LaunchedEffect(pendingDateLink) {
+        val link = pendingDateLink ?: return@LaunchedEffect
+        val dayStart = parseStrictDate(link.date)
+        if (dayStart == null) {
+            onDateLinkConsumed()
+            return@LaunchedEffect
+        }
+        val slot = link.time?.let { minutesOfTime(it) }?.let { dayStart + it * 60_000L }
+        jumpToDay(dayStart, slot)
+        onDateLinkConsumed()
+    }
+
+    // Sprint 2-4 — a create-event intent jumps to the event's day and
+    // opens the add-event dialog prefilled (the dialog reads
+    // eventPendingInsert below). No begin time → the dialog opens on
+    // the currently selected day instead.
+    LaunchedEffect(pendingInsertEvent) {
+        val insert = pendingInsertEvent ?: return@LaunchedEffect
+        insert.beginMillis?.let { begin ->
+            jumpToDay(startOfDayMillis(begin), null)
+        }
+        eventPendingInsert = insert
+        onInsertEventConsumed()
+    }
 
     // Sprint 2-2 — drag-to-slot state machine (the Board's S1-4b
     // pattern: manual long-press drag + floating preview + live slot
@@ -432,7 +494,7 @@ fun CalendarScreen(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(CircleShape)
-                    .clickable { weekOffset-- },
+                    .clickable { weekOffset--; linkHighlight = null },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -456,6 +518,9 @@ fun CalendarScreen(
                             .background(if (isSelected) MaterialTheme.colorScheme.inverseSurface else Color.Transparent)
                             .clickable {
                                 selectedDayIndex = index
+                                // Sprint 2-4 — a manual day move drops
+                                // the date-link highlight (one-shot cue).
+                                linkHighlight = null
                                 onSelectDay(day.epochMillis)
                             }
                             .padding(horizontal = 10.dp, vertical = 12.dp),
@@ -483,7 +548,7 @@ fun CalendarScreen(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(CircleShape)
-                    .clickable { weekOffset++ },
+                    .clickable { weekOffset++; linkHighlight = null },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -845,6 +910,9 @@ fun CalendarScreen(
             tasks = stripTasks,
             draggingTaskId = drag?.taskId,
             onDragStart = { task, offsetInCard, cardCoords ->
+                // Sprint 2-4 — a drag drops the date-link highlight
+                // (the drag's own live highlight takes over).
+                linkHighlight = null
                 // Pointer in screen-viewport coordinates, evaluated
                 // fresh from the live coordinates (the Board's S1-4c
                 // fix: never a cached Offset).
@@ -918,7 +986,9 @@ fun CalendarScreen(
                     highlight = if (drag?.slotStartMillis != null) {
                         drag.slotStartMillis to drag.durationMinutes
                     } else {
-                        null
+                        // Sprint 2-4 — the date link's slot (null when
+                        // the link had no `t`, or after any manual move).
+                        linkHighlight
                     },
                     modifier = Modifier.onGloballyPositioned { gridCoords = it }
                 )
@@ -1000,17 +1070,33 @@ fun CalendarScreen(
         }
 
 
-    if (showAddEventDialog || eventPendingEdit != null) {
+    if (showAddEventDialog || eventPendingEdit != null || eventPendingInsert != null) {
         // Sprint 2-1 (Q8(a)): when opened from an event card, the dialog
         // is an EDIT — prefilled from the event (title / location /
         // duration / type / start time on the event's own day; the date
         // itself is not editable). Otherwise it is a CREATE.
+        // Sprint 2-4: a create-event intent opens the same dialog as a
+        // CREATE prefilled from the intent (title / location / begin /
+        // end) — same fields, same save path.
         val editingEvent = eventPendingEdit
-        var eventTitle by remember(editingEvent) { mutableStateOf(editingEvent?.title ?: "") }
-        var eventLocation by remember(editingEvent) { mutableStateOf(editingEvent?.locationOrLink ?: "") }
-        var selectedDurationMinutes by remember(editingEvent) {
+        val insert = eventPendingInsert
+        var eventTitle by remember(editingEvent, insert) {
+            mutableStateOf(insert?.title ?: editingEvent?.title ?: "")
+        }
+        var eventLocation by remember(editingEvent, insert) {
+            mutableStateOf(insert?.location ?: editingEvent?.locationOrLink ?: "")
+        }
+        var selectedDurationMinutes by remember(editingEvent, insert) {
             mutableIntStateOf(
-                editingEvent?.let { ((it.endEpochMillis - it.startEpochMillis) / 60_000L).toInt().coerceAtLeast(5) } ?: 30
+                insert?.let { ins ->
+                    if (ins.beginMillis != null && ins.endMillis != null) {
+                        ((ins.endMillis - ins.beginMillis) / 60_000L).toInt().coerceAtLeast(5)
+                    } else {
+                        null
+                    }
+                }
+                    ?: editingEvent?.let { ((it.endEpochMillis - it.startEpochMillis) / 60_000L).toInt().coerceAtLeast(5) }
+                    ?: 30
             )
         }
         var eventType by remember(editingEvent) { mutableStateOf(editingEvent?.eventType ?: "MEETING") }
@@ -1019,8 +1105,13 @@ fun CalendarScreen(
         val now = Calendar.getInstance()
         val defaultHour = now.get(Calendar.HOUR_OF_DAY).let { if (it in 7..21) (it + 1) % 24 else 10 }
         val editingCal = editingEvent?.let { Calendar.getInstance().apply { timeInMillis = it.startEpochMillis } }
-        var selectedHour by remember(editingEvent) { mutableIntStateOf(editingCal?.get(Calendar.HOUR_OF_DAY) ?: defaultHour) }
-        var selectedMinute by remember(editingEvent) { mutableIntStateOf(editingCal?.get(Calendar.MINUTE) ?: 0) }
+        val insertCal = insert?.beginMillis?.let { Calendar.getInstance().apply { timeInMillis = it } }
+        var selectedHour by remember(editingEvent, insert) {
+            mutableIntStateOf(editingCal?.get(Calendar.HOUR_OF_DAY) ?: insertCal?.get(Calendar.HOUR_OF_DAY) ?: defaultHour)
+        }
+        var selectedMinute by remember(editingEvent, insert) {
+            mutableIntStateOf(editingCal?.get(Calendar.MINUTE) ?: insertCal?.get(Calendar.MINUTE) ?: 0)
+        }
         var showTimePicker by remember { mutableStateOf(false) }
 
         fun formatTimeStr(h: Int, m: Int): String {
@@ -1039,7 +1130,7 @@ fun CalendarScreen(
         val scheduleSummary = "${formatTimeStr(selectedHour, selectedMinute)} – ${formatTimeStr(endHour, endMinute)} ($selectedDurationMinutes min)"
 
         AlertDialog(
-            onDismissRequest = { showAddEventDialog = false; eventPendingEdit = null },
+            onDismissRequest = { showAddEventDialog = false; eventPendingEdit = null; eventPendingInsert = null },
             title = { Text(if (editingEvent != null) "Edit event" else "Schedule Event", fontWeight = FontWeight.Bold, color = NudgyCharcoal) },
             text = {
                 Column(
@@ -1222,9 +1313,12 @@ fun CalendarScreen(
                 Button(
                     onClick = {
                         if (eventTitle.isNotBlank()) {
-                            // Edit keeps the event's own day; create uses
-                            // the selected day. The date is not editable.
+                            // Edit keeps the event's own day; a
+                            // create-event intent keeps its begin day;
+                            // a plain create uses the selected day. The
+                            // date is not editable.
                             val baseEpoch = editingEvent?.startEpochMillis
+                                ?: insert?.beginMillis
                                 ?: daysList.getOrNull(selectedDayIndex)?.epochMillis
                                 ?: System.currentTimeMillis()
                             val eventStartCal = Calendar.getInstance().apply {
@@ -1256,6 +1350,7 @@ fun CalendarScreen(
                                     eventType
                                 )
                                 showAddEventDialog = false
+                                eventPendingInsert = null
                             }
                         }
                     },
@@ -1266,7 +1361,7 @@ fun CalendarScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showAddEventDialog = false; eventPendingEdit = null }) {
+                TextButton(onClick = { showAddEventDialog = false; eventPendingEdit = null; eventPendingInsert = null }) {
                     Text("Cancel", color = NudgyCharcoal)
                 }
             }

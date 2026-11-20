@@ -64,6 +64,34 @@
                     android:pathPrefix="/nudgy/join"
                     android:scheme="https" />
             </intent-filter>
+            <!-- Sprint 2-4 — date link (App Link): tapping a
+                 /nudgy/date link opens the Calendar on that date (and
+                 highlights the slot when t is present). Same host as
+                 the join link — no new assetlinks entry needed; the
+                 file already lists both fingerprints (upload + app-signing).
+                 Verified pre-merge via the Digital Asset Links API
+                 (linked: true for both fingerprints). -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:host="tanvir-durlove.github.io"
+                    android:pathPrefix="/nudgy/date"
+                    android:scheme="https" />
+            </intent-filter>
+            <!-- Sprint 2-4 — Gmail-style "create event"
+                 (ACTION_INSERT): opens the add-event dialog prefilled
+                 with the intent's title / times / location. -->
+            <intent-filter>
+                <action android:name="android.intent.action.INSERT" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:mimeType="vnd.android.cursor.dir/event" />
+            </intent-filter>
         </activity>
 
         <receiver

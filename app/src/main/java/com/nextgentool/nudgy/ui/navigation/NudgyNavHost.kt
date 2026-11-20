@@ -20,6 +20,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -38,6 +39,7 @@ import androidx.navigation.compose.navigation
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navDeepLink
 import com.nextgentool.nudgy.R
+import com.nextgentool.nudgy.intent.IncomingIntent
 import com.nextgentool.nudgy.ui.screens.CalendarScreen
 import com.nextgentool.nudgy.ui.screens.ChatShell
 import com.nextgentool.nudgy.ui.screens.GroupsShell
@@ -76,11 +78,29 @@ fun NudgyApp() {
     // the share flow is route-independent.
     val shareViewModel: ShareIntentViewModel = hiltViewModel()
     val pendingShare by shareViewModel.pendingShare.collectAsState()
+    // Sprint 2-4 — date links + create-event intents: they open the
+    // Calendar, so a pending one navigates there first (singleTop —
+    // a no-op when already on Calendar); the Calendar destination
+    // acts on the link and consumes it.
+    val pendingDateLink by shareViewModel.pendingDateLink.collectAsState()
+    val pendingInsertEvent by shareViewModel.pendingInsertEvent.collectAsState()
+    LaunchedEffect(pendingDateLink, pendingInsertEvent) {
+        if (pendingDateLink != null || pendingInsertEvent != null) {
+            navigateTo(navController, NudgyRoute.Calendar)
+        }
+    }
     NudgyTheme {
         Scaffold(
             bottomBar = { NudgyBottomNav(navController) }
         ) { innerPadding ->
-            NudgyNavHost(navController, Modifier.padding(innerPadding))
+            NudgyNavHost(
+                navController,
+                Modifier.padding(innerPadding),
+                pendingDateLink = pendingDateLink,
+                onDateLinkConsumed = { shareViewModel.consumeDateLink() },
+                pendingInsertEvent = pendingInsertEvent,
+                onInsertEventConsumed = { shareViewModel.consumeInsertEvent() }
+            )
         }
         val share = pendingShare
         if (share != null) {
@@ -110,7 +130,14 @@ fun NudgyApp() {
 @Composable
 fun NudgyNavHost(
     navController: NavHostController,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // Sprint 2-4 — a pending date link / create-event intent, passed
+    // to the Calendar destination (which acts on it, then consumes
+    // it). Null in every other flow.
+    pendingDateLink: com.nextgentool.nudgy.intent.IncomingIntent.DateLink? = null,
+    onDateLinkConsumed: () -> Unit = {},
+    pendingInsertEvent: com.nextgentool.nudgy.intent.IncomingIntent.InsertEvent? = null,
+    onInsertEventConsumed: () -> Unit = {}
 ) {
     NavHost(
         navController = navController,
@@ -193,7 +220,14 @@ fun NudgyNavHost(
                 pendingConflict = uiState.pendingConflict,
                 onDropTask = { task, slotStart -> viewModel.dropTaskAtSlot(task, slotStart) },
                 onAcceptSuggestedSlot = { viewModel.acceptSuggestedSlot() },
-                onDismissConflict = { viewModel.dismissConflict() }
+                onDismissConflict = { viewModel.dismissConflict() },
+                // Sprint 2-4 — date link / create-event: the screen
+                // jumps to the link's day (+ slot highlight) and opens
+                // the add-event dialog prefilled, then consumes them.
+                pendingDateLink = pendingDateLink,
+                onDateLinkConsumed = onDateLinkConsumed,
+                pendingInsertEvent = pendingInsertEvent,
+                onInsertEventConsumed = onInsertEventConsumed
             )
         }
         composable(NudgyRoute.Chat.route) { ChatShell() }

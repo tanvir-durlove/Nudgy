@@ -57,6 +57,71 @@ fun startOfWeekMillis(now: Long = System.currentTimeMillis()): Long {
 fun dayLabel(epochMillis: Long): String =
     SimpleDateFormat("EEE, MMM d", Locale.getDefault()).format(epochMillis)
 
+/**
+ * Sprint 2-4 — strict "yyyy-MM-dd" → start-of-day millis (local),
+ * or null when the string is not a real calendar date.
+ *
+ * No java.time here: the app has no core-library desugaring and
+ * minSdk is 24, so LocalDate is unavailable below API 26. The regex
+ * pins the shape (2-digit month/day), the non-lenient parse rejects
+ * impossible dates (2026-02-30, month 13), and the round-trip guard
+ * catches any normalisation the parser might still do.
+ */
+private val STRICT_DATE_REGEX = Regex("""^\d{4}-\d{2}-\d{2}$""")
+
+fun parseStrictDate(dateString: String): Long? {
+    if (!STRICT_DATE_REGEX.matches(dateString)) return null
+    val parsed = try {
+        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).apply { isLenient = false }
+            .parse(dateString)
+    } catch (_: Exception) {
+        return null
+    } ?: return null
+    if (dateStringOf(parsed.time) != dateString) return null
+    return startOfDayMillis(parsed.time)
+}
+
+/**
+ * Sprint 2-4 — strict "HH:mm" (24-hour) → minutes since midnight,
+ * or null when invalid. Used for a date link's `t` query param: an
+ * invalid time is ignored, the date still opens.
+ */
+private val STRICT_TIME_REGEX = Regex("""^([01]\d|2[0-3]):[0-5]\d$""")
+
+fun minutesOfTime(timeString: String): Int? {
+    if (!STRICT_TIME_REGEX.matches(timeString)) return null
+    val (hour, minute) = timeString.split(":")
+    return hour.toInt() * 60 + minute.toInt()
+}
+
+/**
+ * Sprint 2-4 — whole weeks between the Monday of [now]'s week and
+ * the Monday of [dayMillis]'s week (Mon–Sun weeks, Q5). Steps with
+ * Calendar.add so a DST transition never miscounts a week.
+ */
+fun weekOffsetForDay(dayMillis: Long, now: Long = System.currentTimeMillis()): Int {
+    val targetMonday = startOfWeekMillis(dayMillis)
+    val currentMonday = startOfWeekMillis(now)
+    var offset = 0
+    val cal = Calendar.getInstance().apply { timeInMillis = currentMonday }
+    while (cal.timeInMillis < targetMonday) {
+        cal.add(Calendar.DAY_OF_MONTH, 7)
+        offset++
+    }
+    while (cal.timeInMillis > targetMonday) {
+        cal.add(Calendar.DAY_OF_MONTH, -7)
+        offset--
+    }
+    return offset
+}
+
+/** Sprint 2-4 — day index inside its Mon–Sun week: Monday = 0 … Sunday = 6. */
+fun dayIndexInWeek(dayMillis: Long): Int {
+    val dayOfWeek = Calendar.getInstance().apply { timeInMillis = dayMillis }
+        .get(Calendar.DAY_OF_WEEK)
+    return (dayOfWeek + 5) % 7
+}
+
 /** "3:00 PM" style time label, device-local. */
 fun timeLabel(epochMillis: Long): String =
     SimpleDateFormat("h:mm a", Locale.getDefault()).format(epochMillis)
