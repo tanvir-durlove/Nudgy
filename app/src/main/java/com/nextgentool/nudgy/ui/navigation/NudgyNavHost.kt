@@ -1,5 +1,8 @@
 package com.nextgentool.nudgy.ui.navigation
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
@@ -17,12 +20,14 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -33,7 +38,7 @@ import androidx.navigation.compose.navigation
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navDeepLink
 import com.nextgentool.nudgy.R
-import com.nextgentool.nudgy.ui.screens.CalendarShell
+import com.nextgentool.nudgy.ui.screens.CalendarScreen
 import com.nextgentool.nudgy.ui.screens.ChatShell
 import com.nextgentool.nudgy.ui.screens.GroupsShell
 import com.nextgentool.nudgy.ui.screens.PlanScreen
@@ -42,6 +47,7 @@ import com.nextgentool.nudgy.ui.screens.TasksScreen
 import com.nextgentool.nudgy.ui.screens.TemplatesScreen
 import com.nextgentool.nudgy.ui.screens.TodayScreen
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
+import com.nextgentool.nudgy.ui.viewmodel.CalendarViewModel
 
 /**
  * Sprint 0 — NavHost + bottom navigation for the scratch rebuild (v2).
@@ -106,7 +112,50 @@ fun NudgyNavHost(
         composable(NudgyRoute.Templates.route) {
             TemplatesScreen(onBack = { navController.popBackStack() })
         }
-        composable(NudgyRoute.Calendar.route) { CalendarShell() }
+        // Sprint 2-1 — Calendar is wired: the real screen on the
+        // CalendarViewModel (Hilt). The route owns the permission
+        // launcher; the ViewModel owns sync triggers and state. The
+        // screen only renders.
+        composable(NudgyRoute.Calendar.route) {
+            val viewModel: CalendarViewModel = hiltViewModel()
+            val uiState by viewModel.uiState.collectAsState()
+            val permissionLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestMultiplePermissions()
+            ) { grants ->
+                if (grants.values.all { it }) {
+                    viewModel.onCalendarPermissionGranted()
+                }
+            }
+            CalendarScreen(
+                events = uiState.events,
+                suggestedSlot = uiState.suggestedSlot,
+                isCalendarConnected = uiState.isCalendarConnected,
+                isSyncing = uiState.isSyncing,
+                errorMessage = uiState.errorMessage,
+                onDismissError = { viewModel.dismissError() },
+                onConnectGoogleCalendar = {
+                    permissionLauncher.launch(
+                        arrayOf(
+                            Manifest.permission.READ_CALENDAR,
+                            Manifest.permission.WRITE_CALENDAR
+                        )
+                    )
+                },
+                onSyncNow = { viewModel.syncNow() },
+                onBlockFocusTime = { start, end, title ->
+                    viewModel.blockFocusTime(title, start, end)
+                },
+                onAddEvent = { title, start, end, location, type ->
+                    viewModel.addEvent(title, start, end, location, type)
+                },
+                onUpdateEvent = { eventId, title, start, end, location, type ->
+                    viewModel.updateEvent(eventId, title, start, end, location, type)
+                },
+                onDeleteEvent = { eventId -> viewModel.deleteEvent(eventId) },
+                onSelectDay = { dayMillis -> viewModel.selectDay(dayMillis) },
+                groupNames = uiState.groupNames
+            )
+        }
         composable(NudgyRoute.Chat.route) { ChatShell() }
         composable(
             route = NudgyRoute.Groups.route,

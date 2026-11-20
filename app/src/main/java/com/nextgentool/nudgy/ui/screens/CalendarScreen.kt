@@ -57,9 +57,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nextgentool.nudgy.R
-import com.nextgentool.nudgy.data.local.entity.TaskEntity
-import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
+import com.nextgentool.nudgy.data.repository.FocusTimeSlot
 import com.nextgentool.nudgy.ui.theme.NudgyAccent
 import com.nextgentool.nudgy.ui.theme.NudgyCard
 import com.nextgentool.nudgy.ui.theme.NudgyCardBorder
@@ -87,12 +86,20 @@ data class DynamicDayItem(
 @OptIn(ExperimentalMaterial3Api::class)
 fun CalendarScreen(
     events: List<CalendarEventEntity>,
-    tasks: List<TaskEntity> = emptyList(),
+    // Sprint 2-1: the suggested slot comes from the ViewModel (repository
+    // rule, 35-min gap) — the screen no longer computes it, and the
+    // `tasks` parameter it was computed from is gone.
+    suggestedSlot: FocusTimeSlot? = null,
     isCalendarConnected: Boolean = false,
+    isSyncing: Boolean = false,
+    errorMessage: String? = null,
+    onDismissError: () -> Unit = {},
     onConnectGoogleCalendar: () -> Unit = {},
     onSyncNow: () -> Unit = {},
-    onBlockFocusTime: (startTime: Long, endTime: Long, title: String) -> Unit,
+    onBlockFocusTime: (startTime: Long, endTime: Long, title: String) -> Unit = { _, _, _ -> },
     onAddEvent: (title: String, startTime: Long, endTime: Long, location: String?, type: String) -> Unit = { _, _, _, _, _ -> },
+    // Sprint 2-1 (Q8(a)): edit an event — same dialog as add, prefilled.
+    onUpdateEvent: (eventId: String, title: String, startTime: Long, endTime: Long, location: String?, type: String) -> Unit = { _, _, _, _, _, _ -> },
     onDeleteEvent: (eventId: String) -> Unit = {},
     onSelectDay: (Long) -> Unit = {},
     groupNames: Map<String, String> = emptyMap(),
@@ -100,6 +107,7 @@ fun CalendarScreen(
 ) {
     var showAddEventDialog by remember { mutableStateOf(false) }
     var eventPendingDelete by remember { mutableStateOf<CalendarEventEntity?>(null) }
+    var eventPendingEdit by remember { mutableStateOf<CalendarEventEntity?>(null) }
     var isBlockingTime by remember { mutableStateOf(false) }
 
     LaunchedEffect(events) {
@@ -176,84 +184,14 @@ fun CalendarScreen(
         list.sortedBy { it.startEpochMillis }
     }
 
-    val suggestedSlot = remember(displayEvents, tasks, selectedDayIndex) {
-        val baseCal = Calendar.getInstance().apply { timeInMillis = selectedDayMillis }
-        // Busy timeline for slot-finding = events + timed tasks (due + 30m).
-        // Tasks stay off the visible schedule, but a suggested focus slot
-        // must never collide with one.
-        val dayStart = (baseCal.clone() as Calendar).apply {
-            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-        }.timeInMillis
-        val dayEnd = dayStart + 24 * 60 * 60 * 1000L - 1
-        val taskBlocks = tasks.filter { it.dueDateEpochMillis in dayStart..dayEnd && !it.isCompleted }
-            .map { ev -> CalendarEventEntity(
-                id = "busy_${ev.id}", userId = ev.userId, title = ev.title,
-                startEpochMillis = ev.dueDateEpochMillis,
-                endEpochMillis = ev.dueDateEpochMillis + 30 * 60 * 1000L,
-                locationOrLink = null, eventType = "TASK"
-            ) }
-        val sortedEvents = (displayEvents + taskBlocks).sortedBy { it.startEpochMillis }
-        val now = System.currentTimeMillis()
-        val isToday = daysList.getOrNull(selectedDayIndex)?.isToday == true
-
-        if (sortedEvents.isEmpty()) {
-            val startMillis = if (isToday) {
-                val cal = Calendar.getInstance().apply { timeInMillis = now + 10 * 60 * 1000L }
-                val m = cal.get(Calendar.MINUTE)
-                val rounded = if (m < 30) 30 else 0
-                if (rounded == 0) cal.add(Calendar.HOUR_OF_DAY, 1)
-                cal.set(Calendar.MINUTE, rounded)
-                cal.set(Calendar.SECOND, 0)
-                cal.set(Calendar.MILLISECOND, 0)
-                cal.timeInMillis
-            } else {
-                val cal = (baseCal.clone() as Calendar).apply {
-                    set(Calendar.HOUR_OF_DAY, 14)
-                    set(Calendar.MINUTE, 0)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }
-                cal.timeInMillis
-            }
-            val endMillis = startMillis + 45 * 60 * 1000L
-            Triple(startMillis, endMillis, 45)
-        } else {
-            var foundStart = 0L
-            var foundEnd = 0L
-            var foundDuration = 0
-
-            // Check gap after first meeting or between meetings
-            for (i in 0 until sortedEvents.size - 1) {
-                val currentEnd = sortedEvents[i].endEpochMillis
-                val nextStart = sortedEvents[i + 1].startEpochMillis
-                val candidateStart = currentEnd + (5 * 60 * 1000L) // 5 min buffer
-                if (isToday && candidateStart < now) continue
-
-                val gapMinutes = ((nextStart - candidateStart) / (60 * 1000L)).toInt()
-                if (gapMinutes >= 30) {
-                    foundStart = candidateStart
-                    val dur = minOf(gapMinutes, 45)
-                    foundEnd = foundStart + (dur * 60 * 1000L)
-                    foundDuration = dur
-                    break
-                }
-            }
-
-            if (foundDuration == 0) {
-                val lastEventEnd = sortedEvents.last().endEpochMillis
-                val candidateStart = maxOf(lastEventEnd + (15 * 60 * 1000L), if (isToday) now + 10 * 60 * 1000L else 0L)
-                foundStart = candidateStart
-                foundDuration = 45
-                foundEnd = foundStart + (45 * 60 * 1000L)
-            }
-
-            Triple(foundStart, foundEnd, foundDuration)
-        }
-    }
-
-    val suggestedStart = suggestedSlot.first
-    val suggestedEnd = suggestedSlot.second
-    val suggestedDuration = suggestedSlot.third
+    // Sprint 2-1: the suggested slot arrives from the ViewModel, which
+    // uses the repository rule (35-min minimum gap). The screen's old
+    // inline calculation (30-min gap) disagreed with it and is deleted.
+    // A null slot means the selected day has no free slot — the card
+    // below is hidden then.
+    val suggestedStart = suggestedSlot?.startEpochMillis ?: 0L
+    val suggestedEnd = suggestedSlot?.endEpochMillis ?: 0L
+    val suggestedDuration = suggestedSlot?.durationMinutes ?: 0
 
     val hasBlockedSuggestedTime = remember(events, suggestedStart, suggestedEnd) {
         events.any { event ->
@@ -268,6 +206,32 @@ fun CalendarScreen(
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
+        // Sprint 2-1: sync / edit failures are shown, not swallowed.
+        if (errorMessage != null) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                color = Color(0xFFFDECEA),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE57373))
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = errorMessage,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = NudgyCharcoal,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = onDismissError) {
+                        Text("Dismiss", color = NudgyAccent, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
         // Top Header
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -431,13 +395,14 @@ fun CalendarScreen(
                 if (isCalendarConnected) {
                     OutlinedButton(
                         onClick = onSyncNow,
+                        enabled = !isSyncing,
                         shape = CircleShape,
                         modifier = Modifier.height(48.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = NudgyGreen),
                         border = androidx.compose.foundation.BorderStroke(1.dp, NudgyGreen)
                     ) {
                         Text(
-                            text = "Sync now",
+                            text = if (isSyncing) "Syncing…" else "Sync now",
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp
@@ -551,7 +516,16 @@ fun CalendarScreen(
                             }
 
                             Surface(
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .then(
+                                        // Sprint 2-1 (Q8(a)): tap a personal
+                                        // event to edit it. Group rows are
+                                        // never edited from here (same rule
+                                        // as delete).
+                                        if (event.groupId == null) Modifier.clickable { eventPendingEdit = event }
+                                        else Modifier
+                                    ),
                                 shape = MaterialTheme.shapes.large,
                                 color = cardBg
                             ) {
@@ -645,8 +619,9 @@ fun CalendarScreen(
             }
         }
 
-        // Suggested Focus Time Card (Figma Screen 2)
-        val (suggestedStart, suggestedEnd, suggestedDuration) = suggestedSlot
+        // Suggested Focus Time Card (Figma Screen 2) — hidden when the
+        // selected day has no free slot (suggestedSlot is null).
+        if (suggestedSlot != null) {
         val suggestedStartStr = timeFormatter.format(suggestedStart)
         val suggestedEndStr = timeFormatter.format(suggestedEnd)
 
@@ -707,6 +682,7 @@ fun CalendarScreen(
                 }
             }
         }
+        }
 
         // (No bottom clearance spacer: the floating mascot button is gone;
         // Scaffold innerPadding + navigationBarsPadding handle the nav bar.)
@@ -749,17 +725,27 @@ fun CalendarScreen(
         }
 
 
-    if (showAddEventDialog) {
-        var eventTitle by remember { mutableStateOf("") }
-        var eventLocation by remember { mutableStateOf("") }
-        var selectedDurationMinutes by remember { mutableIntStateOf(30) }
-        var eventType by remember { mutableStateOf("MEETING") }
+    if (showAddEventDialog || eventPendingEdit != null) {
+        // Sprint 2-1 (Q8(a)): when opened from an event card, the dialog
+        // is an EDIT — prefilled from the event (title / location /
+        // duration / type / start time on the event's own day; the date
+        // itself is not editable). Otherwise it is a CREATE.
+        val editingEvent = eventPendingEdit
+        var eventTitle by remember(editingEvent) { mutableStateOf(editingEvent?.title ?: "") }
+        var eventLocation by remember(editingEvent) { mutableStateOf(editingEvent?.locationOrLink ?: "") }
+        var selectedDurationMinutes by remember(editingEvent) {
+            mutableIntStateOf(
+                editingEvent?.let { ((it.endEpochMillis - it.startEpochMillis) / 60_000L).toInt().coerceAtLeast(5) } ?: 30
+            )
+        }
+        var eventType by remember(editingEvent) { mutableStateOf(editingEvent?.eventType ?: "MEETING") }
 
         // Start time defaults: Current hour + 1 rounded to :00, or 10:00 AM
         val now = Calendar.getInstance()
         val defaultHour = now.get(Calendar.HOUR_OF_DAY).let { if (it in 7..21) (it + 1) % 24 else 10 }
-        var selectedHour by remember { mutableIntStateOf(defaultHour) }
-        var selectedMinute by remember { mutableIntStateOf(0) }
+        val editingCal = editingEvent?.let { Calendar.getInstance().apply { timeInMillis = it.startEpochMillis } }
+        var selectedHour by remember(editingEvent) { mutableIntStateOf(editingCal?.get(Calendar.HOUR_OF_DAY) ?: defaultHour) }
+        var selectedMinute by remember(editingEvent) { mutableIntStateOf(editingCal?.get(Calendar.MINUTE) ?: 0) }
         var showTimePicker by remember { mutableStateOf(false) }
 
         fun formatTimeStr(h: Int, m: Int): String {
@@ -778,8 +764,8 @@ fun CalendarScreen(
         val scheduleSummary = "${formatTimeStr(selectedHour, selectedMinute)} – ${formatTimeStr(endHour, endMinute)} ($selectedDurationMinutes min)"
 
         AlertDialog(
-            onDismissRequest = { showAddEventDialog = false },
-            title = { Text("Schedule Event", fontWeight = FontWeight.Bold, color = NudgyCharcoal) },
+            onDismissRequest = { showAddEventDialog = false; eventPendingEdit = null },
+            title = { Text(if (editingEvent != null) "Edit event" else "Schedule Event", fontWeight = FontWeight.Bold, color = NudgyCharcoal) },
             text = {
                 Column(
                     modifier = Modifier
@@ -961,9 +947,13 @@ fun CalendarScreen(
                 Button(
                     onClick = {
                         if (eventTitle.isNotBlank()) {
-                            val selectedEpoch = daysList.getOrNull(selectedDayIndex)?.epochMillis ?: System.currentTimeMillis()
+                            // Edit keeps the event's own day; create uses
+                            // the selected day. The date is not editable.
+                            val baseEpoch = editingEvent?.startEpochMillis
+                                ?: daysList.getOrNull(selectedDayIndex)?.epochMillis
+                                ?: System.currentTimeMillis()
                             val eventStartCal = Calendar.getInstance().apply {
-                                timeInMillis = selectedEpoch
+                                timeInMillis = baseEpoch
                                 set(Calendar.HOUR_OF_DAY, selectedHour)
                                 set(Calendar.MINUTE, selectedMinute)
                                 set(Calendar.SECOND, 0)
@@ -972,24 +962,36 @@ fun CalendarScreen(
                             val startMillis = eventStartCal.timeInMillis
                             val endMillis = startMillis + (selectedDurationMinutes * 60 * 1000L)
 
-                            onAddEvent(
-                                eventTitle.trim(),
-                                startMillis,
-                                endMillis,
-                                eventLocation.trim().ifEmpty { null },
-                                eventType
-                            )
-                            showAddEventDialog = false
+                            if (editingEvent != null) {
+                                onUpdateEvent(
+                                    editingEvent.id,
+                                    eventTitle.trim(),
+                                    startMillis,
+                                    endMillis,
+                                    eventLocation.trim().ifEmpty { null },
+                                    eventType
+                                )
+                                eventPendingEdit = null
+                            } else {
+                                onAddEvent(
+                                    eventTitle.trim(),
+                                    startMillis,
+                                    endMillis,
+                                    eventLocation.trim().ifEmpty { null },
+                                    eventType
+                                )
+                                showAddEventDialog = false
+                            }
                         }
                     },
                     enabled = eventTitle.isNotBlank(),
                     colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary)
                 ) {
-                    Text("Add", color = Color.White)
+                    Text(if (editingEvent != null) "Save" else "Add", color = Color.White)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showAddEventDialog = false }) {
+                TextButton(onClick = { showAddEventDialog = false; eventPendingEdit = null }) {
                     Text("Cancel", color = NudgyCharcoal)
                 }
             }
