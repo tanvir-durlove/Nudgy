@@ -2,6 +2,7 @@ package com.nextgentool.nudgy.ui.screens
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -73,7 +74,9 @@ class CalendarScreenTest {
         }
         // The event list and the focus card sit below the fold in the
         // test viewport: assertExists (in the tree), not assertIsDisplayed.
-        composeRule.onNodeWithText("Design review").assertExists()
+        // The title is asserted by testTag: the S2-2 grid renders the
+        // same event title as a block, so onNodeWithText would match twice.
+        composeRule.onNodeWithTag("schedule_event_e1").assertExists()
         composeRule.onNodeWithText("SUGGESTED FOCUS TIME").assertExists()
         composeRule.onNodeWithText("Sync now").assertExists()
     }
@@ -89,10 +92,11 @@ class CalendarScreenTest {
                 onUpdateEvent = { eventId, _, _, _, _, _ -> updatedId = eventId }
             )
         }
-        composeRule.onNodeWithText("Design review").performScrollTo()
-        composeRule.onNodeWithText("Design review").performClick()
+        composeRule.onNodeWithTag("schedule_event_e1").performScrollTo()
+        composeRule.onNodeWithTag("schedule_event_e1").performClick()
         // The dialog title and the Save label are unique (the event
-        // title itself now appears twice: list + text field).
+        // title itself now appears three times: schedule list + grid
+        // block + text field).
         composeRule.onNodeWithText("Edit event").assertIsDisplayed()
         composeRule.onNodeWithText("Save").assertIsDisplayed()
         composeRule.onNodeWithText("Save").performClick()

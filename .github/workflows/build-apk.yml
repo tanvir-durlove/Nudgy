@@ -111,6 +111,7 @@ jobs:
           fi
 
       - name: Prepare & Verify Artifacts
+        if: always()
         run: |
           mkdir -p build-artifacts
           
@@ -160,6 +161,7 @@ jobs:
       # GitHub Release below — still go through. Release assets do not count
       # toward the Actions storage quota.
       - name: Upload Build Artifacts (APK & AAB)
+        if: always()
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:

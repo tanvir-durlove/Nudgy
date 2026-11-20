@@ -153,7 +153,16 @@ fun NudgyNavHost(
                 },
                 onDeleteEvent = { eventId -> viewModel.deleteEvent(eventId) },
                 onSelectDay = { dayMillis -> viewModel.selectDay(dayMillis) },
-                groupNames = uiState.groupNames
+                groupNames = uiState.groupNames,
+                // Sprint 2-2 — drag-to-slot: the strip + grid state and
+                // the drop callbacks (the ViewModel writes plannedStart
+                // / plannedDate and owns the busy-slot warn, Q3(a)).
+                stripTasks = uiState.stripTasks,
+                placedTasks = uiState.placedTasks,
+                pendingConflict = uiState.pendingConflict,
+                onDropTask = { task, slotStart -> viewModel.dropTaskAtSlot(task, slotStart) },
+                onAcceptSuggestedSlot = { viewModel.acceptSuggestedSlot() },
+                onDismissConflict = { viewModel.dismissConflict() }
             )
         }
         composable(NudgyRoute.Chat.route) { ChatShell() }
