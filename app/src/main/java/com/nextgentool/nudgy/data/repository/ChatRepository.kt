@@ -120,11 +120,21 @@ class ChatRepository(
     suspend fun checkAndSeedWelcomeMessage(userId: String, displayName: String) = withContext(Dispatchers.IO) {
         val existing = chatDao.getMessagesFlow(userId).first()
         if (existing.isEmpty()) {
-            val firstName = displayName.split(" ").firstOrNull() ?: "Arif"
+            // Sprint 3-0 — no hardcoded default name: a blank name (or
+            // the generic "Guest User" placeholder) greets neutrally.
+            // The old fallback ("Arif") greeted every new user by a
+            // stranger's name.
+            val firstName = displayName.trim().split(" ").firstOrNull()
+                ?.takeIf { it.isNotBlank() && !it.equals("Guest", ignoreCase = true) }
+            val welcomeText = if (firstName != null) {
+                "Hi $firstName! What can I help you get done today?"
+            } else {
+                "Hi! What can I help you get done today?"
+            }
             val welcome = ChatMessage(
                 id = "welcome_msg_${UUID.randomUUID()}",
                 senderIsUser = false,
-                text = "Hi $firstName! What can I help you get done today?",
+                text = welcomeText,
                 quickSuggestions = listOf("Plan my day", "Show today's tasks", "Find free time", "What do you remember?")
             )
             addMessage(userId, welcome)

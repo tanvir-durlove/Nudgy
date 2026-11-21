@@ -1,9 +1,16 @@
 package com.nextgentool.nudgy.di
 
 import android.content.Context
+import com.nextgentool.nudgy.ai.ClientIntentPreFilter
+import com.nextgentool.nudgy.ai.GeminiClient
+import com.nextgentool.nudgy.ai.ReplySoundPlayer
+import com.nextgentool.nudgy.ai.VoiceAssistantManager
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.repository.CalendarRepository
+import com.nextgentool.nudgy.data.repository.ChatRepository
 import com.nextgentool.nudgy.data.repository.GroupRepository
+import com.nextgentool.nudgy.data.repository.MemoryRepository
+import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.reminders.ReminderManager
 import dagger.Module
 import dagger.Provides
@@ -56,4 +63,62 @@ object TaskModule {
         @ApplicationContext context: Context,
         database: NudgyDatabase
     ): GroupRepository = GroupRepository(context, database)
+
+    // Sprint 3-0 — the chat layer. ChatRepository / MemoryRepository /
+    // ClientIntentPreFilter / VoiceAssistantManager are plain classes
+    // (constructed manually elsewhere, like CalendarRepository), so
+    // this module is their only Hilt binding — exactly one instance
+    // each. The prefilter is @Singleton on purpose: the spec (§8.2)
+    // wants ONE instance, owned by the ChatViewModel, so its
+    // in-memory pending-clarification survives rotation.
+    @Provides
+    @Singleton
+    fun provideChatRepository(
+        @ApplicationContext context: Context,
+        database: NudgyDatabase
+    ): ChatRepository = ChatRepository(context, database)
+
+    @Provides
+    @Singleton
+    fun provideMemoryRepository(
+        @ApplicationContext context: Context,
+        database: NudgyDatabase
+    ): MemoryRepository = MemoryRepository(context, database)
+
+    @Provides
+    @Singleton
+    fun provideClientIntentPreFilter(
+        taskRepository: TaskRepository,
+        calendarRepository: CalendarRepository,
+        memoryRepository: MemoryRepository,
+        @ApplicationContext context: Context
+    ): ClientIntentPreFilter =
+        ClientIntentPreFilter(taskRepository, calendarRepository, memoryRepository, context.assets)
+
+    @Provides
+    @Singleton
+    fun provideVoiceAssistantManager(
+        @ApplicationContext context: Context
+    ): VoiceAssistantManager = VoiceAssistantManager(context)
+
+    /** The reply sound (§4.4) is the VoiceAssistantManager itself —
+     *  this binding only names it by its seam so tests can substitute
+     *  a fake without touching RingtoneManager. */
+    @Provides
+    @Singleton
+    fun provideReplySoundPlayer(
+        voiceAssistantManager: VoiceAssistantManager
+    ): ReplySoundPlayer = voiceAssistantManager
+
+    /**
+     * Sprint 3-0 — bound for S3-3, NOT called by the S3-0 pipeline.
+     * The ChatViewModel takes no GeminiClient: there is no LLM in
+     * S3-0, and the central-gate decision (Q1(a)) forbids wiring the
+     * chain before S3-3 builds the cap chain + activation gate.
+     */
+    @Provides
+    @Singleton
+    fun provideGeminiClient(
+        @ApplicationContext context: Context
+    ): GeminiClient = GeminiClient(context)
 }

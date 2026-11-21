@@ -41,7 +41,7 @@ import androidx.navigation.navDeepLink
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.intent.IncomingIntent
 import com.nextgentool.nudgy.ui.screens.CalendarScreen
-import com.nextgentool.nudgy.ui.screens.ChatShell
+import com.nextgentool.nudgy.ui.screens.ChatScreen
 import com.nextgentool.nudgy.ui.screens.GroupsShell
 import com.nextgentool.nudgy.ui.screens.PlanScreen
 import com.nextgentool.nudgy.ui.screens.SettingsShell
@@ -51,6 +51,7 @@ import com.nextgentool.nudgy.ui.screens.TodayScreen
 import com.nextgentool.nudgy.ui.sheets.CreateTaskSheet
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
 import com.nextgentool.nudgy.ui.viewmodel.CalendarViewModel
+import com.nextgentool.nudgy.ui.viewmodel.ChatViewModel
 import com.nextgentool.nudgy.ui.viewmodel.ShareIntentViewModel
 
 /**
@@ -230,7 +231,33 @@ fun NudgyNavHost(
                 onInsertEventConsumed = onInsertEventConsumed
             )
         }
-        composable(NudgyRoute.Chat.route) { ChatShell() }
+        // Sprint 3-0 — Chat is wired: the real ChatScreen on the
+        // ChatViewModel (Hilt). The route owns no state; the ViewModel
+        // owns the send pipeline (guardrails → prefilter → local
+        // fallback) and the reply sound. The ChatShell placeholder is
+        // gone; the Quick Chat sheet + approved restyle is S3-1.
+        composable(NudgyRoute.Chat.route) {
+            val viewModel: ChatViewModel = hiltViewModel()
+            val messages by viewModel.messages.collectAsState()
+            val isThinking by viewModel.isThinking.collectAsState()
+            val isSpeaking by viewModel.isSpeaking.collectAsState()
+            val isListening by viewModel.isListening.collectAsState()
+            val thinkingText by viewModel.thinkingText.collectAsState()
+            ChatScreen(
+                user = viewModel.user,
+                messages = messages,
+                isListening = isListening,
+                isSpeaking = isSpeaking,
+                isThinking = isThinking,
+                thinkingText = thinkingText,
+                onSendMessage = { viewModel.sendMessage(it) },
+                onStartVoice = { viewModel.startVoice() },
+                onStopVoice = { viewModel.stopVoice() },
+                onBlockFocusTime = { start, end, title, messageId ->
+                    viewModel.onBlockFocusTime(start, end, title, messageId)
+                }
+            )
+        }
         composable(
             route = NudgyRoute.Groups.route,
             deepLinks = listOf(navDeepLink { uriPattern = GROUP_JOIN_DEEP_LINK })
