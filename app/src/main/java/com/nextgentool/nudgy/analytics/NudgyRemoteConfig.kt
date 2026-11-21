@@ -23,6 +23,13 @@ data class RemoteConfigValues(
     val chatFreeTurnsPerDay: Long = 5L,
     // Max rewarded (+1 turn) grants per local day.
     val adRewardedMaxTurnsPerDay: Long = 3L,
+    // Sprint 3-3 — CENTRAL ACTIVATION GATE (Q1 = (a)): the central
+    // Gemini key (Firebase AI Logic) is OFF by default. Flipping this
+    // on is a separate decision + billing + alerts + quota setup — it
+    // must NEVER be turned on by a code change alone. With it off, a
+    // user with a BYOK key still gets LLM; everyone else gets the
+    // local fallback and spends no turn.
+    val llmCentralEnabled: Boolean = false,
     val promoCardEnabled: Boolean = true,
     val promoHeadline: String = "Invite friends to Nudgy",
     val promoSubtitle: String = "Share daily rhythms & achieve streaks together.",
@@ -71,6 +78,7 @@ class NudgyRemoteConfig {
                     KEY_AD_REWARDED_UNIT_ID to "ca-app-pub-3940256099942544/5224354917",
                     KEY_CHAT_FREE_TURNS_PER_DAY to 5L,
                     KEY_AD_REWARDED_MAX_TURNS_PER_DAY to 3L,
+                    KEY_LLM_CENTRAL_ENABLED to false,
                     KEY_PROMO_CARD_ENABLED to true,
                     KEY_PROMO_HEADLINE to "Invite friends to Nudgy",
                     KEY_PROMO_SUBTITLE to "Share daily rhythms & achieve streaks together.",
@@ -94,6 +102,7 @@ class NudgyRemoteConfig {
                             adRewardedUnitId = rc.getString(KEY_AD_REWARDED_UNIT_ID).ifEmpty { "ca-app-pub-3940256099942544/5224354917" },
                             chatFreeTurnsPerDay = rc.getLong(KEY_CHAT_FREE_TURNS_PER_DAY).takeIf { it > 0 } ?: 5L,
                             adRewardedMaxTurnsPerDay = rc.getLong(KEY_AD_REWARDED_MAX_TURNS_PER_DAY).takeIf { it > 0 } ?: 3L,
+                            llmCentralEnabled = rc.getBoolean(KEY_LLM_CENTRAL_ENABLED),
                             promoCardEnabled = rc.getBoolean(KEY_PROMO_CARD_ENABLED),
                             promoHeadline = rc.getString(KEY_PROMO_HEADLINE).ifEmpty { "Invite friends to Nudgy" },
                             promoSubtitle = rc.getString(KEY_PROMO_SUBTITLE).ifEmpty { "Share daily rhythms & achieve streaks together." },
@@ -124,6 +133,9 @@ class NudgyRemoteConfig {
         const val KEY_AD_REWARDED_UNIT_ID = "ad_rewarded_unit_id"
         const val KEY_CHAT_FREE_TURNS_PER_DAY = "chat_free_turns_per_day"
         const val KEY_AD_REWARDED_MAX_TURNS_PER_DAY = "ad_rewarded_max_turns_per_day"
+        // Sprint 3-3 — central activation gate (Q1 = (a)). Default
+        // false; see RemoteConfigValues.llmCentralEnabled.
+        const val KEY_LLM_CENTRAL_ENABLED = "llm_central_enabled"
         const val KEY_PROMO_CARD_ENABLED = "promo_card_enabled"
         const val KEY_PROMO_HEADLINE = "promo_card_headline"
         const val KEY_PROMO_SUBTITLE = "promo_card_subtitle"

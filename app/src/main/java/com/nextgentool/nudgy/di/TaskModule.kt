@@ -1,9 +1,16 @@
 package com.nextgentool.nudgy.di
 
 import android.content.Context
+import com.nextgentool.nudgy.NudgyApplication
 import com.nextgentool.nudgy.ai.ClientIntentPreFilter
 import com.nextgentool.nudgy.ai.GeminiClient
+import com.nextgentool.nudgy.ai.LlmConfigProvider
+import com.nextgentool.nudgy.ai.LlmConnectivity
+import com.nextgentool.nudgy.ai.LlmServerCounter
+import com.nextgentool.nudgy.ai.LlmUsageCounter
+import com.nextgentool.nudgy.ai.RemoteConfigLlmConfigProvider
 import com.nextgentool.nudgy.ai.ReplySoundPlayer
+import com.nextgentool.nudgy.ai.SystemLlmConnectivity
 import com.nextgentool.nudgy.ai.VoiceAssistantManager
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.repository.CalendarRepository
@@ -121,4 +128,32 @@ object TaskModule {
     fun provideGeminiClient(
         @ApplicationContext context: Context
     ): GeminiClient = GeminiClient(context)
+
+    // Sprint 3-3 — the LLM fallback seams. The handler itself is
+    // constructor-injected; these three providers are its seams so
+    // tests can substitute fakes without Hilt.
+    @Provides
+    @Singleton
+    fun provideLlmConfigProvider(
+        @ApplicationContext context: Context
+    ): LlmConfigProvider {
+        // The Application owns the single NudgyRemoteConfig instance
+        // (created in NudgyApplication.onCreate, before any ViewModel
+        // exists); the provider reads its LIVE values per call, so a
+        // Remote Config flip needs no restart and no code change.
+        val remoteConfig = (context.applicationContext as NudgyApplication).remoteConfig
+        return RemoteConfigLlmConfigProvider(remoteConfig)
+    }
+
+    @Provides
+    @Singleton
+    fun provideLlmServerCounter(): LlmServerCounter = LlmServerCounter { uid, bucket, freeCap, bonusCap ->
+        LlmUsageCounter.tryConsumeServerTurn(uid, bucket, freeCap, bonusCap)
+    }
+
+    @Provides
+    @Singleton
+    fun provideLlmConnectivity(
+        @ApplicationContext context: Context
+    ): LlmConnectivity = SystemLlmConnectivity(context)
 }

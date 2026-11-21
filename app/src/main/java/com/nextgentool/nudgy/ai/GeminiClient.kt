@@ -28,12 +28,28 @@ import java.util.concurrent.TimeUnit
  *    API backend). The billing key lives server-side in the Firebase
  *    console and NEVER ships in the APK.
  *
+ * Sprint 3-3 — CENTRAL ACTIVATION GATE (Q1 = (a)): the central path
+ * is OFF by default. [generateNudgyResponse] and
+ * [generateStructuredResponse] take `centralEnabled = false` unless
+ * the caller passes the live Remote Config value
+ * (`llm_central_enabled`, default false — see NudgyRemoteConfig).
+ * With the gate closed and no BYOK key, both methods return the local
+ * fallback / null WITHOUT touching Firebase AI Logic — wiring the
+ * chain as-is can never go live with billing. Central can be flipped
+ * on later WITHOUT a code change, but ONLY by a separate decision +
+ * billing + alerts + quota setup. This class links no billing itself.
+ *
  * The baked API key from BuildConfig is deliberately NOT read anywhere
  * here: an APK-baked key is extractable, and removing its use is the
  * point of the central key. Any failure on either path returns the
  * local fallback — never a crash, never a retry loop.
+ *
+ * Test seam: the class is `open` and the two transport methods are
+ * `protected open` so tests can subclass and record which path ran
+ * (the gate proof: with the gate closed, the AI Logic method is never
+ * invoked). Production code must never subclass this client.
  */
-class GeminiClient(private val context: Context? = null) {
+open class GeminiClient(private val context: Context? = null) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -47,7 +63,12 @@ class GeminiClient(private val context: Context? = null) {
         recentHistory: List<Pair<String, Boolean>> = emptyList(), // Pair(text, isUser)
         userMemories: List<String> = emptyList(),
         modelVersion: String = "gemini-3.5-flash-lite",
-        callContext: Context? = null
+        callContext: Context? = null,
+        // Sprint 3-3 — the central activation gate (Q1 = (a)): false
+        // unless the caller passes the live `llm_central_enabled`
+        // Remote Config value. Closed + no BYOK → local fallback, and
+        // the AI Logic path is never entered (no billing possible).
+        centralEnabled: Boolean = false
     ): String = withContext(Dispatchers.IO) {
         val effectiveContext = callContext ?: context
         val customKey = effectiveContext?.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE)
@@ -55,16 +76,84 @@ class GeminiClient(private val context: Context? = null) {
             ?.trim()
 
         val sanitizedModel = sanitizeModel(modelVersion)
+        val plainInstruction = systemInstructionText(userMemories)
         return@withContext try {
-            if (!customKey.isNullOrBlank()) {
-                generateViaRest(userMessage, recentHistory, userMemories, sanitizedModel, customKey)
-            } else {
-                generateViaAiLogic(userMessage, recentHistory, userMemories, sanitizedModel)
+            val text = when {
+                !customKey.isNullOrBlank() -> generateViaRest(
+                    userMessage, recentHistory, sanitizedModel, customKey,
+                    plainInstruction, PLAIN_REST_MAX_OUTPUT_TOKENS
+                )
+                centralEnabled -> generateViaAiLogic(
+                    userMessage, recentHistory, sanitizedModel,
+                    plainInstruction, PLAIN_AI_LOGIC_MAX_OUTPUT_TOKENS
+                )
+                else -> null // Gate closed, no BYOK: no LLM at all.
             }
+            text?.trim()?.ifEmpty { getLocalFallback(userMessage) } ?: getLocalFallback(userMessage)
         } catch (e: Exception) {
             Log.e("GeminiClient", "Gemini call failed", e)
             getLocalFallback(userMessage)
         }
+    }
+
+    /**
+     * Sprint 3-3 — structured-output call (spec §8). Same key chain
+     * and the same central gate as [generateNudgyResponse], but the
+     * model is instructed to answer with ONLY the JSON contract
+     * (action/tasks/events/subtasks/reply) and the output ceiling is
+     * [STRUCTURED_MAX_OUTPUT_TOKENS].
+     *
+     * Returns the raw model text, or null when there is NO LLM to call
+     * (gate closed + no BYOK — the caller checks availability first,
+     * this is the backstop) or when the call itself failed (exception,
+     * empty response). A null here means "the turn produced no answer":
+     * the caller refunds the local turn and answers locally. It NEVER
+     * substitutes the local fallback text — that would be
+     * indistinguishable from a successful plain-text reply, and the
+     * caller must be able to tell the two apart.
+     */
+    suspend fun generateStructuredResponse(
+        userMessage: String,
+        recentHistory: List<Pair<String, Boolean>> = emptyList(),
+        userMemories: List<String> = emptyList(),
+        modelVersion: String = "gemini-3.5-flash-lite",
+        centralEnabled: Boolean = false,
+        callContext: Context? = null
+    ): String? = withContext(Dispatchers.IO) {
+        val effectiveContext = callContext ?: context
+        val customKey = effectiveContext?.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE)
+            ?.getString("custom_gemini_api_key", null)
+            ?.trim()
+        val sanitizedModel = sanitizeModel(modelVersion)
+        val structuredInstruction = structuredSystemInstructionText(userMemories)
+        return@withContext try {
+            when {
+                !customKey.isNullOrBlank() -> generateViaRest(
+                    userMessage, recentHistory, sanitizedModel, customKey,
+                    structuredInstruction, STRUCTURED_MAX_OUTPUT_TOKENS
+                )?.trim()?.ifEmpty { null }
+                centralEnabled -> generateViaAiLogic(
+                    userMessage, recentHistory, sanitizedModel,
+                    structuredInstruction, STRUCTURED_MAX_OUTPUT_TOKENS
+                )?.trim()?.ifEmpty { null }
+                else -> null // Gate closed, no BYOK: no LLM at all.
+            }
+        } catch (e: Exception) {
+            Log.e("GeminiClient", "Gemini structured call failed", e)
+            null
+        }
+    }
+
+    /**
+     * Sprint 3-3 — true when the user supplied their own Gemini key
+     * (BYOK). The cap chain checks this BEFORE consuming any turn: a
+     * user with no key and a closed central gate must never spend a
+     * turn on a local fallback answer.
+     */
+    fun hasCustomKey(callContext: Context? = null): Boolean {
+        val effectiveContext = callContext ?: context ?: return false
+        return !effectiveContext.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE)
+            .getString("custom_gemini_api_key", null)?.trim().isNullOrBlank()
     }
 
     /**
@@ -117,31 +206,87 @@ class GeminiClient(private val context: Context? = null) {
         "You are Nudgy, a warm, energetic, and supportive AI productivity assistant. Tagline: 'Things Get Done.' Keep answers friendly, motivating, and strictly concise (1-2 sentences). You are fully bilingual in English and Bengali; always respond in the language the user spoke/wrote in." + memorySuffix(userMemories)
 
     /**
+     * Sprint 3-3 — the structured-output contract (spec §8) as a system
+     * instruction. The model MUST answer with ONLY the JSON object —
+     * no prose, no markdown fences, no explanation outside the JSON.
+     * At most ONE task or ONE event per answer: the S3-2 preview card
+     * holds one draft, so several items come back as plain text
+     * instead (the S3-4 combined card unlocks multi-item confirm).
+     * Dates are ISO-8601 ("2026-11-22T15:00:00"); when the time is
+     * unknown, use null for `due` and say so in `reply` — never invent
+     * a time. `reply` is the one-sentence answer shown to the user, in
+     * the language they wrote in.
+     */
+    private fun structuredSystemInstructionText(userMemories: List<String>): String =
+        "You are Nudgy, a warm, energetic, and supportive AI productivity assistant. " +
+            "Tagline: 'Things Get Done.' You are fully bilingual in English and Bengali; " +
+            "always reply in the language the user wrote in." + memorySuffix(userMemories) +
+            " Answer with ONLY this JSON object, no other text, no markdown fences: " +
+            "{\"action\": \"create_tasks\" | \"create_event\" | \"split_task\" | \"none\", " +
+            "\"tasks\": [{\"title\": \"...\", \"due\": \"ISO-8601 date-time or null\", \"priority\": \"LOW|MEDIUM|HIGH\"}], " +
+            "\"events\": [{\"title\": \"...\", \"start\": \"ISO-8601 date-time\", \"end\": \"ISO-8601 date-time\"}], " +
+            "\"subtasks\": [{\"title\": \"...\"}], \"reply\": \"one short sentence\"}. " +
+            "Rules: return AT MOST ONE task or ONE event; if the user asks for several things, " +
+            "put the most urgent one in the JSON and mention the rest in \"reply\". " +
+            "Use \"create_tasks\" only when the user wants a task created, \"create_event\" only for a calendar event, " +
+            "\"split_task\" only when they ask to break a task down, otherwise \"none\" with just \"reply\". " +
+            "Dates must be ISO-8601; when the time is unknown use null for \"due\" and ask for it in \"reply\" — never invent a time. " +
+            "Titles must never be empty."
+
+    companion object {
+        /** Plain-text replies: the pre-S3-3 ceilings, unchanged. */
+        const val PLAIN_AI_LOGIC_MAX_OUTPUT_TOKENS = 180
+        const val PLAIN_REST_MAX_OUTPUT_TOKENS = 120
+
+        /**
+         * Sprint 3-3 — structured JSON ceiling (both paths). 180/120
+         * is too tight for the contract: the JSON skeleton alone is
+         * ~30 tokens, one task ~25, the reply ~25 — 3 tasks already
+         * need ~130. A truncated JSON fails validation and degrades to
+         * a plain-text reply, so the ceiling is 256. Cost math (PR
+         * body): worst case 256 out-tokens × $2.50/1M = $0.00064/turn
+         * (vs $0.00045 at 180); typical structured answer is 60–110
+         * output tokens. Central is OFF in this PR, so there is no
+         * central spend at all — BYOK users pay their own key.
+         */
+        const val STRUCTURED_MAX_OUTPUT_TOKENS = 256
+    }
+
+    /**
      * Central-key path: Firebase AI Logic (Gemini Developer API backend).
      * No API key is sent from the app — the billing key lives in the
      * Firebase console and the request is proxied server-side. App Check
      * (Play Integrity / debug provider, initialized in NudgyApplication)
-     * attests that the caller is a genuine app install. Any failure —
-     * AI Logic not configured in the console yet, attestation failure,
-     * offline — returns the local fallback.
+     * attests that the caller is a genuine app install.
+     *
+     * Returns null on ANY failure (AI Logic not configured in the
+     * console yet, attestation failure, offline, empty response) — the
+     * caller decides the fallback. `protected open` is the test seam:
+     * tests subclass and record whether this path was entered at all
+     * (the central-gate proof).
+     *
+     * CALLERS: never call this directly. The gate lives in
+     * [generateNudgyResponse] / [generateStructuredResponse] — this
+     * method is reachable ONLY through them, with the gate checked.
      */
-    private suspend fun generateViaAiLogic(
+    protected open suspend fun generateViaAiLogic(
         userMessage: String,
         recentHistory: List<Pair<String, Boolean>>,
-        userMemories: List<String>,
-        modelId: String
-    ): String {
+        modelId: String,
+        systemInstruction: String,
+        maxOutputTokens: Int
+    ): String? {
         return try {
             val model = Firebase.ai(backend = GenerativeBackend.googleAI())
                 .generativeModel(
                     modelName = modelId,
                     generationConfig = generationConfig {
                         temperature = 0.6f
-                        // ~80-output-token budget with headroom; the local
-                        // cap (5 free turns/day) bounds the monthly cost.
-                        maxOutputTokens = 180
+                        // The caller sets the ceiling: 180 for plain
+                        // replies, 256 for structured JSON.
+                        maxOutputTokens = maxOutputTokens
                     },
-                    systemInstruction = content { text(systemInstructionText(userMemories)) }
+                    systemInstruction = content { text(systemInstruction) }
                 )
             val contents = buildList {
                 for ((text, isUser) in sanitizeHistory(recentHistory)) {
@@ -150,11 +295,10 @@ class GeminiClient(private val context: Context? = null) {
                 add(content("user") { text(userMessage) })
             }
             val response = model.generateContent(contents)
-            response.text?.trim()?.ifEmpty { getLocalFallback(userMessage) }
-                ?: getLocalFallback(userMessage)
+            response.text?.trim()?.ifEmpty { null }
         } catch (e: Exception) {
             Log.e("GeminiClient", "Firebase AI Logic call failed", e)
-            getLocalFallback(userMessage)
+            null
         }
     }
 
@@ -163,14 +307,19 @@ class GeminiClient(private val context: Context? = null) {
      * before the central key existed. Kept verbatim (including the
      * gemini-3.5-flash fallback) so a user-supplied key behaves exactly
      * as it always has.
+     *
+     * Returns null on ANY failure (HTTP error, empty response,
+     * exception) — the caller decides the fallback. `protected open`
+     * is the test seam (same as [generateViaAiLogic]).
      */
-    private suspend fun generateViaRest(
+    protected open suspend fun generateViaRest(
         userMessage: String,
         recentHistory: List<Pair<String, Boolean>>,
-        userMemories: List<String>,
         sanitizedModel: String,
-        apiKey: String
-    ): String {
+        apiKey: String,
+        systemInstruction: String,
+        maxOutputTokens: Int
+    ): String? {
         try {
             val primaryUrl = "https://generativelanguage.googleapis.com/v1beta/models/$sanitizedModel:generateContent?key=$apiKey"
 
@@ -196,12 +345,12 @@ class GeminiClient(private val context: Context? = null) {
                 put("contents", contentsArray)
                 put("systemInstruction", JSONObject().apply {
                     put("parts", JSONArray().put(JSONObject().put("text",
-                        systemInstructionText(userMemories)
+                        systemInstruction
                     )))
                 })
                 put("generationConfig", JSONObject().apply {
                     put("temperature", 0.6)
-                    put("maxOutputTokens", 120) // Strict token cap for minimum cost
+                    put("maxOutputTokens", maxOutputTokens)
                 })
             }
 
@@ -234,7 +383,7 @@ class GeminiClient(private val context: Context? = null) {
 
             if (!isSuccess) {
                 Log.w("GeminiClient", "Gemini HTTP error $responseCode: $responseBody")
-                return getLocalFallback(userMessage)
+                return null
             }
 
             val jsonResponse = JSONObject(responseBody)
@@ -244,10 +393,10 @@ class GeminiClient(private val context: Context? = null) {
             val parts = content?.optJSONArray("parts")
             val text = parts?.optJSONObject(0)?.optString("text")
 
-            return text?.trim()?.ifEmpty { getLocalFallback(userMessage) } ?: getLocalFallback(userMessage)
+            return text?.trim()?.ifEmpty { null }
         } catch (e: Exception) {
             Log.e("GeminiClient", "Gemini API call failed", e)
-            return getLocalFallback(userMessage)
+            return null
         }
     }
 
