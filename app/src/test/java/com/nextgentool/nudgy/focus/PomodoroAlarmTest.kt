@@ -48,7 +48,9 @@ class PomodoroAlarmTest {
 
         val shadow = shadowOf(alarmManager)
         assertEquals(1, shadow.scheduledAlarms.size)
-        assertEquals(trigger, shadow.nextScheduledAlarm.triggerAtMs)
+        val next = shadow.nextScheduledAlarm
+        assertNotNull(next)
+        assertEquals(trigger, next!!.triggerAtMs)
         // The stored PendingIntent is the pomodoro end for this
         // session: an equal intent (same action + extras + request
         // code) resolves to the same PendingIntent.
@@ -72,7 +74,9 @@ class PomodoroAlarmTest {
         val trigger = System.currentTimeMillis() + 5 * 60_000L
         assertTrue(alarm.scheduleEnd("session-2", FocusSessionKind.BREAK, null, trigger))
         assertEquals(1, shadowOf(alarmManager).scheduledAlarms.size)
-        assertEquals(trigger, shadowOf(alarmManager).nextScheduledAlarm.triggerAtMs)
+        val next = shadowOf(alarmManager).nextScheduledAlarm
+        assertNotNull(next)
+        assertEquals(trigger, next!!.triggerAtMs)
     }
 
     @Test
