@@ -297,6 +297,11 @@ fun NudgyNavHost(
             val isSpeaking by viewModel.isSpeaking.collectAsState()
             val isListening by viewModel.isListening.collectAsState()
             val thinkingText by viewModel.thinkingText.collectAsState()
+            // Sprint 3-2 — the pending draft lives in the ViewModel; the
+            // screen only renders its preview card and reports the
+            // card's actions back.
+            val pendingDraft by viewModel.pendingDraft.collectAsState()
+            val pendingDraftMessageId by viewModel.pendingDraftMessageId.collectAsState()
             ChatScreen(
                 user = viewModel.user,
                 messages = messages,
@@ -309,7 +314,12 @@ fun NudgyNavHost(
                 onStopVoice = { viewModel.stopVoice() },
                 onBlockFocusTime = { start, end, title, messageId ->
                     viewModel.onBlockFocusTime(start, end, title, messageId)
-                }
+                },
+                pendingDraft = pendingDraft,
+                pendingDraftMessageId = pendingDraftMessageId,
+                onConfirmDraft = { viewModel.confirmDraft() },
+                onDiscardDraft = { viewModel.discardDraft() },
+                onDraftEdited = { viewModel.editDraft(it) }
             )
         }
         composable(

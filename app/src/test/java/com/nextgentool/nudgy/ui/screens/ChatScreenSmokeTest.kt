@@ -8,6 +8,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -22,7 +23,10 @@ import com.nextgentool.nudgy.data.repository.ChatRepository
 import com.nextgentool.nudgy.data.repository.MemoryRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.ui.viewmodel.ChatViewModel
+import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -61,6 +65,7 @@ class ChatScreenSmokeTest {
 
     private lateinit var db: NudgyDatabase
     private lateinit var viewModel: ChatViewModel
+    private lateinit var taskRepository: TaskRepository
 
     @Before
     fun setUp() {
@@ -70,7 +75,7 @@ class ChatScreenSmokeTest {
         db = Room.inMemoryDatabaseBuilder(context, NudgyDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        val taskRepository = TaskRepository(context, db)
+        taskRepository = TaskRepository(context, db)
         val calendarRepository = CalendarRepository(context, db)
         val preFilter = ClientIntentPreFilter(
             taskRepository, calendarRepository, MemoryRepository(context, db), context.assets
@@ -97,6 +102,11 @@ class ChatScreenSmokeTest {
             val isListening by viewModel.isListening.collectAsState()
             val isSpeaking by viewModel.isSpeaking.collectAsState()
             val thinkingText by viewModel.thinkingText.collectAsState()
+            // Sprint 3-2 — the preview card renders from the ViewModel's
+            // pending draft; without these the Confirm/Discard buttons
+            // would be dead in the test.
+            val pendingDraft by viewModel.pendingDraft.collectAsState()
+            val pendingDraftMessageId by viewModel.pendingDraftMessageId.collectAsState()
             ChatScreen(
                 user = viewModel.user,
                 messages = messages,
@@ -109,7 +119,12 @@ class ChatScreenSmokeTest {
                 onStopVoice = { viewModel.stopVoice() },
                 onBlockFocusTime = { start, end, title, messageId ->
                     viewModel.onBlockFocusTime(start, end, title, messageId)
-                }
+                },
+                pendingDraft = pendingDraft,
+                pendingDraftMessageId = pendingDraftMessageId,
+                onConfirmDraft = { viewModel.confirmDraft() },
+                onDiscardDraft = { viewModel.discardDraft() },
+                onDraftEdited = { viewModel.editDraft(it) }
             )
         }
     }
@@ -135,7 +150,7 @@ class ChatScreenSmokeTest {
     }
 
     @Test
-    fun `sending a message shows the assistant reply`() {
+    fun `sending a creation shows the preview card and confirm creates the task`() {
         setChatContent()
         // The welcome message is seeded asynchronously — wait for it
         // before typing, so the send is not racing the seed.
@@ -148,20 +163,57 @@ class ChatScreenSmokeTest {
         // placeholder is a separate, non-editable Text node).
         composeRule.onNode(hasSetTextAction()).performTextInput("call tasnim at 5pm")
         composeRule.onNodeWithContentDescription("Send").performClick()
-        // The prefilter creates the task and the reply names it.
-        // Assert on "remind you about": it occurs ONLY in the reply
-        // text. Call tasks build with reminderAtDue=true, so the
-        // reply is "Done! I'll remind you about …" — never "Created
-        // task". And "asnim" would also match the TASK_PREVIEW card
-        // title, so onNode would throw on duplicates — whether the
-        // card has composed yet is a race between the chat flow and
-        // the task flow in observeMessages (that race is what flipped
-        // this test between round 1 and round 2).
+        // Sprint 3-2 — the reply is a preview card, and NOTHING is in
+        // the DB yet: the task exists only after Confirm.
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("remind you about", substring = true)
+            composeRule.onAllNodesWithTag("draft_preview_card")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("remind you about", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("draft_preview_card").assertIsDisplayed()
+        runBlocking {
+            assertTrue(taskRepository.getAllTasksOnce("test-user-1").isEmpty())
+        }
+        composeRule.onNodeWithTag("draft_confirm_button").performClick()
+        // The receipt arrives with the TASK_PREVIEW card. "View Task"
+        // exists ONLY on the post-save receipt — the preview card has
+        // Confirm / Edit / Discard instead, so this waitUntil only
+        // passes when Confirm actually saved. (The receipt text
+        // "remind you about" cannot be used: the preview question
+        // contains the same words, so onNode would throw on
+        // duplicates — the race the old test's comment warned about.)
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("View Task")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("View Task").assertIsDisplayed()
+        runBlocking {
+            val tasks = taskRepository.getAllTasksOnce("test-user-1")
+            assertEquals(1, tasks.size)
+            assertTrue(tasks.single().title.contains("tasnim", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun `discarding the preview card creates nothing`() {
+        setChatContent()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Hi! What can I help you get done today?")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNode(hasSetTextAction()).performTextInput("call tasnim at 5pm")
+        composeRule.onNodeWithContentDescription("Send").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("draft_preview_card")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("draft_discard_button").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("discarded", substring = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        runBlocking {
+            assertTrue(taskRepository.getAllTasksOnce("test-user-1").isEmpty())
+        }
     }
 
     @Test

@@ -33,18 +33,22 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.outlined.TaskAlt
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -52,12 +56,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nextgentool.nudgy.R
+import com.nextgentool.nudgy.ai.ChatDraft
+import com.nextgentool.nudgy.ai.DraftKind
+import com.nextgentool.nudgy.ui.components.NudgyDatePickerDialog
+import com.nextgentool.nudgy.ui.components.NudgyTimePickerDialog
+import com.nextgentool.nudgy.ui.components.localDateParts
+import java.time.Instant
+import java.time.ZoneId
+import java.util.Calendar
 import com.nextgentool.nudgy.ads.ChatCapState
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
@@ -71,7 +84,10 @@ enum class ChatActionType {
     TASK_PREVIEW,
     EVENT_CREATED,
     FOCUS_TIME_PROPOSAL,
-    DAILY_PLAN
+    DAILY_PLAN,
+    /** S3-2 — the message carries a pending draft (preview question);
+     *  the card renders only while the ViewModel still holds it. */
+    DRAFT_PREVIEW
 }
 
 data class ChatMessage(
@@ -106,6 +122,15 @@ fun ChatScreen(
     onStopVoice: () -> Unit,
     onTaskClick: (TaskEntity) -> Unit = {},
     onBlockFocusTime: (Long, Long, String, String) -> Unit = { _, _, _, _ -> },
+    // Sprint 3-2 — draft-then-confirm (Q2 = (a)): the pending draft and
+    // the id of the message its preview card is attached to, plus the
+    // card's actions. All defaulted: the card simply never renders
+    // without a pending draft.
+    pendingDraft: ChatDraft? = null,
+    pendingDraftMessageId: String? = null,
+    onConfirmDraft: () -> Unit = {},
+    onDiscardDraft: () -> Unit = {},
+    onDraftEdited: (ChatDraft) -> Unit = {},
     // Ads: rewarded entry — non-null only when the free daily chat cap is
     // hit. The button grants +1 AI turn only after a completed ad view.
     chatCapState: ChatCapState? = null,
@@ -117,6 +142,17 @@ fun ChatScreen(
 ) {
     val listState = rememberLazyListState()
     val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
+    val draftDateFormat = remember { SimpleDateFormat("EEE, MMM d", Locale.getDefault()) }
+    val draftDateTimeFormat = remember { SimpleDateFormat("EEE, MMM d • h:mm a", Locale.getDefault()) }
+
+    // S3-2 — draft edit dialog state. The dialog edits a COPY of the
+    // pending draft; only its Save button pushes back through
+    // onDraftEdited. Cancel / dismiss leaves the draft untouched.
+    var editingDraft by remember { mutableStateOf<ChatDraft?>(null) }
+    var editTitle by remember { mutableStateOf("") }
+    var editStartMillis by remember { mutableLongStateOf(0L) }
+    var showEditDatePicker by remember { mutableStateOf(false) }
+    var showEditTimePicker by remember { mutableStateOf(false) }
     // Sprint 3-1 — approved design tokens (brand_colors.xml, single
     // source of truth). The v1 palette (coral-dark primary, peach /
     // lavender / butter tints) and the mascot are gone from this
@@ -384,6 +420,99 @@ fun ChatScreen(
                                                         )
                                                         Spacer(modifier = Modifier.width(4.dp))
                                                         Text("Scheduled", color = teal, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // S3-2 — Action Card 1c: Draft Preview.
+                                    // The pre-save approval (Q2 = (a)): this
+                                    // card renders ONLY on the message the
+                                    // pending draft is attached to, and only
+                                    // while the ViewModel still holds the
+                                    // draft. Confirm saves, Edit changes
+                                    // the draft, Discard drops it — nothing
+                                    // is in the DB yet. The TASK_PREVIEW /
+                                    // EVENT_CREATED cards above stay as the
+                                    // POST-save receipt.
+                                    if (message.actionType == ChatActionType.DRAFT_PREVIEW &&
+                                        message.id == pendingDraftMessageId && pendingDraft != null
+                                    ) {
+                                        val draft = pendingDraft
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Surface(
+                                            modifier = Modifier.fillMaxWidth().testTag("draft_preview_card"),
+                                            shape = RoundedCornerShape(16.dp),
+                                            color = cream,
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, teal.copy(alpha = 0.3f))
+                                        ) {
+                                            Column(modifier = Modifier.padding(14.dp)) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(
+                                                        imageVector = if (draft.kind == DraftKind.SCHEDULE || draft.kind == DraftKind.FOCUS_EVENT) Icons.Default.Schedule else Icons.Outlined.TaskAlt,
+                                                        contentDescription = null,
+                                                        tint = teal,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text(
+                                                        text = draft.title,
+                                                        style = MaterialTheme.typography.titleMedium.copy(
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 15.sp
+                                                        ),
+                                                        color = ink
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text(
+                                                    text = when (draft.kind) {
+                                                        DraftKind.TASK -> "Due: ${draftDateTimeFormat.format(draft.startEpochMillis)} • Priority: ${draft.priority.name.lowercase().replaceFirstChar { it.uppercase() }}"
+                                                        DraftKind.REMINDER -> "Reminder: ${draftDateTimeFormat.format(draft.startEpochMillis)}"
+                                                        DraftKind.SCHEDULE -> "${draftDateTimeFormat.format(draft.startEpochMillis)} – ${timeFormat.format(draft.endEpochMillis ?: draft.startEpochMillis)} • ${draft.scheduleLocation ?: "Google Meet"}"
+                                                        DraftKind.FOCUS_EVENT -> "${draftDateTimeFormat.format(draft.startEpochMillis)} – ${timeFormat.format(draft.endEpochMillis ?: draft.startEpochMillis)} • ${draft.focusDurationMinutes} min"
+                                                    },
+                                                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                                    color = muted
+                                                )
+                                                if (draft.conflictingTitle != null) {
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    Text(
+                                                        text = if (draft.isBengali) "⚠ ওই সময়ে \"${draft.conflictingTitle}\" আছে" else "⚠ Overlaps with \"${draft.conflictingTitle}\"",
+                                                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                                        color = Color(0xFFB45309)
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.height(10.dp))
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Button(
+                                                        onClick = onConfirmDraft,
+                                                        shape = RoundedCornerShape(100.dp),
+                                                        colors = ButtonDefaults.buttonColors(containerColor = teal),
+                                                        modifier = Modifier.testTag("draft_confirm_button")
+                                                    ) {
+                                                        Text("Confirm", fontSize = 13.sp, color = Color.White)
+                                                    }
+                                                    TextButton(
+                                                        onClick = {
+                                                            editingDraft = draft
+                                                            editTitle = draft.title
+                                                            editStartMillis = draft.startEpochMillis
+                                                        },
+                                                        modifier = Modifier.testTag("draft_edit_button")
+                                                    ) {
+                                                        Text("Edit", fontSize = 13.sp, color = teal)
+                                                    }
+                                                    TextButton(
+                                                        onClick = onDiscardDraft,
+                                                        modifier = Modifier.testTag("draft_discard_button")
+                                                    ) {
+                                                        Text("Discard", fontSize = 13.sp, color = muted)
                                                     }
                                                 }
                                             }
@@ -690,6 +819,109 @@ fun ChatScreen(
                 onStartVoice = onStartVoice,
                 onStopVoice = onStopVoice,
                 modifier = Modifier.padding(bottom = 12.dp)
+            )
+        }
+
+        // S3-2 — draft edit dialog: title + date + time. The picker
+        // millis are UTC midnight (DatePicker contract): the initial
+        // value is built in UTC from the draft's local date, and the
+        // picked value comes back through Instant + system ZoneId —
+        // never a raw local Calendar read of UTC millis (that shifts
+        // the day in negative-offset timezones).
+        if (editingDraft != null) {
+            val base = editingDraft!!
+            AlertDialog(
+                onDismissRequest = { editingDraft = null },
+                title = { Text("Edit draft") },
+                text = {
+                    Column {
+                        OutlinedTextField(
+                            value = editTitle,
+                            onValueChange = { editTitle = it },
+                            label = { Text("Title") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag("draft_edit_title")
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(
+                                onClick = { showEditDatePicker = true },
+                                modifier = Modifier.testTag("draft_edit_date_button")
+                            ) {
+                                Text(draftDateFormat.format(editStartMillis), color = teal)
+                            }
+                            TextButton(
+                                onClick = { showEditTimePicker = true },
+                                modifier = Modifier.testTag("draft_edit_time_button")
+                            ) {
+                                Text(timeFormat.format(editStartMillis), color = teal)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val updated = base.withTitle(editTitle.trim().ifBlank { base.title })
+                            .withStartTime(editStartMillis)
+                        onDraftEdited(updated)
+                        editingDraft = null
+                    }) { Text("Save") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { editingDraft = null }) { Text("Cancel") }
+                }
+            )
+        }
+        if (showEditDatePicker && editingDraft != null) {
+            val (year, month, day) = localDateParts(editStartMillis)
+            val utcMidnight = Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
+                set(Calendar.YEAR, year)
+                set(Calendar.MONTH, month)
+                set(Calendar.DAY_OF_MONTH, day)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            NudgyDatePickerDialog(
+                initialDateMillis = utcMidnight,
+                onDateSelected = { dateMillis ->
+                    showEditDatePicker = false
+                    val picked = Instant.ofEpochMilli(dateMillis)
+                        .atZone(ZoneId.systemDefault()).toLocalDate()
+                    val cal = Calendar.getInstance().apply { timeInMillis = editStartMillis }
+                    editStartMillis = Calendar.getInstance().apply {
+                        set(Calendar.YEAR, picked.year)
+                        set(Calendar.MONTH, picked.monthValue - 1)
+                        set(Calendar.DAY_OF_MONTH, picked.dayOfMonth)
+                        set(Calendar.HOUR_OF_DAY, cal.get(Calendar.HOUR_OF_DAY))
+                        set(Calendar.MINUTE, cal.get(Calendar.MINUTE))
+                        set(Calendar.SECOND, 0)
+                        set(Calendar.MILLISECOND, 0)
+                    }.timeInMillis
+                },
+                onDismiss = { showEditDatePicker = false }
+            )
+        }
+        if (showEditTimePicker && editingDraft != null) {
+            val cal = Calendar.getInstance().apply { timeInMillis = editStartMillis }
+            NudgyTimePickerDialog(
+                initialHour = cal.get(Calendar.HOUR_OF_DAY),
+                initialMinute = cal.get(Calendar.MINUTE),
+                onTimeSelected = { hour, minute ->
+                    showEditTimePicker = false
+                    val (year, month, day) = localDateParts(editStartMillis)
+                    editStartMillis = Calendar.getInstance().apply {
+                        set(Calendar.YEAR, year)
+                        set(Calendar.MONTH, month)
+                        set(Calendar.DAY_OF_MONTH, day)
+                        set(Calendar.HOUR_OF_DAY, hour)
+                        set(Calendar.MINUTE, minute)
+                        set(Calendar.SECOND, 0)
+                        set(Calendar.MILLISECOND, 0)
+                    }.timeInMillis
+                },
+                onDismiss = { showEditTimePicker = false }
             )
         }
     }
