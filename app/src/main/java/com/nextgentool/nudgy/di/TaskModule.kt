@@ -19,6 +19,8 @@ import com.nextgentool.nudgy.data.repository.FocusHabitRepository
 import com.nextgentool.nudgy.data.repository.GroupRepository
 import com.nextgentool.nudgy.data.repository.MemoryRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.focus.PomodoroAlarm
+import com.nextgentool.nudgy.focus.RealPomodoroAlarm
 import com.nextgentool.nudgy.reminders.ReminderManager
 import dagger.Module
 import dagger.Provides
@@ -104,6 +106,16 @@ object TaskModule {
         @ApplicationContext context: Context,
         database: NudgyDatabase
     ): FocusHabitRepository = FocusHabitRepository(context, database)
+
+    // Sprint 4-1 — the Pomodoro end alarm (exact-alarm pattern, same
+    // as ReminderManager). The FocusViewModel depends on the seam so
+    // tests can substitute a fake; production gets the real
+    // AlarmManager implementation.
+    @Provides
+    @Singleton
+    fun providePomodoroAlarm(
+        @ApplicationContext context: Context
+    ): PomodoroAlarm = RealPomodoroAlarm(context)
 
     @Provides
     @Singleton

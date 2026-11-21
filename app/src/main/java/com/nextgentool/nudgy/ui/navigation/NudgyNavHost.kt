@@ -50,6 +50,7 @@ import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.intent.IncomingIntent
 import com.nextgentool.nudgy.ui.screens.CalendarScreen
 import com.nextgentool.nudgy.ui.screens.ChatScreen
+import com.nextgentool.nudgy.ui.screens.FocusScreen
 import com.nextgentool.nudgy.ui.screens.GroupsShell
 import com.nextgentool.nudgy.ui.screens.PlanScreen
 import com.nextgentool.nudgy.ui.screens.SettingsShell
@@ -214,12 +215,18 @@ fun NudgyNavHost(
             composable(NudgyRoute.Today.route) {
                 TodayScreen(
                     onPlanClick = { navController.navigate(NudgyRoute.Plan.route) },
-                    onAllTasksClick = { navController.navigate(NudgyRoute.Tasks.route) }
+                    onAllTasksClick = { navController.navigate(NudgyRoute.Tasks.route) },
+                    onFocusClick = { navController.navigate(NudgyRoute.Focus.route) }
                 )
             }
             composable(NudgyRoute.Plan.route) {
                 PlanScreen(onBackClick = { navController.popBackStack() })
             }
+        }
+        // Sprint 4-1 — Focus timer. NOT a bottom destination: no tab is
+        // highlighted while it is open (see NudgyRoute.all).
+        composable(NudgyRoute.Focus.route) {
+            FocusScreen(onBackClick = { navController.popBackStack() })
         }
         // Sprint 1-1 — Tasks list. NOT a bottom destination: no tab is
         // highlighted while it is open (see NudgyRoute.all).

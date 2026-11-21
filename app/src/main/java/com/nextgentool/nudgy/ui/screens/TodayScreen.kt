@@ -86,6 +86,9 @@ fun TodayScreen(
     // Sprint 1-1: entry point to the Tasks list. Defaults to no-op so
     // older call sites keep compiling.
     onAllTasksClick: () -> Unit = {},
+    // Sprint 4-1: entry point to the Focus timer (Q10=(a)). Defaults
+    // to no-op so older call sites keep compiling.
+    onFocusClick: () -> Unit = {},
     // Sprint 1-1 fix: the Today quick-add (Feature 1) shares TasksViewModel
     // with TasksScreen — a separate instance scoped to this destination,
     // same singleton repository, so the guards (empty title, double-tap)
@@ -150,14 +153,28 @@ fun TodayScreen(
                     )
                 }
                 Spacer(modifier = Modifier.height(12.dp))
-                Button(
-                    onClick = onPlanClick,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colorResource(R.color.nudgy_teal),
-                        contentColor = colorResource(R.color.nudgy_cream)
-                    )
-                ) {
-                    Text(text = "Plan my day")
+                // Sprint 4-1 — Focus timer entry (Q10=(a)): next to the
+                // Plan button, same teal treatment.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = onPlanClick,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colorResource(R.color.nudgy_teal),
+                            contentColor = colorResource(R.color.nudgy_cream)
+                        )
+                    ) {
+                        Text(text = "Plan my day")
+                    }
+                    Button(
+                        onClick = onFocusClick,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colorResource(R.color.nudgy_teal),
+                            contentColor = colorResource(R.color.nudgy_cream)
+                        ),
+                        modifier = Modifier.testTag("focus_button")
+                    ) {
+                        Text(text = "Focus")
+                    }
                 }
             }
         }
