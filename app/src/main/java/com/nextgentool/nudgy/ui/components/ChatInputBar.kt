@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,11 +36,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.ui.theme.NudgyTokens
+import com.nextgentool.nudgy.ui.viewmodel.ChatVoiceLanguage
 
 /**
  * Sprint 3-1 — the single chat input bar, shared by the full
@@ -52,6 +57,12 @@ import com.nextgentool.nudgy.ui.theme.NudgyTokens
  * Voice is the v1 single utterance (continuous listening / brain dump
  * is S3-4). The send guard is here too: dead while a reply is pending,
  * so a second prompt can never start a second send run.
+ *
+ * Sprint 3-7 (Q6 = (a)) — the explicit EN/বাংলা voice toggle: a
+ * small chip next to the mic shows the CURRENT language ("EN" /
+ * "বাংলা"); tapping it flips [voiceLanguage] in the ViewModel (the
+ * state lives there, so it survives rotation and is shared by the
+ * sheet and the full chat). The mic then listens in that language.
  */
 @Composable
 fun ChatInputBar(
@@ -60,7 +71,9 @@ fun ChatInputBar(
     onSendMessage: (String) -> Unit,
     onStartVoice: () -> Unit,
     onStopVoice: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    voiceLanguage: ChatVoiceLanguage = ChatVoiceLanguage.ENGLISH,
+    onToggleVoiceLanguage: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var inputText by rememberSaveable { mutableStateOf("") }
@@ -120,6 +133,35 @@ fun ChatInputBar(
                 modifier = Modifier.weight(1f),
                 singleLine = true
             )
+
+            // Sprint 3-7 — the voice-language toggle: shows the
+            // CURRENT language; tapping flips it (the mic then
+            // listens in the other language). Never auto-detects.
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .background(
+                        if (voiceLanguage == ChatVoiceLanguage.BENGALI) {
+                            teal.copy(alpha = 0.12f)
+                        } else {
+                            muted.copy(alpha = 0.10f)
+                        }
+                    )
+                    .clickable { onToggleVoiceLanguage() }
+                    .semantics {
+                        contentDescription =
+                            "Voice language: ${voiceLanguage.label}. Tap to switch language."
+                    }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = voiceLanguage.label,
+                    color = if (voiceLanguage == ChatVoiceLanguage.BENGALI) teal else muted,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
 
             IconButton(onClick = { handleVoiceClick() }) {
                 Icon(

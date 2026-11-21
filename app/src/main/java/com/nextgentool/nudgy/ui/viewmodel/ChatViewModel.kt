@@ -19,6 +19,7 @@ import com.nextgentool.nudgy.ai.LlmConfigProvider
 import com.nextgentool.nudgy.ai.LlmFallbackHandler
 import com.nextgentool.nudgy.ai.LlmFallbackResult
 import com.nextgentool.nudgy.ai.PreFilterResult
+import com.nextgentool.nudgy.ai.PrefilterCommand
 import com.nextgentool.nudgy.ai.ReplySoundPlayer
 import com.nextgentool.nudgy.ai.SplitCommand
 import com.nextgentool.nudgy.ai.SplitCommandParser
@@ -169,11 +170,37 @@ import javax.inject.Inject
  * Apply is not a creation, so it does not go through confirmDraft;
  * List/Board due-first sort is untouched (S1 locked).
  *
+ * Sprint 3-7 (feature 23, Q6 = (a)) — Bengali voice + Bengali
+ * natural language. The input bar carries an explicit EN/বাংলা
+ * toggle ([voiceLanguage], [toggleVoiceLanguage]) — the user picks,
+ * the app never auto-detects; the toggle's code ("en-US" / "bn-BD")
+ * is what [startVoice] hears in, and it decides the reply language
+ * for voice-driven flows. The bank grew three intents (SPLIT_TASK /
+ * PLAN_DAY / PRIORITY_SORT, 241 entries, 6516 total) so the local
+ * matcher parses the Bengali commands offline; the prefilter
+ * returns them as [PreFilterResult.Command] and this ViewModel
+ * routes each to its existing handler — a command phrasing the
+ * parsers cannot read asks which task, never a guess. A command
+ * piece inside a brain dump counts as skipped, never a task. The
+ * priority Apply receipt answers in the command's language
+ * ([_pendingPriorityIsBengali] rides with the pending order).
+ *
  * Sound (§4.4): every assistant reply plays the short notification
  * sound ([ReplySoundPlayer]). [speak] is NEVER called from the chat
  * path — [isSpeaking] is a constant false, so the mascot never shows
  * its TALKING mood in chat. TTS stays dormant.
  */
+/**
+ * Sprint 3-7 (Q6 = (a)) — the explicit EN/বাংলা voice toggle. The
+ * user picks the language; the app never auto-detects. [code] is the
+ * SpeechRecognizer locale ("en-US" / "bn-BD"); [label] is what the
+ * toggle chip in the input bar shows.
+ */
+enum class ChatVoiceLanguage(val code: String, val label: String) {
+    ENGLISH("en-US", "EN"),
+    BENGALI("bn-BD", "বাংলা")
+}
+
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
@@ -240,6 +267,25 @@ class ChatViewModel @Inject constructor(
 
     val isListening: StateFlow<Boolean> = voiceInput.isListening
 
+    /**
+     * Sprint 3-7 (Q6 = (a)) — the explicit EN/বাংলা voice toggle.
+     * The user picks the language; the app never auto-detects. The
+     * toggle lives in the ViewModel (not the bar) so it survives
+     * rotation and is shared by the sheet and the full chat (same
+     * ViewModel), and so [startVoice] always hears in the picked
+     * language. Default English — Bengali is one tap away.
+     */
+    private val _voiceLanguage = MutableStateFlow(ChatVoiceLanguage.ENGLISH)
+    val voiceLanguage: StateFlow<ChatVoiceLanguage> = _voiceLanguage.asStateFlow()
+
+    /** Flips the voice toggle EN <-> বাংলা. */
+    fun toggleVoiceLanguage() {
+        _voiceLanguage.value = when (_voiceLanguage.value) {
+            ChatVoiceLanguage.ENGLISH -> ChatVoiceLanguage.BENGALI
+            ChatVoiceLanguage.BENGALI -> ChatVoiceLanguage.ENGLISH
+        }
+    }
+
     /** Sprint 3-4 — true while a brain-dump session is open. The mic
      *  button shows Stop while this is true even between utterances
      *  (the recognizer's [isListening] flickers false while the
@@ -283,6 +329,11 @@ class ChatViewModel @Inject constructor(
      *  button on the DAILY_PLAN reply. Null = no order pending. */
     private val _pendingPriorityOrder = MutableStateFlow<List<String>?>(null)
     val pendingPriorityOrder: StateFlow<List<String>?> = _pendingPriorityOrder.asStateFlow()
+
+    /** Sprint 3-7 — whether the pending priority order came from a
+     *  Bengali command, so [applyPriorityOrder]'s receipt answers
+     *  in Bengali. Set with the order, cleared with it. */
+    private val _pendingPriorityIsBengali = MutableStateFlow(false)
 
     /** The id of the assistant message the priority Apply card is
      *  attached to. */
@@ -369,6 +420,7 @@ class ChatViewModel @Inject constructor(
         _pendingPlanMessageId.value = null
         _pendingPriorityOrder.value = null
         _pendingPriorityMessageId.value = null
+        _pendingPriorityIsBengali.value = false
         viewModelScope.launch {
             _isThinking.value = true
             try {
@@ -480,6 +532,21 @@ class ChatViewModel @Inject constructor(
             // → Gemini → validated draft or plain-text reply.
             is PreFilterResult.Unhandled ->
                 handleLlmFallback(trimmed, historyBefore)
+            // Sprint 3-7 — a recognised Sprint 3 command: route it to
+            // the same handler the typed-message parsers reach. A
+            // split the parsers cannot read (a bank-only phrasing)
+            // asks which task — never a guess, never a creation.
+            is PreFilterResult.Command -> when (result.command) {
+                PrefilterCommand.SPLIT_TASK -> {
+                    val split = SplitCommandParser.parse(result.prompt)
+                        ?: SplitCommand(null)
+                    handleSplitCommand(split, result.prompt, historyBefore)
+                }
+                PrefilterCommand.PLAN_DAY ->
+                    handleAutoScheduleCommand(result.prompt)
+                PrefilterCommand.PRIORITY_SORT ->
+                    handlePriorityCommand(result.prompt)
+            }
             // The prefilter itself failed: the old behaviour — a local
             // fallback answer, no LLM call, no turn spent.
             null -> postAssistantMessage(
@@ -623,7 +690,14 @@ class ChatViewModel @Inject constructor(
                 val parent = runCatching { taskRepository.getTaskById(taskId) }.getOrNull()
                 when {
                     parent == null -> postAssistantMessage(
-                        "I couldn't find that task anymore."
+                        // Sprint 3-7 — no parent title to read the
+                        // language from, so the voice toggle (the
+                        // user's explicit chat-language choice) decides.
+                        if (_voiceLanguage.value == ChatVoiceLanguage.BENGALI) {
+                            "ওই টাস্কটা আর পেলাম না।"
+                        } else {
+                            "I couldn't find that task anymore."
+                        }
                     )
                     parent.parentTaskId != null -> postAssistantMessage(
                         if (parent.title.any { it in '\u0980'..'\u09FF' }) {
@@ -960,6 +1034,12 @@ class ChatViewModel @Inject constructor(
                 }.getOrNull()
                 when (result) {
                     is PreFilterResult.PendingDraft -> drafts += result.draft
+                    // Sprint 3-7 — a command piece inside a dump
+                    // ("দিনটা সাজাও" spoken mid-dump): it is not a
+                    // task, and executing a day-plan mid-dump would
+                    // surprise the user — count it as skipped, like
+                    // any other non-creation Handled piece.
+                    is PreFilterResult.Command -> skipped++
                     is PreFilterResult.Handled -> {
                         // A question was asked: the prefilter stored a
                         // pending clarification. Record its text and
@@ -1459,6 +1539,9 @@ class ChatViewModel @Inject constructor(
         }
         val ordered = DayPlanner.priorityOrder(unplaced, now) { conflicts.containsKey(it.id) }
         _pendingPriorityOrder.value = ordered.map { it.id }
+        // Sprint 3-7 — the Apply receipt answers in the command's
+        // language; the flag rides with the order.
+        _pendingPriorityIsBengali.value = isBengali
         val messageId = postAssistantMessage(
             text = buildPriorityReplyText(ordered, conflicts, now, isBengali),
             actionType = ChatActionType.DAILY_PLAN,
@@ -1529,7 +1612,9 @@ class ChatViewModel @Inject constructor(
      */
     fun applyPriorityOrder() {
         val orderIds = _pendingPriorityOrder.value ?: return
+        val isBengali = _pendingPriorityIsBengali.value
         _pendingPriorityOrder.value = null
+        _pendingPriorityIsBengali.value = false
         _pendingPriorityMessageId.value = null
         viewModelScope.launch {
             val allTasks = runCatching { taskRepository.getAllTasksOnce(userId) }
@@ -1538,7 +1623,10 @@ class ChatViewModel @Inject constructor(
             val ordered = orderIds.mapNotNull { byId[it] }
                 .filter { !it.isCompleted && it.parentTaskId == null }
             if (ordered.isEmpty()) {
-                postAssistantMessage("Nothing to apply — those tasks are gone.")
+                postAssistantMessage(
+                    if (isBengali) "লাগানোর মতো কিছু নেই — টাস্কগুলো আর নেই।"
+                    else "Nothing to apply — those tasks are gone."
+                )
                 return@launch
             }
             val now = System.currentTimeMillis()
@@ -1558,7 +1646,10 @@ class ChatViewModel @Inject constructor(
                     )
                 }
             }
-            val lines = StringBuilder("Done — your My Day now follows this order:\n")
+            val lines = StringBuilder(
+                if (isBengali) "হয়ে গেছে — My Day এখন এই ক্রমে সাজবে:\n"
+                else "Done — your My Day now follows this order:\n"
+            )
             ordered.forEachIndexed { index, task -> lines.append("${index + 1}. ${task.title}\n") }
             postAssistantMessage(lines.toString().trimEnd())
         }
@@ -1569,6 +1660,7 @@ class ChatViewModel @Inject constructor(
     fun dismissPriorityOrder() {
         if (_pendingPriorityOrder.value == null) return
         _pendingPriorityOrder.value = null
+        _pendingPriorityIsBengali.value = false
         _pendingPriorityMessageId.value = null
     }
 

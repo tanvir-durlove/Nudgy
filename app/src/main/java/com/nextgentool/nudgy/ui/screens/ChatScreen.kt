@@ -79,6 +79,7 @@ import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.ui.components.ChatInputBar
+import com.nextgentool.nudgy.ui.viewmodel.ChatVoiceLanguage
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -123,6 +124,11 @@ fun ChatScreen(
     onSendMessage: (String) -> Unit,
     onStartVoice: () -> Unit,
     onStopVoice: () -> Unit,
+    // Sprint 3-7 (Q6 = (a)) — the explicit EN/বাংলা voice toggle,
+    // passed through to the shared input bar. Defaulted: the toggle
+    // simply shows EN and flips to বাংলা when tapped.
+    voiceLanguage: ChatVoiceLanguage = ChatVoiceLanguage.ENGLISH,
+    onToggleVoiceLanguage: () -> Unit = {},
     onTaskClick: (TaskEntity) -> Unit = {},
     onBlockFocusTime: (Long, Long, String, String) -> Unit = { _, _, _, _ -> },
     // Sprint 3-2 — draft-then-confirm (Q2 = (a)): the pending draft and
@@ -1191,7 +1197,9 @@ fun ChatScreen(
                 onSendMessage = onSendMessage,
                 onStartVoice = onStartVoice,
                 onStopVoice = onStopVoice,
-                modifier = Modifier.padding(bottom = 12.dp)
+                modifier = Modifier.padding(bottom = 12.dp),
+                voiceLanguage = voiceLanguage,
+                onToggleVoiceLanguage = onToggleVoiceLanguage
             )
         }
 

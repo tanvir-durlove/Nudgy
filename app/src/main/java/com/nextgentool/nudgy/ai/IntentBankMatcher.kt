@@ -8,7 +8,8 @@ import kotlin.math.sqrt
 
 /**
  * Local TF-IDF matcher over the chat intent bank
- * (assets/chat_intent_bank.json, v2-clean, 6275 entries).
+ * (assets/chat_intent_bank.json, v2-clean + Sprint 3-7 commands,
+ * 6516 entries).
  *
  * Decides INTENT ONLY — never time, never title. Fully offline, no
  * network, no Gemini, no cap consumption.
@@ -25,14 +26,15 @@ import kotlin.math.sqrt
  * Prediction = intent of the best-scoring document.
  *
  * Validated by leave-one-out over the bank (prototype): overall accuracy
- * 85.29% (SCHEDULE_CREATE 99.3%, QUERY_SCHEDULE 93.1%, QUERY_TASKS
- * 90.1%, TASK_CREATE 78.4%, REMINDER 71.6%). Threshold 0.30 is the
+ * 85.56% (SCHEDULE_CREATE 99.2%, QUERY_SCHEDULE 92.7%, QUERY_TASKS
+ * 89.5%, TASK_CREATE 78.2%, REMINDER 71.6%; Sprint 3-7 commands:
+ * SPLIT_TASK 100%, PRIORITY_SORT 94.0%, PLAN_DAY 89.1%). Threshold 0.30 is the
  * highest floor that costs zero measured LOO accuracy (lowest correct
- * LOO score is 0.327); greetings score 0.000 and abstain. The threshold
+ * LOO score is 0.321); greetings score 0.000 and abstain. The threshold
  * is a floor for nonsense input only — it cannot reject near-miss
- * commands ("I am busy" scores 0.794); those are handled by the
- * pre-filter's precise branches and question/small-talk guards, which
- * run before the matcher.
+ * commands ("I am busy" scores 0.793; "break a leg" scores 0.658
+ * against SPLIT_TASK); those are handled by the pre-filter's precise
+ * branches and question/small-talk guards, which run before the matcher.
  *
  * NOTE: bank entries carry their markdown numbering as a token
  * ("1. আজ বাজার করতে হবে" -> token "1"). Deliberately NOT stripped:
@@ -60,7 +62,13 @@ enum class BankIntent {
     SCHEDULE_CREATE,
     REMINDER,
     QUERY_SCHEDULE,
-    QUERY_TASKS;
+    QUERY_TASKS,
+    /** Sprint 3-7 — "break this task down" / "ভেঙে দাও". */
+    SPLIT_TASK,
+    /** Sprint 3-7 — "plan my day" / "দিনটা সাজাও". */
+    PLAN_DAY,
+    /** Sprint 3-7 — "what should I do first" / "কোনটা আগে করবো". */
+    PRIORITY_SORT;
 
     companion object {
         fun fromString(raw: String): BankIntent? = try {
@@ -81,7 +89,7 @@ data class BankMatch(
 class IntentBankMatcher(private val assets: AssetManager) {
 
     companion object {
-        /** Validated floor: lowest correct LOO score is 0.327. */
+        /** Validated floor: lowest correct LOO score is 0.321 (S3-7, was 0.327). */
         const val MATCH_THRESHOLD = 0.30
         private const val ASSET_PATH = "chat_intent_bank.json"
     }

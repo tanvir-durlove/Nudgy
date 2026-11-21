@@ -448,4 +448,75 @@ class ClientIntentPreFilterTest {
         assertTrue(handled.responseText.contains("couldn't split"))
         assertTrue(tasks.observeSubtasks(parent.id).first().isEmpty())
     }
+
+    // ---- Sprint 3-7 — Bengali commands route to Command results ----
+
+    private suspend fun commandOfSuspend(text: String): PreFilterResult.Command {
+        val result = preFilter.tryHandle("test-user", text, emptyList(), emptyList())
+        assertTrue("expected a Command for \"$text\", got $result", result is PreFilterResult.Command)
+        return result as PreFilterResult.Command
+    }
+
+    @Test
+    fun `bengali schedule-word command routes to plan-my-day before the schedule shortcut`() = runTest {
+        // "দিনটা শিডিউল করো" carries the schedule word "শিডিউল" —
+        // without the parser-first check it would fall into the
+        // schedule-word shortcut and draft a SCHEDULE_CREATE. The
+        // DayPlan parser owns it first.
+        val command = commandOfSuspend("দিনটা শিডিউল করো")
+        assertEquals(PrefilterCommand.PLAN_DAY, command.command)
+        assertEquals("দিনটা শিডিউল করো", command.prompt)
+    }
+
+    @Test
+    fun `bengali question-word command routes to priority before the question guard`() = runTest {
+        // "কোনটা আগে করবো" starts with the question word "কোন" —
+        // without the parser-first check Guard 2 would route it to
+        // the LLM fallback instead of the priority handler.
+        val command = commandOfSuspend("কোনটা আগে করবো")
+        assertEquals(PrefilterCommand.PRIORITY_SORT, command.command)
+        assertEquals("কোনটা আগে করবো", command.prompt)
+    }
+
+    @Test
+    fun `bengali split command routes to a split command`() = runTest {
+        val command = commandOfSuspend("পার্টির আয়োজনটা ভেঙে দাও")
+        assertEquals(PrefilterCommand.SPLIT_TASK, command.command)
+        assertEquals("পার্টির আয়োজনটা ভেঙে দাও", command.prompt)
+    }
+
+    @Test
+    fun `bank-only bengali phrasings route to commands`() = runTest {
+        // The parsers miss all three (see IntentBankMatcherTest) —
+        // the bank match is the second net, and the prefilter turns
+        // it into a Command the ViewModel can route.
+        assertEquals(
+            PrefilterCommand.SPLIT_TASK,
+            commandOfSuspend("টাস্কটা ভেঙে ছোট ছোট subtask বানিয়ে দাও").command
+        )
+        assertEquals(
+            PrefilterCommand.PLAN_DAY,
+            commandOfSuspend("আজকের দিনের সব কাজ সাজাও").command
+        )
+        assertEquals(
+            PrefilterCommand.PRIORITY_SORT,
+            commandOfSuspend("আজ সবার আগে কোন কাজটা করবো").command
+        )
+    }
+
+    @Test
+    fun `bengali task creation still drafts and confirm creates it`() = runTest {
+        val result = preFilter.tryHandle("test-user", "বাজার করতে হবে", emptyList(), emptyList())
+        assertTrue(result is PreFilterResult.PendingDraft)
+        val draft = (result as PreFilterResult.PendingDraft).draft
+        assertEquals(DraftKind.TASK, draft.kind)
+        assertTrue(draft.title.contains("বাজার"))
+        // Nothing is in the DB yet — draft-then-confirm, as in S3-2.
+        assertTrue(tasks.getAllTasksOnce("test-user").isEmpty())
+        val confirmed = preFilter.confirmDraft("test-user", draft)
+        assertTrue(confirmed is PreFilterResult.Handled)
+        val created = tasks.getAllTasksOnce("test-user")
+        assertEquals(1, created.size)
+        assertTrue(created.single().title.contains("বাজার"))
+    }
 }

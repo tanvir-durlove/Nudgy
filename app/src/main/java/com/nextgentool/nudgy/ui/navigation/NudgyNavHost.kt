@@ -142,6 +142,9 @@ fun NudgyApp() {
             // Sprint 3-4 — the sheet's mic shows Stop while a dump
             // session is open, even between utterances.
             val sheetBrainDumpActive by chatViewModel.isBrainDumpActive.collectAsState()
+            // Sprint 3-7 — the EN/বাংলা voice toggle, shared with the
+            // full chat through the same ViewModel.
+            val sheetVoiceLanguage by chatViewModel.voiceLanguage.collectAsState()
             QuickChatSheet(
                 messages = sheetMessages,
                 isThinking = sheetThinking,
@@ -152,8 +155,10 @@ fun NudgyApp() {
                     navigateTo(navController, NudgyRoute.Chat)
                 },
                 onDismiss = { quickChatOpen = false },
-                onStartVoice = { chatViewModel.startVoice() },
-                onStopVoice = { chatViewModel.stopVoice() }
+                onStartVoice = { chatViewModel.startVoice(sheetVoiceLanguage.code) },
+                onStopVoice = { chatViewModel.stopVoice() },
+                voiceLanguage = sheetVoiceLanguage,
+                onToggleVoiceLanguage = { chatViewModel.toggleVoiceLanguage() }
             )
         }
         val share = pendingShare
@@ -332,6 +337,8 @@ fun NudgyNavHost(
             val chatCapState by viewModel.chatCapState.collectAsState()
             val rewardedAdReady by viewModel.rewardedAdReady.collectAsState()
             val rewardedLoadError by viewModel.rewardedLoadError.collectAsState()
+            // Sprint 3-7 — the EN/বাংলা voice toggle.
+            val voiceLanguage by viewModel.voiceLanguage.collectAsState()
             val activity = LocalContext.current as? Activity
             ChatScreen(
                 user = viewModel.user,
@@ -341,8 +348,10 @@ fun NudgyNavHost(
                 isThinking = isThinking,
                 thinkingText = thinkingText,
                 onSendMessage = { viewModel.sendMessage(it) },
-                onStartVoice = { viewModel.startVoice() },
+                onStartVoice = { viewModel.startVoice(voiceLanguage.code) },
                 onStopVoice = { viewModel.stopVoice() },
+                voiceLanguage = voiceLanguage,
+                onToggleVoiceLanguage = { viewModel.toggleVoiceLanguage() },
                 onBlockFocusTime = { start, end, title, messageId ->
                     viewModel.onBlockFocusTime(start, end, title, messageId)
                 },

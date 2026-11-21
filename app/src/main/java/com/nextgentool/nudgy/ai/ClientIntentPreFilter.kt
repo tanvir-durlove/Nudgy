@@ -25,7 +25,7 @@ import java.util.regex.Pattern
  *
  * 1. ONE parseIntent() — every creation/message is routed through it.
  *    A local TF-IDF matcher over a curated sentence bank
- *    (assets/chat_intent_bank.json, 6275 sentences) decides INTENT ONLY;
+ *    (assets/chat_intent_bank.json, 6516 sentences) decides INTENT ONLY;
  *    deterministic functions resolve time and title on ONE path; a
  *    single reply builder writes every creation reply.
  * 2. NEVER-GUESS invariant — a bare hour with no AM/PM/daypart marker
@@ -107,9 +107,37 @@ sealed class PreFilterResult {
         val previewText: String,
         val quickSuggestions: List<String> = emptyList()
     ) : PreFilterResult()
+
+    /**
+     * Sprint 3-7 — a Sprint 3 chat command the prefilter recognised
+     * but cannot execute itself (split / plan-my-day / priority).
+     * The [prompt] is the raw user text; the ChatViewModel routes it
+     * to the existing handler (split, auto-schedule, priority) — the
+     * same handlers the typed-message parsers reach. A Command is
+     * never a creation: nothing is saved by returning it, and a
+     * brain-dump piece that is a command counts as skipped, not as a
+     * task. The parsers ([SplitCommandParser], [DayPlanCommandParser])
+     * are the authority on what counts as a command — the bank match
+     * is the second net for phrasings they miss.
+     */
+    data class Command(
+        val command: PrefilterCommand,
+        val prompt: String
+    ) : PreFilterResult()
 }
 
-enum class ParsedKind { TASK, SCHEDULE, REMINDER, QUERY_SCHEDULE, QUERY_TASKS, UNKNOWN }
+/** Sprint 3-7 — the commands [PreFilterResult.Command] can carry. */
+enum class PrefilterCommand { SPLIT_TASK, PLAN_DAY, PRIORITY_SORT }
+
+enum class ParsedKind {
+    TASK, SCHEDULE, REMINDER, QUERY_SCHEDULE, QUERY_TASKS, UNKNOWN,
+    /** Sprint 3-7 — a split command ("ভেঙে দাও" / "break this down"). */
+    SPLIT,
+    /** Sprint 3-7 — an auto-schedule command ("দিনটা সাজাও" / "plan my day"). */
+    PLAN_DAY,
+    /** Sprint 3-7 — a priority command ("কোনটা আগে করবো" / "what should I do first"). */
+    PRIORITY_SORT
+}
 
 data class ParsedIntent(
     val kind: ParsedKind,
@@ -713,6 +741,44 @@ class ClientIntentPreFilter(
         val bn = isBengali(cleaned)
         val now = Calendar.getInstance()
 
+        // Sprint 3-7 — Sprint 3 commands FIRST, before every shortcut
+        // and guard below. The typed path never reaches here for these
+        // (ChatViewModel detects them before the prefilter), but a
+        // brain-dump piece does — and without this check a command
+        // piece would be hijacked: "দিনটা শিডিউল করো" contains the
+        // schedule-word shortcut ("শিডিউল করো") and "কোনটা আগে করবো"
+        // starts with the question word "কোন" (Guard 2). The parsers
+        // are the authority on what counts as a command; the bank
+        // match below is only the second net for phrasings they miss.
+        // The title is the raw prompt — the ViewModel re-parses it
+        // (SplitCommandParser extracts the target title there).
+        SplitCommandParser.parse(cleaned)?.let {
+            return ParsedIntent(
+                kind = ParsedKind.SPLIT, title = cleaned,
+                dayCal = null, timeToken = null, isBareHour = false,
+                confidence = 1.0, isBengali = bn, priority = Priority.MEDIUM,
+                category = null, reminderAtDue = false,
+                scheduleLocation = null, scheduleType = "MEETING"
+            )
+        }
+        when (DayPlanCommandParser.parse(cleaned)) {
+            DayPlanCommand.AUTO_SCHEDULE -> return ParsedIntent(
+                kind = ParsedKind.PLAN_DAY, title = cleaned,
+                dayCal = null, timeToken = null, isBareHour = false,
+                confidence = 1.0, isBengali = bn, priority = Priority.MEDIUM,
+                category = null, reminderAtDue = false,
+                scheduleLocation = null, scheduleType = "MEETING"
+            )
+            DayPlanCommand.PRIORITY -> return ParsedIntent(
+                kind = ParsedKind.PRIORITY_SORT, title = cleaned,
+                dayCal = null, timeToken = null, isBareHour = false,
+                confidence = 1.0, isBengali = bn, priority = Priority.MEDIUM,
+                category = null, reminderAtDue = false,
+                scheduleLocation = null, scheduleType = "MEETING"
+            )
+            null -> Unit
+        }
+
         // Day resolution — shared by every kind.
         val dayOffset = extractRelativeDayInfo(cleaned) ?: 0
         val dayCal = (now.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, dayOffset) }
@@ -814,6 +880,31 @@ class ClientIntentPreFilter(
                 BankIntent.REMINDER -> ParsedKind.REMINDER
                 BankIntent.QUERY_SCHEDULE -> ParsedKind.QUERY_SCHEDULE
                 BankIntent.QUERY_TASKS -> ParsedKind.QUERY_TASKS
+                // Sprint 3-7 — the second net: a command phrasing the
+                // parsers above missed still reaches its handler via
+                // [PreFilterResult.Command]. The title stays the raw
+                // prompt (the ViewModel re-parses it); no time/title
+                // cleaning applies to a command.
+                BankIntent.SPLIT_TASK -> ParsedKind.SPLIT
+                BankIntent.PLAN_DAY -> ParsedKind.PLAN_DAY
+                BankIntent.PRIORITY_SORT -> ParsedKind.PRIORITY_SORT
+            }
+            if (kind == ParsedKind.SPLIT || kind == ParsedKind.PLAN_DAY ||
+                kind == ParsedKind.PRIORITY_SORT
+            ) {
+                return ParsedIntent(
+                    kind = kind, title = cleaned,
+                    dayCal = dayCal, timeToken = timeToken,
+                    isBareHour = isBareHourToken(timeToken, cleaned),
+                    confidence = match.score, isBengali = bn, priority = priority,
+                    category = category, reminderAtDue = false,
+                    scheduleLocation = null, scheduleType = "MEETING",
+                    // Matcher guess, not an explicit shortcut — but the
+                    // Command result never reads kindCertain (it is
+                    // only used by the clarification path, which a
+                    // command never enters).
+                    kindCertain = false
+                )
             }
             // A task phrased as an explicit reminder still reminds AT due.
             val explicitReminder = kind == ParsedKind.TASK &&
@@ -1724,6 +1815,16 @@ class ClientIntentPreFilter(
     ): PreFilterResult? {
         // (3) parseIntent — bank matcher + unified time/title/reply.
         return when (parsed.kind) {
+            // Sprint 3-7 — a recognised Sprint 3 command: hand the raw
+            // prompt back to the ViewModel, which routes it to the
+            // existing split / auto-schedule / priority handler. No
+            // creation happens here, and no clarification is stored.
+            ParsedKind.SPLIT ->
+                PreFilterResult.Command(PrefilterCommand.SPLIT_TASK, cleaned)
+            ParsedKind.PLAN_DAY ->
+                PreFilterResult.Command(PrefilterCommand.PLAN_DAY, cleaned)
+            ParsedKind.PRIORITY_SORT ->
+                PreFilterResult.Command(PrefilterCommand.PRIORITY_SORT, cleaned)
             ParsedKind.QUERY_SCHEDULE -> {
                 if ((extractRelativeDayInfo(cleaned) ?: 0) != 0 || mentionsWeekday(cleaned)) {
                     PreFilterResult.Unhandled

@@ -1,7 +1,7 @@
 {
 "version": 1,
 "source": "nudgy-chat-intent-bank-v2-clean.md",
-"count": 6275,
+"count": 6516,
 "entries": [
 {
 "intent": "TASK_CREATE",
@@ -31377,6 +31377,1211 @@
 "intent": "QUERY_TASKS",
 "lang": "en",
 "text": "What do I have to do tomorrow?"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই টাস্কটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই টাস্কটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই টাস্কটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই টাস্কটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই টাস্কটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই কাজটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই কাজটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই কাজটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই কাজটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই কাজটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই বড় টাস্কটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই বড় টাস্কটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই বড় টাস্কটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই বড় টাস্কটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই বড় টাস্কটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পার্টির আয়োজনটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পার্টির আয়োজনটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পার্টির আয়োজনটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পার্টির আয়োজনটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পার্টির আয়োজনটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রজেক্টটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রজেক্টটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রজেক্টটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রজেক্টটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রজেক্টটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পড়াশোনার কাজটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পড়াশোনার কাজটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পড়াশোনার কাজটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পড়াশোনার কাজটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পড়াশোনার কাজটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "অফিসের কাজটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "অফিসের কাজটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "অফিসের কাজটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "অফিসের কাজটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "অফিসের কাজটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বিয়ের আয়োজনটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বিয়ের আয়োজনটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বিয়ের আয়োজনটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বিয়ের আয়োজনটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বিয়ের আয়োজনটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ঘর সাজানোর কাজটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ঘর সাজানোর কাজটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ঘর সাজানোর কাজটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ঘর সাজানোর কাজটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ঘর সাজানোর কাজটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পরীক্ষার প্রস্তুতিটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পরীক্ষার প্রস্তুতিটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পরীক্ষার প্রস্তুতিটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পরীক্ষার প্রস্তুতিটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পরীক্ষার প্রস্তুতিটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "রিপোর্ট লেখার কাজটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "রিপোর্ট লেখার কাজটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "রিপোর্ট লেখার কাজটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "রিপোর্ট লেখার কাজটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "রিপোর্ট লেখার কাজটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বাজার করার কাজটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বাজার করার কাজটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বাজার করার কাজটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বাজার করার কাজটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বাজার করার কাজটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভ্রমণের পরিকল্পনাটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভ্রমণের পরিকল্পনাটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভ্রমণের পরিকল্পনাটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভ্রমণের পরিকল্পনাটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভ্রমণের পরিকল্পনাটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রেজেন্টেশনের কাজটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রেজেন্টেশনের কাজটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রেজেন্টেশনের কাজটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রেজেন্টেশনের কাজটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রেজেন্টেশনের কাজটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বাড়ি বদলের কাজটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বাড়ি বদলের কাজটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বাড়ি বদলের কাজটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বাড়ি বদলের কাজটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বাড়ি বদলের কাজটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ওয়েবসাইট বানানোর কাজটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ওয়েবসাইট বানানোর কাজটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ওয়েবসাইট বানানোর কাজটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ওয়েবসাইট বানানোর কাজটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ওয়েবসাইট বানানোর কাজটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "থিসিস লেখার কাজটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "থিসিস লেখার কাজটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "থিসিস লেখার কাজটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "থিসিস লেখার কাজটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "থিসিস লেখার কাজটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ইন্টারভিউয়ের প্রস্তুতিটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ইন্টারভিউয়ের প্রস্তুতিটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ইন্টারভিউয়ের প্রস্তুতিটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ইন্টারভিউয়ের প্রস্তুতিটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ইন্টারভিউয়ের প্রস্তুতিটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বইটা পড়ার কাজটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বইটা পড়ার কাজটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বইটা পড়ার কাজটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বইটা পড়ার কাজটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বইটা পড়ার কাজটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "অনুষ্ঠানের আয়োজনটা ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "অনুষ্ঠানের আয়োজনটা ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "অনুষ্ঠানের আয়োজনটা ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "অনুষ্ঠানের আয়োজনটা ছোট ছোট করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "অনুষ্ঠানের আয়োজনটা কয়েকটা ছোট ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভেঙে দাও এই টাস্কটা"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভেঙে দাও এই কাজটা"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভাগ করে দাও এই টাস্কটা"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভাগ করে দাও এই কাজটা"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভেঙে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই বড় কাজটা ছোট ছোট ভাগে ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "টাস্কটা ভেঙে ছোট ছোট subtask বানিয়ে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই কাজটা কয়েকটা ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পার্টির আয়োজনটা ধাপে ধাপে ভাগ করো"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রজেক্টটা ছোট ছোট টাস্কে ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break down Plan Diwali party"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break Plan Diwali party down"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "split Plan Diwali party into subtasks"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break down the project"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break the project down"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "split the project into subtasks"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break down my thesis"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break my thesis down"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "split my thesis into subtasks"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break down this big task"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break this big task down"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "split this big task into subtasks"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break down the presentation"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break the presentation down"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "split the presentation into subtasks"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break down the house move"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break the house move down"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "split the house move into subtasks"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break down the report"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break the report down"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "split the report into subtasks"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break down the website redesign"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break the website redesign down"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "split the website redesign into subtasks"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break down the exam preparation"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break the exam preparation down"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "split the exam preparation into subtasks"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break down this task"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break this task down"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "split this task into subtasks"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break this down"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "split this into subtasks"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "split this task into smaller steps"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "en",
+"text": "break this into subtasks"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "আমার দিনটা সাজাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "দিনটা সাজাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "দিন সাজাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "আমার দিনটা শিডিউল করো"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "দিনটা শিডিউল করো"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "দিন শিডিউল করো"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "দিনের প্ল্যান বানাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "আজকের দিনটা সাজাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "আমার দিনের প্ল্যান করো"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "আজকের দিনের প্ল্যান বানাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "দিনের কাজগুলো সাজাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "আজকের কাজগুলো শিডিউল করো"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "দিনটা প্ল্যান করো"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "আজকের প্ল্যানটা সাজাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "আমার আজকের দিনটা সাজাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "দিনের প্ল্যানটা করে দাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "আজকের দিনটা শিডিউল করো"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "আমার দিনটা পরিকল্পনা করে দাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "দিনের কাজগুলো শিডিউল করে দাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "আজকের কাজগুলো সাজাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "দিনটা গুছিয়ে দাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "প্লিজ আমার দিনটা সাজাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "আমার দিনটা সাজাও তো"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "প্লিজ দিনটা শিডিউল করো"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "দিনটা শিডিউল করো তো"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "প্লিজ দিনের প্ল্যান বানাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "দিনের প্ল্যান বানাও তো"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "আজকের দিনের সব কাজ সাজাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "সকাল থেকে সন্ধ্যা পর্যন্ত দিনটা সাজাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "bn",
+"text": "আমার আজকের শিডিউলটা সাজাও"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "en",
+"text": "plan my day"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "en",
+"text": "schedule my day"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "en",
+"text": "schedule today"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "en",
+"text": "plan today"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "en",
+"text": "organize my day"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "en",
+"text": "organise my day"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "en",
+"text": "arrange my day"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "en",
+"text": "plan out my day"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "en",
+"text": "schedule my tasks for today"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "en",
+"text": "plan my tasks"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "en",
+"text": "plan my day for me"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "en",
+"text": "please plan my day"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "en",
+"text": "schedule my day please"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "en",
+"text": "help me plan my day"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "en",
+"text": "plan out today"
+},
+{
+"intent": "PLAN_DAY",
+"lang": "en",
+"text": "organize today for me"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "কোনটা আগে করবো"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "কোনটা আগে করব"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "কোনটি আগে করবো"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "কোনটি আগে করব"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "দিনটা সাজিয়ে দাও"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "আমার দিনটা সাজিয়ে দাও"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "অগ্রাধিকার ঠিক করো"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "প্রায়োরিটি অনুযায়ী সাজাও"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "সবচেয়ে জরুরি কাজটা আগে দেখাও"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "কোন কাজটা আগে করা উচিত"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "আজ কোনটা আগে করবো"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "অগ্রাধিকার অনুযায়ী কাজগুলো সাজাও"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "প্রায়োরিটি ঠিক করে দাও"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "কোন কাজটা সবচেয়ে জরুরি"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "আগে কোনটা করবো বলো"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "দিনের কাজগুলো অগ্রাধিকার অনুযায়ী সাজিয়ে দাও"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "কাজগুলো জরুরি অনুযায়ী সাজাও"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "সবচেয়ে গুরুত্বপূর্ণ কাজটা আগে বলো"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "আজকের কাজগুলোর প্রায়োরিটি ঠিক করো"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "কোনটা আগে করলে ভালো হবে"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "আমার দিনটা প্রায়োরিটি অনুযায়ী সাজিয়ে দাও"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "কাজের অগ্রাধিকার ঠিক করে দাও"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "জরুরি কাজগুলো আগে সাজাও"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "প্লিজ কোনটা আগে করবো"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "কোনটা আগে করবো তো"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "প্লিজ দিনটা সাজিয়ে দাও"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "দিনটা সাজিয়ে দাও তো"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "প্লিজ অগ্রাধিকার ঠিক করো"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "অগ্রাধিকার ঠিক করো তো"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "আজ সবার আগে কোন কাজটা করবো"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "bn",
+"text": "কোন কাজটা আগে করা দরকার বলো"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "what should I do first"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "what do I do first"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "what should I tackle first"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "which task first"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "what's first"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "whats first"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "prioritize my day"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "prioritise my day"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "prioritize today"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "prioritise today"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "sort by priority"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "order by priority"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "most important first"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "what is the most important task today"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "which task is most important"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "prioritize my tasks"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "order my day by priority"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "tell me what to do first"
+},
+{
+"intent": "PRIORITY_SORT",
+"lang": "en",
+"text": "what should I start with"
 }
 ]
 }
