@@ -70,6 +70,15 @@ import java.util.regex.Pattern
  * Known limitation (deliberate, do not chase): negation is not handled
  * ("মনে করিয়ে দিও না, তবে টাস্ক বানাও") — a TF-IDF matcher cannot do
  * negation. Behaviour is left as-is.
+ *
+ * Sprint 3-2 (Q2 = (a)) — draft-then-confirm: NO creation path in
+ * this class saves directly anymore. [buildDraftFromParsed] and the
+ * step-4 / step-5 / 30-minute-reminder / focus branches return
+ * [PreFilterResult.PendingDraft]; the user confirms on the preview
+ * card and only [confirmDraft] writes to the DB (createTask /
+ * addEvent / blockFocusTime). The 6 original tests were updated to
+ * the new flow for exactly this reason — a test asserting immediate
+ * creation would now be asserting the old bug.
  */
 sealed class PreFilterResult {
     data class Handled(
@@ -84,6 +93,20 @@ sealed class PreFilterResult {
     ) : PreFilterResult()
 
     object Unhandled : PreFilterResult()
+
+    /**
+     * Sprint 3-2 (Q2 = (a)) — draft-then-confirm: a creation parsed
+     * but NOT saved yet. The chat shows the preview card with
+     * [previewText]; NOTHING is created until the user confirms,
+     * which calls [ClientIntentPreFilter.confirmDraft]. Discard is
+     * simply never calling confirm — the prefilter holds no draft
+     * state of its own (the ViewModel owns the pending draft).
+     */
+    data class PendingDraft(
+        val draft: ChatDraft,
+        val previewText: String,
+        val quickSuggestions: List<String> = emptyList()
+    ) : PreFilterResult()
 }
 
 enum class ParsedKind { TASK, SCHEDULE, REMINDER, QUERY_SCHEDULE, QUERY_TASKS, UNKNOWN }
@@ -1047,7 +1070,7 @@ class ClientIntentPreFilter(
             } ?: return null
             pendingClarification = null
             val eventCal = resolvedEventCal(pending, pending.resolvedHour, now)
-            return createFromParsed(
+            return buildDraftFromParsed(
                 ParsedIntent(
                     kind = chosenKind, title = pending.title,
                     dayCal = pending.dayCal, timeToken = pending.timeToken,
@@ -1095,7 +1118,7 @@ class ClientIntentPreFilter(
 
         pendingClarification = null
         val eventCal = resolvedEventCal(pending, resolvedHour, now)
-        return createFromParsed(
+        return buildDraftFromParsed(
             ParsedIntent(
                 kind = pending.kind, title = pending.title,
                 dayCal = pending.dayCal, timeToken = pending.timeToken,
@@ -1126,10 +1149,14 @@ class ClientIntentPreFilter(
         }
     }
 
-    /** Creates the task/event for a fully-resolved parsed intent and
-     *  returns the unified reply. One place — clarification answers and
-     *  fresh parses both land here. */
-    private suspend fun createFromParsed(
+    /** S3-2 (Q2 = (a)) — builds the DRAFT for a fully-resolved parsed
+     *  intent and returns the preview text. One place — clarification
+     *  answers and fresh parses both land here. NOTHING is saved here:
+     *  the draft is created only when the user confirms
+     *  ([confirmDraft]). The conflict check is read-only, so it is
+     *  safe to run at draft time; [confirmDraft] re-checks it fresh
+     *  before saving. */
+    private suspend fun buildDraftFromParsed(
         parsed: ParsedIntent,
         eventCal: Calendar,
         now: Calendar,
@@ -1137,24 +1164,147 @@ class ClientIntentPreFilter(
     ): PreFilterResult {
         return when (parsed.kind) {
             ParsedKind.SCHEDULE -> {
-                // Conflict checked BEFORE creation, so the new event can
-                // never report a conflict with itself.
                 val startMillis = eventCal.timeInMillis
                 val endMillis = startMillis + 45 * 60 * 1000L
+                // Conflict checked BEFORE creation, so the new event can
+                // never report a conflict with itself. Read-only here;
+                // confirmDraft re-checks fresh.
+                val conflict = calendarRepository.checkConflict(userId, startMillis, endMillis)
+                val conflictingTitle = if (conflict.hasConflict) conflict.conflictingEvent?.title else null
+                val draft = ChatDraft(
+                    kind = DraftKind.SCHEDULE,
+                    title = parsed.title,
+                    startEpochMillis = startMillis,
+                    endEpochMillis = endMillis,
+                    priority = parsed.priority,
+                    category = parsed.category,
+                    scheduleLocation = parsed.scheduleLocation ?: "Google Meet",
+                    scheduleType = parsed.scheduleType,
+                    isBengali = parsed.isBengali,
+                    conflictingTitle = conflictingTitle
+                )
+                PreFilterResult.PendingDraft(
+                    draft = draft,
+                    previewText = buildPreviewText(draft, now),
+                    quickSuggestions = listOf("Show schedule", "Plan my day", "Find free time")
+                )
+            }
+            ParsedKind.TASK, ParsedKind.REMINDER -> {
+                val reminderMillis = if (parsed.reminderAtDue) {
+                    eventCal.timeInMillis
+                } else {
+                    eventCal.timeInMillis - 2 * 60 * 60 * 1000L
+                }
+                val draft = ChatDraft(
+                    kind = if (parsed.kind == ParsedKind.REMINDER) DraftKind.REMINDER else DraftKind.TASK,
+                    title = parsed.title,
+                    startEpochMillis = eventCal.timeInMillis,
+                    priority = parsed.priority,
+                    category = parsed.category ?: TaskCategory.PERSONAL,
+                    reminderAtDue = parsed.reminderAtDue,
+                    reminderEpochMillis = reminderMillis,
+                    isBengali = parsed.isBengali
+                )
+                PreFilterResult.PendingDraft(
+                    draft = draft,
+                    previewText = buildPreviewText(draft, now),
+                    quickSuggestions = listOf("Show today's tasks", "Plan my day", "Find free time")
+                )
+            }
+            else -> PreFilterResult.Unhandled
+        }
+    }
+
+    /** S3-2 — the preview question for a draft: what WILL be created,
+     *  as a question, never past tense. The card shows the details
+     *  (title / time / priority); this text is the ask. Mirrors
+     *  [buildCreationReply]'s branches (event time first, reminder
+     *  labelled separately) so preview and receipt never disagree. */
+    private fun buildPreviewText(draft: ChatDraft, now: Calendar): String {
+        val eventCal = Calendar.getInstance().apply { timeInMillis = draft.startEpochMillis }
+        return when (draft.kind) {
+            DraftKind.SCHEDULE -> {
+                val conflictNote = draft.conflictingTitle?.let {
+                    if (draft.isBengali) " সতর্কতা: ওই সময়ে \"$it\" আছে — সময় মিলিয়ে নিও।"
+                    else " ⚠ Heads up: this overlaps with '$it'."
+                } ?: ""
+                if (draft.isBengali) {
+                    "\"${draft.title}\" ${formatDayTimeLabel(eventCal, now)} শিডিউল করব?$conflictNote"
+                } else {
+                    "Schedule \"${draft.title}\" for ${formatDayTimeLabelEn(eventCal, now)}?$conflictNote"
+                }
+            }
+            DraftKind.REMINDER -> if (draft.isBengali) {
+                "${formatDayTimeLabel(eventCal, now)} \"${draft.title}\"-এর কথা মনে করিয়ে দেব?"
+            } else {
+                "Remind you about \"${draft.title}\" ${formatDayTimeLabelEn(eventCal, now)}?"
+            }
+            DraftKind.TASK -> if (draft.reminderAtDue) {
+                if (draft.isBengali) {
+                    "${formatDayTimeLabel(eventCal, now)} \"${draft.title}\"-এর কথা মনে করিয়ে দেব — টাস্কটা তৈরি করব?"
+                } else {
+                    "Remind you about \"${draft.title}\" ${formatDayTimeLabelEn(eventCal, now)} — create this task?"
+                }
+            } else if (draft.reminderEpochMillis != null) {
+                val reminderCal = Calendar.getInstance().apply { timeInMillis = draft.reminderEpochMillis }
+                if (draft.isBengali) {
+                    val eventLabel = formatDayTimeLabel(eventCal, now)
+                    val reminderLabel = formatDayTimeLabel(reminderCal, now)
+                    "\"${draft.title}\" টাস্কটা $eventLabel তৈরি করব, আর $reminderLabel মনে করিয়ে দেব?"
+                } else {
+                    val eventLabel = formatDayTimeLabelEn(eventCal, now)
+                    val reminderLabel = formatDayTimeLabelEn(reminderCal, now)
+                    "Create task \"${draft.title}\" for $eventLabel? I'll remind you at $reminderLabel."
+                }
+            } else {
+                if (draft.isBengali) {
+                    "\"${draft.title}\" টাস্কটা ${formatDayTimeLabel(eventCal, now)} তৈরি করব?"
+                } else {
+                    "Create task \"${draft.title}\" for ${formatDayTimeLabelEn(eventCal, now)}?"
+                }
+            }
+            DraftKind.FOCUS_EVENT -> {
+                val endMillis = draft.endEpochMillis
+                    ?: (draft.startEpochMillis + draft.focusDurationMinutes * 60 * 1000L)
+                val range = "${formatTime(java.util.Date(draft.startEpochMillis))} – ${formatTime(java.util.Date(endMillis))}"
+                if (draft.isBengali) {
+                    "${draft.focusDurationMinutes} মিনিটের Deep Work ($range) ব্লক করব?"
+                } else {
+                    "Block ${draft.focusDurationMinutes} minutes of Deep Work ($range)?"
+                }
+            }
+        }
+    }
+
+    /**
+     * S3-2 — saves a confirmed draft: the ONLY place a chat creation
+     * writes to the DB. Called by ChatViewModel after the user taps
+     * Confirm on the preview card. Returns the post-save receipt (the
+     * same reply text + card the old immediate-save path showed). The
+     * schedule conflict is re-checked fresh here — the draft-time
+     * check may be stale by confirm time.
+     */
+    suspend fun confirmDraft(userId: String, draft: ChatDraft): PreFilterResult {
+        val now = Calendar.getInstance()
+        val eventCal = Calendar.getInstance().apply { timeInMillis = draft.startEpochMillis }
+        return when (draft.kind) {
+            DraftKind.SCHEDULE -> {
+                val startMillis = draft.startEpochMillis
+                val endMillis = draft.endEpochMillis ?: startMillis + 45 * 60 * 1000L
                 val conflict = calendarRepository.checkConflict(userId, startMillis, endMillis)
                 val conflictingTitle = if (conflict.hasConflict) conflict.conflictingEvent?.title else null
                 val event = calendarRepository.addEvent(
                     userId = userId,
-                    title = parsed.title,
+                    title = draft.title,
                     startEpochMillis = startMillis,
                     endEpochMillis = endMillis,
-                    locationOrLink = parsed.scheduleLocation ?: "Google Meet",
-                    eventType = parsed.scheduleType
+                    locationOrLink = draft.scheduleLocation ?: "Google Meet",
+                    eventType = draft.scheduleType
                 )
                 PreFilterResult.Handled(
                     responseText = buildCreationReply(
-                        parsed.title, eventCal, null, false, ParsedKind.SCHEDULE, now,
-                        isBengali = parsed.isBengali,
+                        draft.title, eventCal, null, false, ParsedKind.SCHEDULE, now,
+                        isBengali = draft.isBengali,
                         conflictingTitle = conflictingTitle
                     ),
                     createdEvent = event,
@@ -1164,32 +1314,42 @@ class ClientIntentPreFilter(
                     quickSuggestions = listOf("Show schedule", "Plan my day", "Find free time")
                 )
             }
-            ParsedKind.TASK, ParsedKind.REMINDER -> {
-                val reminderCal = if (parsed.reminderAtDue) {
-                    eventCal
-                } else {
-                    (eventCal.clone() as Calendar).apply { add(Calendar.HOUR_OF_DAY, -2) }
+            DraftKind.TASK, DraftKind.REMINDER -> {
+                val kind = if (draft.kind == DraftKind.REMINDER) ParsedKind.REMINDER else ParsedKind.TASK
+                val reminderCal = draft.reminderEpochMillis?.let {
+                    Calendar.getInstance().apply { timeInMillis = it }
                 }
                 val task = taskRepository.createTask(
                     userId = userId,
-                    title = parsed.title,
-                    dueEpochMillis = eventCal.timeInMillis,
-                    priority = parsed.priority,
-                    category = parsed.category ?: TaskCategory.PERSONAL,
+                    title = draft.title,
+                    dueEpochMillis = draft.startEpochMillis,
+                    priority = draft.priority,
+                    category = draft.category ?: TaskCategory.PERSONAL,
                     reminderSet = true,
-                    reminderEpochMillis = if (parsed.reminderAtDue) eventCal.timeInMillis else reminderCal.timeInMillis
+                    reminderEpochMillis = draft.reminderEpochMillis
                 )
                 PreFilterResult.Handled(
                     responseText = buildCreationReply(
-                        parsed.title, eventCal, reminderCal, parsed.reminderAtDue, parsed.kind, now,
-                        isBengali = parsed.isBengali
+                        draft.title, eventCal, reminderCal, draft.reminderAtDue, kind, now,
+                        isBengali = draft.isBengali
                     ),
                     createdTask = task,
                     actionType = ChatActionType.TASK_PREVIEW,
                     quickSuggestions = listOf("Show today's tasks", "Plan my day", "Find free time")
                 )
             }
-            else -> PreFilterResult.Unhandled
+            DraftKind.FOCUS_EVENT -> {
+                val startMillis = draft.startEpochMillis
+                val endMillis = draft.endEpochMillis
+                    ?: (startMillis + draft.focusDurationMinutes * 60 * 1000L)
+                val event = calendarRepository.blockFocusTime(userId, startMillis, endMillis, draft.title)
+                val timeRangeText = "${formatTime(java.util.Date(startMillis))} – ${formatTime(java.util.Date(endMillis))}"
+                PreFilterResult.Handled(
+                    responseText = "Done! Reserved ${draft.focusDurationMinutes} minutes of Deep Work on your calendar ($timeRangeText). Let's stay in the zone! 🎯",
+                    createdEvent = event,
+                    quickSuggestions = listOf("Plan my day", "Show today's tasks", "What do you remember?")
+                )
+            }
         }
     }
 
@@ -1229,19 +1389,21 @@ class ClientIntentPreFilter(
         // 5. English / Bengali: "Remind me in 30 minutes"
         if (lower.contains("30 minute") || lower.contains("30 minutes") || cleaned.contains("৩০ মিনিট")) {
             val cal = Calendar.getInstance().apply { add(Calendar.MINUTE, 30) }
-            val reminderTask = taskRepository.createTask(
-                userId = userId,
+            // S3-2 — a draft, not a save: the 30-minute reminder is a
+            // chat creation like any other (Q2 = (a)).
+            val draft = ChatDraft(
+                kind = DraftKind.TASK,
                 title = "Follow-up reminder",
-                dueEpochMillis = cal.timeInMillis,
+                startEpochMillis = cal.timeInMillis,
                 priority = Priority.MEDIUM,
                 category = TaskCategory.PERSONAL,
-                reminderSet = true,
-                reminderEpochMillis = cal.timeInMillis
+                reminderAtDue = true,
+                reminderEpochMillis = cal.timeInMillis,
+                isBengali = isBengali(cleaned)
             )
-            return PreFilterResult.Handled(
-                responseText = "Done! I've set a reminder for 30 minutes from now (at ${formatTime(cal.timeInMillis)}). 🔔",
-                createdTask = reminderTask,
-                actionType = ChatActionType.TASK_PREVIEW,
+            return PreFilterResult.PendingDraft(
+                draft = draft,
+                previewText = buildPreviewText(draft, Calendar.getInstance()),
                 quickSuggestions = listOf("Plan my day", "Show today's tasks")
             )
         }
@@ -1289,12 +1451,22 @@ class ClientIntentPreFilter(
             }
             val durationMinutes = suggestedSlot?.durationMinutes ?: 45
             val endMillis = suggestedSlot?.endEpochMillis ?: (startMillis + (durationMinutes * 60 * 1000L))
-            val timeRangeText = "${formatTime(java.util.Date(startMillis))} – ${formatTime(java.util.Date(endMillis))}"
 
-            val event = calendarRepository.blockFocusTime(userId, startMillis, endMillis, "Focus Time (Deep Work)")
-            return PreFilterResult.Handled(
-                responseText = "Done! Reserved $durationMinutes minutes of Deep Work on your calendar ($timeRangeText). Let's stay in the zone! 🎯",
-                createdEvent = event,
+            // S3-2 — a draft, not a save: "Block 45m focus" is a chat
+            // creation (Q2 = (a)). The FOCUS_TIME_PROPOSAL card's own
+            // "Block Time" button is unchanged — that proposal IS the
+            // preview and the button IS the confirm.
+            val draft = ChatDraft(
+                kind = DraftKind.FOCUS_EVENT,
+                title = "Focus Time (Deep Work)",
+                startEpochMillis = startMillis,
+                endEpochMillis = endMillis,
+                isBengali = isBengali(cleaned),
+                focusDurationMinutes = durationMinutes
+            )
+            return PreFilterResult.PendingDraft(
+                draft = draft,
+                previewText = buildPreviewText(draft, Calendar.getInstance()),
                 quickSuggestions = listOf("Plan my day", "Show today's tasks", "What do you remember?")
             )
         }
@@ -1576,7 +1748,7 @@ class ClientIntentPreFilter(
                     buildNoTimeQuestion(parsed, now)
                 } else {
                     val eventCal = resolveCreationTime(parsed, now, findDaypartWord(cleaned))
-                    createFromParsed(parsed, eventCal, now, userId)
+                    buildDraftFromParsed(parsed, eventCal, now, userId)
                 }
             }
             ParsedKind.UNKNOWN -> null
@@ -1639,29 +1811,29 @@ class ClientIntentPreFilter(
                 }
                 fallbackTitle = fallbackTitle.replaceFirstChar { it.uppercase() }
                 parseTimeIntoCalendar(eventCal, token, isBengali(cleaned), findDaypartWord(cleaned))
+                // S3-2 — a draft, not a save. The conflict is read-only
+                // here; confirmDraft re-checks it fresh. (Preserved
+                // quirk, not fixed here: unlike step 3, this fallback
+                // does not roll a past time +1 day.)
                 val conflict = calendarRepository.checkConflict(
                     userId, eventCal.timeInMillis, eventCal.timeInMillis + (45 * 60 * 1000L)
                 )
-                val conflictNote = if (conflict.hasConflict) {
-                    " ⚠ Heads up: this overlaps with '${conflict.conflictingEvent?.title}'."
-                } else ""
+                val conflictingTitle = if (conflict.hasConflict) conflict.conflictingEvent?.title else null
                 // Scheduled appointments/sessions are events — Calendar only,
                 // no shadow task (keeps Tasks and Calendar separate).
-                val event = calendarRepository.addEvent(
-                    userId = userId,
+                val draft = ChatDraft(
+                    kind = DraftKind.SCHEDULE,
                     title = fallbackTitle,
                     startEpochMillis = eventCal.timeInMillis,
                     endEpochMillis = eventCal.timeInMillis + (45 * 60 * 1000L),
-                    locationOrLink = "Personal",
-                    eventType = "EVENT"
+                    scheduleLocation = "Personal",
+                    scheduleType = "EVENT",
+                    isBengali = isBengali(cleaned),
+                    conflictingTitle = conflictingTitle
                 )
-                val formatted = formatTime(eventCal.timeInMillis)
-                val isNowTomorrow = eventCal.get(Calendar.DAY_OF_YEAR) != Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
-                val dayLabel = if (isNowTomorrow) "tomorrow at" else "today at"
-                return PreFilterResult.Handled(
-                    responseText = "Got it! I've scheduled '$fallbackTitle' for $dayLabel $formatted on your calendar. 📅$conflictNote",
-                    createdEvent = event,
-                    actionType = ChatActionType.EVENT_CREATED,
+                return PreFilterResult.PendingDraft(
+                    draft = draft,
+                    previewText = buildPreviewText(draft, Calendar.getInstance()),
                     quickSuggestions = listOf("Show schedule", "Plan my day", "Find free time")
                 )
             }
@@ -1736,24 +1908,24 @@ class ClientIntentPreFilter(
                 .trim()
             if (catchTitle.isBlank()) catchTitle = cleaned
             catchTitle = catchTitle.replaceFirstChar { it.uppercase() }
-            val task = taskRepository.createTask(
-                userId = userId,
+            // S3-2 — a draft, not a save. The reminder lead is the same
+            // due − 2h the old code got back from the repository default
+            // (dueReminderTriggerMillis); storing it explicitly keeps the
+            // preview faithful and confirm passes it through unchanged.
+            val draft = ChatDraft(
+                kind = DraftKind.TASK,
                 title = catchTitle,
-                dueEpochMillis = cal.timeInMillis,
+                startEpochMillis = cal.timeInMillis,
                 priority = Priority.MEDIUM,
                 category = TaskCategory.PERSONAL,
-                reminderSet = true
+                reminderAtDue = false,
+                reminderEpochMillis = cal.timeInMillis - 2 * 60 * 60 * 1000L,
+                isBengali = bn
             )
-            val reminderMillis = task.reminderEpochMillis ?: cal.timeInMillis
-            val reminderCal = Calendar.getInstance().apply { timeInMillis = reminderMillis }
             val now = Calendar.getInstance()
-            return PreFilterResult.Handled(
-                responseText = buildCreationReply(
-                    catchTitle, cal, reminderCal, false, ParsedKind.TASK, now,
-                    isBengali = bn
-                ),
-                createdTask = task,
-                actionType = ChatActionType.TASK_PREVIEW,
+            return PreFilterResult.PendingDraft(
+                draft = draft,
+                previewText = buildPreviewText(draft, now),
                 quickSuggestions = listOf("Show today's tasks", "Plan my day", "Find free time")
             )
         }

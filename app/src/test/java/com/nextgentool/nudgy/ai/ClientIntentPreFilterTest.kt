@@ -7,7 +7,9 @@ import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.data.repository.MemoryRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.domain.startOfDayMillis
 import com.nextgentool.nudgy.ui.screens.ChatActionType
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -49,6 +51,7 @@ class ClientIntentPreFilterTest {
     private lateinit var db: NudgyDatabase
     private lateinit var preFilter: ClientIntentPreFilter
     private lateinit var tasks: TaskRepository
+    private lateinit var calendar: CalendarRepository
 
     @Before
     fun setUp() {
@@ -57,7 +60,7 @@ class ClientIntentPreFilterTest {
             .allowMainThreadQueries()
             .build()
         tasks = TaskRepository(context, db)
-        val calendar = CalendarRepository(context, db)
+        calendar = CalendarRepository(context, db)
         val memories = MemoryRepository(context, db)
         preFilter = ClientIntentPreFilter(tasks, calendar, memories, context.assets)
     }
@@ -91,22 +94,40 @@ class ClientIntentPreFilterTest {
         assertTrue(handled.responseText.contains("সকাল নাকি বিকেল"))
     }
 
+    // Sprint 3-2 (Q2 = (a)) — draft-then-confirm: these two tests used
+    // to assert immediate creation. The parse now returns a
+    // PendingDraft with NOTHING in the DB; the task exists only after
+    // confirmDraft. The reason is the point of the sprint: a wrong
+    // parse must never silently create a wrong task.
+
     @Test
-    fun `explicit PM creates a task at 17_00`() = runTest {
+    fun `explicit PM drafts a task at 17_00 and creates it only on confirm`() = runTest {
         val result = preFilter.tryHandle("test-user", "call tasnim at 5pm", emptyList(), emptyList())
-        assertTrue(result is PreFilterResult.Handled)
-        val handled = result as PreFilterResult.Handled
+        assertTrue(result is PreFilterResult.PendingDraft)
+        val draft = (result as PreFilterResult.PendingDraft).draft
+        assertEquals(DraftKind.TASK, draft.kind)
+        assertFalse(result.previewText.contains("AM or PM"))
+        assertEquals(17, hourOf(draft.startEpochMillis))
+        assertTrue(draft.title.contains("tasnim", ignoreCase = true))
+        // Nothing is created until Confirm.
+        assertTrue(tasks.getAllTasksOnce("test-user").isEmpty())
+        val confirmed = preFilter.confirmDraft("test-user", draft)
+        assertTrue(confirmed is PreFilterResult.Handled)
+        val handled = confirmed as PreFilterResult.Handled
         assertNotNull(handled.createdTask)
-        assertFalse(handled.responseText.contains("AM or PM"))
         assertEquals(17, hourOf(handled.createdTask!!.dueDateEpochMillis))
         assertTrue(handled.createdTask.title.contains("tasnim", ignoreCase = true))
     }
 
     @Test
-    fun `explicit AM creates a task in the future`() = runTest {
+    fun `explicit AM drafts a task in the future and creates it only on confirm`() = runTest {
         val result = preFilter.tryHandle("test-user", "call tasnim at 5am", emptyList(), emptyList())
-        assertTrue(result is PreFilterResult.Handled)
-        val handled = result as PreFilterResult.Handled
+        assertTrue(result is PreFilterResult.PendingDraft)
+        val draft = (result as PreFilterResult.PendingDraft).draft
+        assertEquals(5, hourOf(draft.startEpochMillis))
+        assertTrue(tasks.getAllTasksOnce("test-user").isEmpty())
+        val confirmed = preFilter.confirmDraft("test-user", draft)
+        val handled = confirmed as PreFilterResult.Handled
         assertNotNull(handled.createdTask)
         assertEquals(5, hourOf(handled.createdTask!!.dueDateEpochMillis))
         assertTrue(handled.createdTask.dueDateEpochMillis > System.currentTimeMillis())
@@ -164,10 +185,16 @@ class ClientIntentPreFilterTest {
     }
 
     @Test
-    fun `block focus time creates the focus event`() = runTest {
+    fun `block focus time drafts the focus event and creates it only on confirm`() = runTest {
         val result = preFilter.tryHandle("test-user", "block 45m focus", emptyList(), emptyList())
-        assertTrue(result is PreFilterResult.Handled)
-        val handled = result as PreFilterResult.Handled
+        assertTrue(result is PreFilterResult.PendingDraft)
+        val draft = (result as PreFilterResult.PendingDraft).draft
+        assertEquals(DraftKind.FOCUS_EVENT, draft.kind)
+        assertTrue(draft.title.contains("Focus"))
+        val today = startOfDayMillis(System.currentTimeMillis())
+        assertTrue(calendar.observeEventsForDay("test-user", today).first().isEmpty())
+        val confirmed = preFilter.confirmDraft("test-user", draft)
+        val handled = confirmed as PreFilterResult.Handled
         assertNotNull(handled.createdEvent)
         assertTrue(handled.createdEvent!!.title.contains("Focus"))
     }
@@ -188,8 +215,9 @@ class ClientIntentPreFilterTest {
 
     @Test
     fun `show todays tasks lists the created task`() = runTest {
-        val created = preFilter.tryHandle("test-user", "call tasnim at 5pm", emptyList(), emptyList())
-        assertTrue(created is PreFilterResult.Handled)
+        val drafted = preFilter.tryHandle("test-user", "call tasnim at 5pm", emptyList(), emptyList())
+        assertTrue(drafted is PreFilterResult.PendingDraft)
+        preFilter.confirmDraft("test-user", (drafted as PreFilterResult.PendingDraft).draft)
         val todayTasks = tasks.getAllTasksOnce("test-user")
         assertEquals(1, todayTasks.size)
         val result = preFilter.tryHandle("test-user", "show today's tasks", todayTasks, emptyList())
@@ -199,7 +227,8 @@ class ClientIntentPreFilterTest {
 
     @Test
     fun `complete then clear completed removes the task`() = runTest {
-        preFilter.tryHandle("test-user", "call tasnim at 5pm", emptyList(), emptyList())
+        val drafted = preFilter.tryHandle("test-user", "call tasnim at 5pm", emptyList(), emptyList())
+        preFilter.confirmDraft("test-user", (drafted as PreFilterResult.PendingDraft).draft)
         val todayTasks = tasks.getAllTasksOnce("test-user")
         assertEquals(1, todayTasks.size)
         val completed = preFilter.tryHandle("test-user", "complete task tasnim", todayTasks, emptyList())
@@ -210,5 +239,171 @@ class ClientIntentPreFilterTest {
         assertTrue(cleared is PreFilterResult.Handled)
         assertTrue((cleared as PreFilterResult.Handled).responseText.contains("cleared"))
         assertTrue(tasks.getAllTasksOnce("test-user").isEmpty())
+    }
+
+    // Sprint 3-2 — draft-then-confirm coverage for every refactored
+    // creation branch: the parse returns a PendingDraft, the DB stays
+    // empty until confirmDraft, and confirm saves exactly the draft.
+
+    @Test
+    fun `schedule draft creates nothing until confirmed`() = runTest {
+        val result = preFilter.tryHandle(
+            "test-user", "schedule meeting with team tomorrow at 2pm", emptyList(), emptyList()
+        )
+        assertTrue(result is PreFilterResult.PendingDraft)
+        val draft = (result as PreFilterResult.PendingDraft).draft
+        assertEquals(DraftKind.SCHEDULE, draft.kind)
+        assertTrue(draft.title.contains("team", ignoreCase = true))
+        assertEquals(14, hourOf(draft.startEpochMillis))
+        val tomorrow = startOfDayMillis(System.currentTimeMillis() + 86_400_000L)
+        assertTrue(calendar.observeEventsForDay("test-user", tomorrow).first().isEmpty())
+        val confirmed = preFilter.confirmDraft("test-user", draft)
+        val handled = confirmed as PreFilterResult.Handled
+        assertNotNull(handled.createdEvent)
+        assertEquals(14, hourOf(handled.createdEvent!!.startEpochMillis))
+        assertTrue(handled.createdEvent.title.contains("team", ignoreCase = true))
+    }
+
+    @Test
+    fun `reminder draft creates nothing until confirmed`() = runTest {
+        val result = preFilter.tryHandle(
+            // NOTE: no "call" verb here — "remind me to call mom"
+            // routes to TASK by design (the call-task shortcut runs
+            // before the reminder shortcut; a call to a person is a
+            // task). "buy milk" reaches the REMINDER branch.
+            "test-user", "remind me to buy milk at 6pm", emptyList(), emptyList()
+        )
+        assertTrue(result is PreFilterResult.PendingDraft)
+        val draft = (result as PreFilterResult.PendingDraft).draft
+        assertEquals(DraftKind.REMINDER, draft.kind)
+        assertTrue(draft.title.contains("milk", ignoreCase = true))
+        assertEquals(18, hourOf(draft.startEpochMillis))
+        assertTrue(tasks.getAllTasksOnce("test-user").isEmpty())
+        val confirmed = preFilter.confirmDraft("test-user", draft)
+        val handled = confirmed as PreFilterResult.Handled
+        assertNotNull(handled.createdTask)
+        assertEquals(18, hourOf(handled.createdTask!!.dueDateEpochMillis))
+    }
+
+    @Test
+    fun `event fallback drafts the appointment and creates it only on confirm`() = runTest {
+        // NOTE: reaching step 4 needs a genuine matcher MISS (score
+        // < 0.30). Short English phrases with a time token all score
+        // 0.42+ — "Gym session tomorrow at 6am" (0.46) and "Workout
+        // tomorrow at 6am" (0.45) are both caught by the bank (step 3).
+        // This Bengali phrase scores 0.27 on a faithful replica of
+        // IntentBankMatcher (TF-IDF cosine, same tokenize + nukta fold),
+        // so the matcher abstains and the step-4 fallback fires. The
+        // "gym" keeps hasActionContext true. "বিকেলে" (with ে) matters:
+        // bare "বিকেল" is NOT a bengaliDaypartHour key, so
+        // isBareHourToken treats "৪টায়" as a bare hour and step 4 asks
+        // instead of drafting — "বিকেলে" resolves it to 16:00. Title
+        // keeps "আগামীকাল": step 4's \b-anchored Bengali strip does not
+        // match on the JVM (Robolectric) — pre-existing quirk.
+        val result = preFilter.tryHandle(
+            "test-user", "আগামীকাল বিকেলে ৪টায় সাঁতার কাটতে যাব gym-এ বন্ধুর সাথে", emptyList(), emptyList()
+        )
+        assertTrue(result is PreFilterResult.PendingDraft)
+        val draft = (result as PreFilterResult.PendingDraft).draft
+        assertEquals(DraftKind.SCHEDULE, draft.kind)
+        // Step 4 (not step 3): an EVENT on the Personal calendar.
+        assertEquals("EVENT", draft.scheduleType)
+        assertEquals("Personal", draft.scheduleLocation)
+        assertTrue(draft.title.contains("সাঁতার"))
+        assertEquals(16, hourOf(draft.startEpochMillis))
+        val tomorrow = startOfDayMillis(System.currentTimeMillis() + 86_400_000L)
+        assertTrue(calendar.observeEventsForDay("test-user", tomorrow).first().isEmpty())
+        val confirmed = preFilter.confirmDraft("test-user", draft)
+        val handled = confirmed as PreFilterResult.Handled
+        assertNotNull(handled.createdEvent)
+        assertEquals(16, hourOf(handled.createdEvent!!.startEpochMillis))
+        assertTrue(handled.createdEvent.title.contains("সাঁতার"))
+    }
+
+    @Test
+    fun `catch-all drafts the task and creates it only on confirm`() = runTest {
+        val result = preFilter.tryHandle("test-user", "Go for petrol", emptyList(), emptyList())
+        assertTrue(result is PreFilterResult.PendingDraft)
+        val draft = (result as PreFilterResult.PendingDraft).draft
+        assertEquals(DraftKind.TASK, draft.kind)
+        assertTrue(draft.title.contains("petrol", ignoreCase = true))
+        assertTrue(tasks.getAllTasksOnce("test-user").isEmpty())
+        val confirmed = preFilter.confirmDraft("test-user", draft)
+        val handled = confirmed as PreFilterResult.Handled
+        assertNotNull(handled.createdTask)
+        assertTrue(handled.createdTask!!.title.contains("petrol", ignoreCase = true))
+    }
+
+    @Test
+    fun `thirty minute reminder drafts before creating`() = runTest {
+        val before = System.currentTimeMillis()
+        val result = preFilter.tryHandle(
+            "test-user", "Remind me in 30 minutes", emptyList(), emptyList()
+        )
+        assertTrue(result is PreFilterResult.PendingDraft)
+        val draft = (result as PreFilterResult.PendingDraft).draft
+        assertEquals(DraftKind.TASK, draft.kind)
+        assertEquals("Follow-up reminder", draft.title)
+        assertTrue(draft.reminderAtDue)
+        assertTrue(tasks.getAllTasksOnce("test-user").isEmpty())
+        val confirmed = preFilter.confirmDraft("test-user", draft)
+        val handled = confirmed as PreFilterResult.Handled
+        assertNotNull(handled.createdTask)
+        val dueInMinutes = (handled.createdTask!!.dueDateEpochMillis - before) / 60_000L
+        assertTrue(dueInMinutes in 29..31)
+    }
+
+    @Test
+    fun `clarification answer completes through the draft path`() = runTest {
+        val asked = preFilter.tryHandle("test-user", "call tasnim at 5", emptyList(), emptyList())
+        assertTrue(asked is PreFilterResult.Handled)
+        assertTrue((asked as PreFilterResult.Handled).responseText.contains("AM or PM"))
+        assertTrue(tasks.getAllTasksOnce("test-user").isEmpty())
+        // The hour answer produces a DRAFT — not a saved task.
+        val drafted = preFilter.tryHandle("test-user", "5 PM", emptyList(), emptyList())
+        assertTrue(drafted is PreFilterResult.PendingDraft)
+        val draft = (drafted as PreFilterResult.PendingDraft).draft
+        assertEquals(DraftKind.TASK, draft.kind)
+        assertEquals(17, hourOf(draft.startEpochMillis))
+        assertTrue(tasks.getAllTasksOnce("test-user").isEmpty())
+        val confirmed = preFilter.confirmDraft("test-user", draft)
+        val handled = confirmed as PreFilterResult.Handled
+        assertNotNull(handled.createdTask)
+        assertEquals(17, hourOf(handled.createdTask!!.dueDateEpochMillis))
+    }
+
+    @Test
+    fun `guessed kind clarification completes through the draft path`() = runTest {
+        val asked = preFilter.tryHandle("test-user", "buy milk 5", emptyList(), emptyList())
+        assertTrue(asked is PreFilterResult.Handled)
+        assertTrue((asked as PreFilterResult.Handled).responseText.contains("AM or PM"))
+        val kindAsked = preFilter.tryHandle("test-user", "5 PM", emptyList(), emptyList())
+        assertTrue(kindAsked is PreFilterResult.Handled)
+        assertTrue((kindAsked as PreFilterResult.Handled).responseText.contains("Task or schedule"))
+        assertTrue(tasks.getAllTasksOnce("test-user").isEmpty())
+        val drafted = preFilter.tryHandle("test-user", "Task", emptyList(), emptyList())
+        assertTrue(drafted is PreFilterResult.PendingDraft)
+        val draft = (drafted as PreFilterResult.PendingDraft).draft
+        assertEquals(DraftKind.TASK, draft.kind)
+        assertEquals(17, hourOf(draft.startEpochMillis))
+        assertTrue(tasks.getAllTasksOnce("test-user").isEmpty())
+        val confirmed = preFilter.confirmDraft("test-user", draft)
+        val handled = confirmed as PreFilterResult.Handled
+        assertNotNull(handled.createdTask)
+        assertEquals(17, hourOf(handled.createdTask!!.dueDateEpochMillis))
+    }
+
+    @Test
+    fun `edited draft confirms with the edited values`() = runTest {
+        val result = preFilter.tryHandle("test-user", "call tasnim at 5pm", emptyList(), emptyList())
+        val draft = (result as PreFilterResult.PendingDraft).draft
+        val edited = draft
+            .withTitle("Call Tasnim about the launch")
+            .withStartTime(draft.startEpochMillis + 60 * 60 * 1000L)
+        val confirmed = preFilter.confirmDraft("test-user", edited)
+        val handled = confirmed as PreFilterResult.Handled
+        assertNotNull(handled.createdTask)
+        assertEquals("Call Tasnim about the launch", handled.createdTask!!.title)
+        assertEquals(18, hourOf(handled.createdTask.dueDateEpochMillis))
     }
 }

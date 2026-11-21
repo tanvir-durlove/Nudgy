@@ -2,6 +2,7 @@ package com.nextgentool.nudgy.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.nextgentool.nudgy.ai.ChatDraft
 import com.nextgentool.nudgy.ai.ClientIntentPreFilter
 import com.nextgentool.nudgy.ai.ChatGuardrails
 import com.nextgentool.nudgy.ai.PreFilterResult
@@ -48,11 +49,22 @@ import javax.inject.Inject
  *    stays dormant, its wiring + cap chain + central gate is S3-3's
  *    job. The fallback never crashes and never spends a turn.
  *
- * Out of scope here, deliberately: confirm-before-save is S3-2, so the
- * prefilter's current immediate-save behaviour stays as-is in S3-0
- * (createFromParsed saves directly); the Quick Chat sheet + approved
- * restyle is S3-1; voice brain dump (continuous listening) is S3-4 —
- * [startVoice] is the v1 single utterance only.
+ * Out of scope here, deliberately: the LLM fallback is S3-3 (GeminiClient
+ * stays dormant, its wiring + cap chain + central gate is S3-3's job);
+ * the voice brain dump (continuous listening) is S3-4 — [startVoice]
+ * is the v1 single utterance only.
+ *
+ * Sprint 3-2 (Q2 = (a)) — draft-then-confirm: the prefilter never
+ * saves directly. A creation returns [PreFilterResult.PendingDraft]
+ * and the draft waits in [_pendingDraft] until the user confirms,
+ * edits, or discards it on the preview card. Only [confirmDraft]
+ * writes to the DB, through [ClientIntentPreFilter.confirmDraft].
+ * The draft lives in this ViewModel, so it survives rotation; a
+ * process death loses it (the preview question stays in history as
+ * plain text and the user can retype — the same accepted loss as
+ * pendingClarification in the prefilter). Sending a NEW message
+ * abandons the pending draft: a stale draft must never be
+ * confirmable after the user moved on.
  *
  * Sound (§4.4): every assistant reply plays the short notification
  * sound ([ReplySoundPlayer]). [speak] is NEVER called from the chat
@@ -102,6 +114,18 @@ class ChatViewModel @Inject constructor(
 
     val isListening: StateFlow<Boolean> = voiceAssistantManager.isListening
 
+    /** S3-2 — the pending draft (Q2 = (a)). Set when the prefilter
+     *  returns [PreFilterResult.PendingDraft]; cleared on Confirm,
+     *  Discard, Edit-replace, or a new outgoing message. */
+    private val _pendingDraft = MutableStateFlow<ChatDraft?>(null)
+    val pendingDraft: StateFlow<ChatDraft?> = _pendingDraft.asStateFlow()
+
+    /** The id of the assistant message the preview card is attached
+     *  to. The card renders only on that message while a draft is
+     *  pending; older preview messages stay as plain text. */
+    private val _pendingDraftMessageId = MutableStateFlow<String?>(null)
+    val pendingDraftMessageId: StateFlow<String?> = _pendingDraftMessageId.asStateFlow()
+
     init {
         // Seed the welcome message once (no-op when history exists).
         // displayName is "" until the Sprint 6 auth flow knows the
@@ -124,6 +148,9 @@ class ChatViewModel @Inject constructor(
     fun sendMessage(text: String) {
         val trimmed = text.trim()
         if (trimmed.isEmpty() || _isThinking.value) return
+        // S3-2: a new message abandons any pending draft.
+        _pendingDraft.value = null
+        _pendingDraftMessageId.value = null
         viewModelScope.launch {
             _isThinking.value = true
             try {
@@ -144,6 +171,17 @@ class ChatViewModel @Inject constructor(
                             preFilter.tryHandle(userId, trimmed, todayTasks, events)
                         }.getOrNull()
                         when (result) {
+                            // S3-2: a creation parsed but NOT saved — the
+                            // draft waits for Confirm / Edit / Discard.
+                            is PreFilterResult.PendingDraft -> {
+                                _pendingDraft.value = result.draft
+                                val messageId = postAssistantMessage(
+                                    text = result.previewText,
+                                    actionType = ChatActionType.DRAFT_PREVIEW,
+                                    quickSuggestions = result.quickSuggestions
+                                )
+                                _pendingDraftMessageId.value = messageId
+                            }
                             is PreFilterResult.Handled -> postAssistantMessage(
                                 text = result.responseText,
                                 actionType = result.actionType,
@@ -174,12 +212,74 @@ class ChatViewModel @Inject constructor(
 
     /** Focus proposal "Block Time" button (ChatScreen action card 2).
      *  Writes the focus event, then marks the proposal message done so
-     *  the card flips to "Scheduled". */
+     *  the card flips to "Scheduled". Unchanged by S3-2: the proposal
+     *  card IS the preview (it shows the slot) and this button IS the
+     *  confirm — no second confirmation is needed for it. */
     fun onBlockFocusTime(startMillis: Long, endMillis: Long, title: String, messageId: String) {
         viewModelScope.launch {
             runCatching { calendarRepository.blockFocusTime(userId, startMillis, endMillis, title) }
             runCatching { chatRepository.markFocusActionCompleted(messageId) }
         }
+    }
+
+    /**
+     * S3-2 — Confirm on the preview card: the ONLY path that saves a
+     * draft. The draft is cleared FIRST (synchronously, so a double
+     * tap can never save twice), then the prefilter writes and the
+     * receipt message (with the created task/event card) is posted.
+     * A confirm with no pending draft is a no-op.
+     */
+    fun confirmDraft() {
+        val draft = _pendingDraft.value ?: return
+        _pendingDraft.value = null
+        _pendingDraftMessageId.value = null
+        viewModelScope.launch {
+            try {
+                val result = runCatching { preFilter.confirmDraft(userId, draft) }.getOrNull()
+                if (result is PreFilterResult.Handled) {
+                    postAssistantMessage(
+                        text = result.responseText,
+                        actionType = result.actionType,
+                        task = result.createdTask,
+                        event = result.createdEvent,
+                        focusStartMillis = result.focusStartMillis,
+                        focusEndMillis = result.focusEndMillis,
+                        focusDurationMinutes = result.focusDurationMinutes,
+                        quickSuggestions = result.quickSuggestions
+                    )
+                } else {
+                    postAssistantMessage("Something went wrong — please try again.")
+                }
+            } catch (e: Exception) {
+                runCatching { postAssistantMessage("Something went wrong — please try again.") }
+            }
+        }
+    }
+
+    /**
+     * S3-2 — Discard on the preview card: nothing is created, and a
+     * short note says so. A discard with no pending draft is a no-op.
+     */
+    fun discardDraft() {
+        val draft = _pendingDraft.value ?: return
+        _pendingDraft.value = null
+        _pendingDraftMessageId.value = null
+        viewModelScope.launch {
+            postAssistantMessage(
+                if (draft.isBengali) "ঠিক আছে, কিছু তৈরি করিনি — ড্রাফটটা বাতিল করেছি।"
+                else "No problem — I discarded the draft, nothing was created."
+            )
+        }
+    }
+
+    /**
+     * S3-2 — the preview card's Edit saves changes back into the
+     * pending draft (title / time). Nothing is written to the DB; the
+     * card re-renders with the edited values and Confirm saves those.
+     */
+    fun editDraft(updated: ChatDraft) {
+        if (_pendingDraft.value == null) return
+        _pendingDraft.value = updated
     }
 
     /**
@@ -212,7 +312,9 @@ class ChatViewModel @Inject constructor(
         )
     }
 
-    /** Stores the assistant reply and plays the reply sound (§4.4). */
+    /** Stores the assistant reply and plays the reply sound (§4.4).
+     *  Returns the message id so the caller can attach live state to
+     *  it (S3-2: the preview card attaches to the draft message). */
     private suspend fun postAssistantMessage(
         text: String,
         actionType: ChatActionType = ChatActionType.NONE,
@@ -222,11 +324,12 @@ class ChatViewModel @Inject constructor(
         focusEndMillis: Long? = null,
         focusDurationMinutes: Int = 45,
         quickSuggestions: List<String> = emptyList()
-    ) {
+    ): String {
+        val messageId = UUID.randomUUID().toString()
         chatRepository.addMessage(
             userId,
             ChatMessage(
-                id = UUID.randomUUID().toString(),
+                id = messageId,
                 senderIsUser = false,
                 text = text,
                 actionType = actionType,
@@ -239,6 +342,7 @@ class ChatViewModel @Inject constructor(
             )
         )
         replySoundPlayer.playReplySound()
+        return messageId
     }
 
     /** Local fallback for Unhandled input — in the input's language,

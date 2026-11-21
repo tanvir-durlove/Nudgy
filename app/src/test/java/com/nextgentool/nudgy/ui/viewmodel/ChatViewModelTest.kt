@@ -24,6 +24,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -145,8 +146,12 @@ class ChatViewModelTest {
         }
     }
 
+    // Sprint 3-2 (Q2 = (a)) — draft-then-confirm: the send now returns
+    // a PREVIEW, not a creation. The task exists only after Confirm.
+    // The old name asserted immediate creation; the new name states
+    // the new flow, for the same reason as the prefilter tests.
     @Test
-    fun `handled task creation stores both messages and creates the task`() = runTest {
+    fun `handled task creation drafts first and creates only on confirm`() = runTest {
         val testDispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(testDispatcher)
         try {
@@ -157,13 +162,95 @@ class ChatViewModelTest {
             assertTrue(messages[1].senderIsUser)
             assertEquals("call tasnim at 5pm", messages[1].text)
             assertFalse(messages[2].senderIsUser)
-            assertTrue(messages[2].text.contains("asnim", ignoreCase = true))
-            assertEquals(ChatActionType.TASK_PREVIEW, messages[2].actionType)
+            assertEquals(ChatActionType.DRAFT_PREVIEW, messages[2].actionType)
+            assertNotNull(viewModel.pendingDraft.value)
+            assertEquals(17, hourOf(viewModel.pendingDraft.value!!.startEpochMillis))
+            // Nothing is in the DB yet — the preview is only a question.
+            assertTrue(taskRepository.getAllTasksOnce(userId).isEmpty())
+            assertEquals(1, fakeSound.playCount)
+            // Confirm saves it and posts the receipt.
+            viewModel.confirmDraft()
+            val afterConfirm = viewModel.messages.first { it.size == 4 }
+            assertEquals(ChatActionType.TASK_PREVIEW, afterConfirm[3].actionType)
+            assertTrue(afterConfirm[3].text.contains("asnim", ignoreCase = true))
             val tasks = taskRepository.getAllTasksOnce(userId)
             assertEquals(1, tasks.size)
             assertEquals(17, hourOf(tasks.single().dueDateEpochMillis))
             assertTrue(tasks.single().title.contains("tasnim", ignoreCase = true))
-            assertEquals(1, fakeSound.playCount)
+            assertNull(viewModel.pendingDraft.value)
+            assertEquals(2, fakeSound.playCount)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `discarding a draft creates nothing and posts a discarded note`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("call tasnim at 5pm")
+            viewModel.messages.first { it.size == 3 }
+            assertNotNull(viewModel.pendingDraft.value)
+            viewModel.discardDraft()
+            val messages = viewModel.messages.first { it.size == 4 }
+            assertTrue(messages.last().text.contains("discarded", ignoreCase = true))
+            assertTrue(taskRepository.getAllTasksOnce(userId).isEmpty())
+            assertNull(viewModel.pendingDraft.value)
+            // A second discard is a no-op — no extra message appears.
+            viewModel.discardDraft()
+            testScheduler.advanceUntilIdle()
+            assertEquals(4, viewModel.messages.value.size)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `editing the draft changes what confirm creates`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("call tasnim at 5pm")
+            viewModel.messages.first { it.size == 3 }
+            val draft = viewModel.pendingDraft.value!!
+            viewModel.editDraft(draft.withTitle("Call Tasnim about the launch"))
+            assertEquals("Call Tasnim about the launch", viewModel.pendingDraft.value!!.title)
+            viewModel.confirmDraft()
+            viewModel.messages.first { it.size == 4 }
+            val tasks = taskRepository.getAllTasksOnce(userId)
+            assertEquals(1, tasks.size)
+            assertEquals("Call Tasnim about the launch", tasks.single().title)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `a new message abandons the pending draft`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("call tasnim at 5pm")
+            viewModel.messages.first { it.size == 3 }
+            assertNotNull(viewModel.pendingDraft.value)
+            // The first send must fully finish (isThinking false)
+            // before the second send, or the thinking guard ignores it.
+            viewModel.isThinking.first { !it }
+            viewModel.sendMessage("show today's tasks")
+            viewModel.messages.first { it.size == 5 }
+            assertNull(viewModel.pendingDraft.value)
+            // Confirm now is a no-op: nothing was ever created.
+            viewModel.confirmDraft()
+            testScheduler.advanceUntilIdle()
+            assertTrue(taskRepository.getAllTasksOnce(userId).isEmpty())
+            assertEquals(5, viewModel.messages.value.size)
         } finally {
             Dispatchers.resetMain()
         }
