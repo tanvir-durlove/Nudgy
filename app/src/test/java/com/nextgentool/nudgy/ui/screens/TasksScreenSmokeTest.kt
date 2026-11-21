@@ -7,7 +7,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
@@ -128,9 +128,15 @@ class TasksScreenSmokeTest {
     fun `detail sheet Break down button calls onSplitTask with the task id`() {
         var splitId: String? = null
         renderDetailSheet(detailTask()) { splitId = it }
-        // The button lives in the subtask section, below the fold of
-        // the sheet's LazyColumn — scroll it into view first.
-        composeRule.onNodeWithTag("split_task_button").performScrollTo()
+        // The button lives in the Subtasks section (LazyColumn item 12
+        // for a top-level personal task: header, title, notes, Due,
+        // Reminder, Recurrence, Estimate, Actual, Attachments,
+        // Priority, Project, Tags, Subtasks) — below the fold, so its
+        // row is not composed until the list is scrolled. Jump by
+        // index (the S14SmokeTest pattern): deterministic, no swipe
+        // physics.
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("task_detail_sheet_list").performScrollToIndex(12)
         composeRule.onNodeWithTag("split_task_button").assertIsDisplayed()
         composeRule.onNodeWithTag("split_task_button").performClick()
         assertEquals("t1", splitId)

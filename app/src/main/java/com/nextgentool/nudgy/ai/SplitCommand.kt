@@ -55,33 +55,37 @@ object SplitCommandParser {
     }
 
     private fun parseEnglish(text: String): SplitCommand? {
+        // The title is extracted from the ORIGINAL-case text (the
+        // regexes are case-insensitive): lowercasing first lost the
+        // title's case ("Plan Diwali party" came back "plan diwali
+        // party"). Only the bare "break down" equality needs lower.
         val lower = text.lowercase().trimEnd('.', '!', '?').trim()
         // A bare "break down" (no "this", no title) still means "break
         // [it] down" — the caller asks which task.
         if (lower == "break down") return SplitCommand(null)
         // "break this/that/it/task down" — no title.
-        if (Regex("""\bbreak\s+(this|that|it|this task|that task)\s+down\b""").containsMatchIn(lower)) {
+        if (Regex("""\bbreak\s+(this|that|it|this task|that task)\s+down\b""", RegexOption.IGNORE_CASE).containsMatchIn(text)) {
             return SplitCommand(null)
         }
         // "break down <title>" — title after the verb.
-        Regex("""\bbreak\s+down\s+(.+)$""").find(lower)?.let {
+        Regex("""\bbreak\s+down\s+(.+)$""", RegexOption.IGNORE_CASE).find(text)?.let {
             return SplitCommand(cleanTitle(it.groupValues[1], english = true))
         }
         // "break <title> down" — title between the verb parts.
-        Regex("""\bbreak\s+(.+?)\s+down\b""").find(lower)?.let {
+        Regex("""\bbreak\s+(.+?)\s+down\b""", RegexOption.IGNORE_CASE).find(text)?.let {
             val title = cleanTitle(it.groupValues[1], english = true)
             // "break it down" / "break this down" reached here only when
             // the this-task regex above missed (extra words) — still no title.
             return SplitCommand(title?.takeUnless { it.lowercase() in EN_THIS_TASK })
         }
         // "split this/that/it (into …)" — no title.
-        if (Regex("""\bsplit\s+(this|that|it)\b""").containsMatchIn(lower)) {
+        if (Regex("""\bsplit\s+(this|that|it)\b""", RegexOption.IGNORE_CASE).containsMatchIn(text)) {
             return SplitCommand(null)
         }
         // "split <title> into subtasks/steps" — the suffix is REQUIRED
         // for a bare title (see the class KDoc: "split the bill").
-        Regex("""\bsplit\s+(.+?)\s+into\s+(subtasks?|sub-tasks?|steps?|smaller tasks?|smaller steps?)\b""")
-            .find(lower)?.let {
+        Regex("""\bsplit\s+(.+?)\s+into\s+(subtasks?|sub-tasks?|steps?|smaller tasks?|smaller steps?)\b""", RegexOption.IGNORE_CASE)
+            .find(text)?.let {
                 return SplitCommand(cleanTitle(it.groupValues[1], english = true))
             }
         return null

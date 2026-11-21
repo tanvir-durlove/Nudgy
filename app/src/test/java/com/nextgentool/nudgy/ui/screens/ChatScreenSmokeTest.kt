@@ -543,6 +543,12 @@ class ChatScreenSmokeTest {
             composeRule.onAllNodesWithTag("draft_preview_card")
                 .fetchSemanticsNodes().isEmpty()
         }
+        // Confirm clears the card synchronously but creates the
+        // subtasks asynchronously in viewModelScope — wait for them
+        // to land before reading the DB, or the read races the write.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            runBlocking { taskRepository.observeSubtasks(parent.id).first().size == 3 }
+        }
         runBlocking {
             val subtasks = taskRepository.observeSubtasks(parent.id).first()
             assertEquals(3, subtasks.size)

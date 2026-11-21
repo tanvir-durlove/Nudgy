@@ -413,6 +413,22 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
+     * Sprint 3-5 — title lookup for a split command. An exact
+     * contains-match wins; a Bengali command usually names the task
+     * with its definite suffix ("পার্টির আয়োজনটা" — the arrangement)
+     * while the stored title has none ("পার্টির আয়োজন"), so a miss
+     * retries with a trailing টা/টি stripped. A stored title that
+     * keeps its suffix still matches on the exact pass first.
+     */
+    private fun matchSplitTitle(tasks: List<TaskEntity>, title: String): List<TaskEntity> {
+        val exact = tasks.filter { it.title.contains(title, ignoreCase = true) }
+        if (exact.isNotEmpty()) return exact
+        val stripped = title.removeSuffix("টা").removeSuffix("টি")
+        if (stripped == title) return emptyList()
+        return tasks.filter { it.title.contains(stripped, ignoreCase = true) }
+    }
+
+    /**
      * Sprint 3-5 — a typed split command. The target is resolved
      * LOCALLY (no LLM call, no turn) before anything is split:
      * - a named title: exactly one top-level match → split it; none →
@@ -439,9 +455,9 @@ class ChatViewModel @Inject constructor(
         }
         val allTasks = runCatching { taskRepository.getAllTasksOnce(userId) }
             .getOrDefault(emptyList())
-        val topLevel = allTasks.filter {
-            it.parentTaskId == null && !it.isCompleted &&
-                it.title.contains(title, ignoreCase = true)
+        val titled = matchSplitTitle(allTasks, title)
+        val topLevel = titled.filter {
+            it.parentTaskId == null && !it.isCompleted
         }
         when {
             topLevel.size == 1 -> runSplitFor(topLevel.single(), prompt, historyBefore)
@@ -456,9 +472,7 @@ class ChatViewModel @Inject constructor(
                 )
             }
             else -> {
-                val subtaskMatch = allTasks.any {
-                    it.parentTaskId != null && it.title.contains(title, ignoreCase = true)
-                }
+                val subtaskMatch = titled.any { it.parentTaskId != null }
                 postAssistantMessage(
                     when {
                         subtaskMatch -> if (isBengali) {
