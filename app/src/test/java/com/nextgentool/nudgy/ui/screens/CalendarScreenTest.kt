@@ -197,6 +197,71 @@ class CalendarScreenTest {
         composeRule.onNodeWithText("3:00 PM – 3:30 PM").assertDoesNotExist()
     }
 
+    // ------------------------------------------------------ Sprint 2-1b
+
+    private fun sampleAllDayEvent(): CalendarEventEntity {
+        val start = todayAt(0)
+        return CalendarEventEntity(
+            id = "e2",
+            userId = "test-user-1",
+            title = "Thanksgiving",
+            startEpochMillis = start,
+            endEpochMillis = start + 24 * 60 * 60 * 1000L,
+            locationOrLink = "Google Calendar",
+            eventType = "MEETING",
+            isAllDay = true,
+            isFromGoogleCalendar = true
+        )
+    }
+
+    @Test
+    fun `all-day event shows as a label chip and stays out of the schedule count`() {
+        composeRule.setContent {
+            CalendarScreen(
+                events = listOf(sampleEvent(), sampleAllDayEvent()),
+                suggestedSlot = sampleSlot(),
+                isCalendarConnected = true
+            )
+        }
+        // The label chip row exists, with the holiday title once.
+        composeRule.onNodeWithTag("all_day_row").assertExists()
+        composeRule.onNodeWithTag("all_day_label_e2").assertExists()
+        composeRule.onNodeWithText("Thanksgiving").assertExists()
+        // The schedule counts timed events only: 1 item, not 2.
+        composeRule.onNodeWithText("Schedule · 1 items").assertExists()
+        // The timed event is still listed; the all-day one never is.
+        composeRule.onNodeWithTag("schedule_event_e1").assertExists()
+        composeRule.onNodeWithTag("schedule_event_e2").assertDoesNotExist()
+    }
+
+    @Test
+    fun `no all-day events means no label row`() {
+        composeRule.setContent {
+            CalendarScreen(
+                events = listOf(sampleEvent()),
+                suggestedSlot = sampleSlot(),
+                isCalendarConnected = true
+            )
+        }
+        composeRule.onNodeWithTag("all_day_row").assertDoesNotExist()
+    }
+
+    @Test
+    fun `all-day event does not block the suggested focus slot`() {
+        composeRule.setContent {
+            CalendarScreen(
+                events = listOf(sampleAllDayEvent()),
+                suggestedSlot = sampleSlot(),
+                isCalendarConnected = true
+            )
+        }
+        // Before the fix the 00:00–24:00 label marked the 2:00 PM slot
+        // "Blocked" and disabled the button; now it stays bookable.
+        composeRule.onNodeWithText("SUGGESTED FOCUS TIME").assertExists()
+        composeRule.onNodeWithText("Block time").assertExists()
+        composeRule.onNodeWithText("Blocked").assertDoesNotExist()
+    }
+
     @Test
     fun `create-event intent opens the add-event dialog prefilled`() {
         val begin = Calendar.getInstance().apply {

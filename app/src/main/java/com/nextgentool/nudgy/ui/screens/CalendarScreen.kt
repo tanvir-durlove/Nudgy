@@ -358,7 +358,11 @@ fun CalendarScreen(
         }
     }
 
-    val displayEvents = remember(events, selectedDayMillis) {
+    // Sprint 2-1b — the day's events split in two: all-day events are
+    // labels (a chip row under the Connect & Sync card, never in the
+    // schedule), timed events are the schedule (UP NEXT count/list and
+    // the hour grid). Both lists share the same day filter.
+    val (allDayEvents, displayEvents) = remember(events, selectedDayMillis) {
         val (startOfDay, endOfDay) = run {
             val cal = Calendar.getInstance().apply { timeInMillis = selectedDayMillis }
             cal.set(Calendar.HOUR_OF_DAY, 0)
@@ -379,8 +383,8 @@ fun CalendarScreen(
         val list = events.filter {
             (it.startEpochMillis in startOfDay..endOfDay) ||
             (it.startEpochMillis <= endOfDay && it.endEpochMillis >= startOfDay)
-        }.toMutableList()
-        list.sortedBy { it.startEpochMillis }
+        }.sortedBy { it.startEpochMillis }
+        list.partition { it.isAllDay }
     }
 
     // Sprint 2-1: the suggested slot arrives from the ViewModel, which
@@ -392,8 +396,10 @@ fun CalendarScreen(
     val suggestedEnd = suggestedSlot?.endEpochMillis ?: 0L
     val suggestedDuration = suggestedSlot?.durationMinutes ?: 0
 
-    val hasBlockedSuggestedTime = remember(events, suggestedStart, suggestedEnd) {
-        events.any { event ->
+    // Sprint 2-1b — timed events only: an all-day label must never
+    // mark the suggested slot "Blocked" or disable the Block time button.
+    val hasBlockedSuggestedTime = remember(displayEvents, suggestedStart, suggestedEnd) {
+        displayEvents.any { event ->
             event.startEpochMillis < suggestedEnd && event.endEpochMillis > suggestedStart
         }
     }
@@ -637,6 +643,48 @@ fun CalendarScreen(
                                 color = Color.White
                             )
                         )
+                    }
+                }
+            }
+        }
+
+        // Sprint 2-1b — all-day events are labels: one read-only chip
+        // per event, directly under the Connect & Sync card. Only shown
+        // when the day has all-day events; tapping a chip does nothing
+        // in v1 (the label is information, not a schedule item).
+        if (allDayEvents.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("all_day_row"),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                allDayEvents.forEach { event ->
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("all_day_label_${event.id}"),
+                        shape = MaterialTheme.shapes.medium,
+                        color = NudgyChipBackground,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(NudgyPrimary)
+                            )
+                            Text(
+                                text = event.title,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = NudgyCharcoal
+                            )
+                        }
                     }
                 }
             }
