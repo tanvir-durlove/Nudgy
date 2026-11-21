@@ -72,7 +72,7 @@ object SplitCommandParser {
             val title = cleanTitle(it.groupValues[1], english = true)
             // "break it down" / "break this down" reached here only when
             // the this-task regex above missed (extra words) — still no title.
-            return SplitCommand(if (title.lowercase() in EN_THIS_TASK) null else title)
+            return SplitCommand(title?.takeUnless { it.lowercase() in EN_THIS_TASK })
         }
         // "split this/that/it (into …)" — no title.
         if (Regex("""\bsplit\s+(this|that|it)\b""").containsMatchIn(lower)) {
