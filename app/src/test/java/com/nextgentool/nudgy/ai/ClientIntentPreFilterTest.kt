@@ -267,12 +267,16 @@ class ClientIntentPreFilterTest {
     @Test
     fun `reminder draft creates nothing until confirmed`() = runTest {
         val result = preFilter.tryHandle(
-            "test-user", "remind me to call mom at 6pm", emptyList(), emptyList()
+            // NOTE: no "call" verb here — "remind me to call mom"
+            // routes to TASK by design (the call-task shortcut runs
+            // before the reminder shortcut; a call to a person is a
+            // task). "buy milk" reaches the REMINDER branch.
+            "test-user", "remind me to buy milk at 6pm", emptyList(), emptyList()
         )
         assertTrue(result is PreFilterResult.PendingDraft)
         val draft = (result as PreFilterResult.PendingDraft).draft
         assertEquals(DraftKind.REMINDER, draft.kind)
-        assertTrue(draft.title.contains("mom", ignoreCase = true))
+        assertTrue(draft.title.contains("milk", ignoreCase = true))
         assertEquals(18, hourOf(draft.startEpochMillis))
         assertTrue(tasks.getAllTasksOnce("test-user").isEmpty())
         val confirmed = preFilter.confirmDraft("test-user", draft)
@@ -283,8 +287,12 @@ class ClientIntentPreFilterTest {
 
     @Test
     fun `event fallback drafts the appointment and creates it only on confirm`() = runTest {
+        // NOTE: "Gym session tomorrow at 6am" does NOT reach step 4 —
+        // the bank matcher catches it as SCHEDULE_CREATE (step 3).
+        // "workout" has zero bank coverage in any form, so the matcher
+        // misses and the step-4 fallback fires.
         val result = preFilter.tryHandle(
-            "test-user", "Gym session tomorrow at 6am", emptyList(), emptyList()
+            "test-user", "Workout tomorrow at 6am", emptyList(), emptyList()
         )
         assertTrue(result is PreFilterResult.PendingDraft)
         val draft = (result as PreFilterResult.PendingDraft).draft
