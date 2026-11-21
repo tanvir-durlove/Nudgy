@@ -543,11 +543,15 @@ class ChatScreenSmokeTest {
             composeRule.onAllNodesWithTag("draft_preview_card")
                 .fetchSemanticsNodes().isEmpty()
         }
-        // Confirm clears the card synchronously but creates the
-        // subtasks asynchronously in viewModelScope — wait for them
-        // to land before reading the DB, or the read races the write.
+        // The receipt arrives only after Confirm actually saved: its
+        // "into 3 subtasks:" (with the colon) appears nowhere on the
+        // preview card — the preview text is the model's own reply, and
+        // the card lists bare titles. This is the S3-2 pattern (wait
+        // for a receipt-only UI marker, then read the DB): polling the
+        // DB directly from waitUntil never observed the write land.
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            runBlocking { taskRepository.observeSubtasks(parent.id).first().size == 3 }
+            composeRule.onAllNodesWithText("into 3 subtasks:", substring = true)
+                .fetchSemanticsNodes().isNotEmpty()
         }
         runBlocking {
             val subtasks = taskRepository.observeSubtasks(parent.id).first()
