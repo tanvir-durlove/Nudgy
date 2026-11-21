@@ -133,9 +133,11 @@ class GeminiClientGateTest {
         kotlinx.coroutines.test.runTest {
             setByokKey()
             client.restResponse = null
-            val plain = client.generateNudgyResponse("hello", centralEnabled = false)
+            // A prompt that hits the generic fallback branch ("hello"
+            // would take the greeting branch instead).
+            val plain = client.generateNudgyResponse("what is the meaning of life?", centralEnabled = false)
             assertTrue(plain.contains("couldn't process"))
-            val structured = client.generateStructuredResponse("hello", centralEnabled = false)
+            val structured = client.generateStructuredResponse("what is the meaning of life?", centralEnabled = false)
             assertNull(structured)
         }
 
