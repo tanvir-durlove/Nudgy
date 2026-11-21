@@ -37,6 +37,7 @@ import com.nextgentool.nudgy.data.repository.ChatRepository
 import com.nextgentool.nudgy.data.repository.MemoryRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.ui.viewmodel.ChatViewModel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -209,7 +210,9 @@ class ChatScreenSmokeTest {
                 pendingDraftMessageId = pendingDraftMessageId,
                 onConfirmDraft = { viewModel.confirmDraft() },
                 onDiscardDraft = { viewModel.discardDraft() },
-                onDraftEdited = { viewModel.editDraft(it) }
+                onDraftEdited = { viewModel.editDraft(it) },
+                // Sprint 3-5 — per-item remove on the split preview card.
+                onRemoveSplitSubtask = { viewModel.removeSplitSubtask(it) }
             )
         }
     }
@@ -492,5 +495,95 @@ class ChatScreenSmokeTest {
         composeRule.onNodeWithTag("rewarded_watch_button").performClick()
         assertEquals(1, watchClicks)
         assertEquals(0, retryClicks)
+    }
+
+    // ---- Sprint 3-5 — subtask split (feature 20) ----
+
+    private val splitJson =
+        """{"action": "split_task", "subtasks": [{"title": "Buy flour"}, {"title": "Mix the dough"}, {"title": "Bake for 30 minutes"}], "tasks": [], "events": [], "reply": "Here is how I'd break it down."}"""
+
+    private fun seedParentTask(title: String) = runBlocking {
+        taskRepository.createTask(
+            userId = "test-user-1",
+            title = title,
+            dueEpochMillis = System.currentTimeMillis() + 86_400_000L
+        )
+    }
+
+    @Test
+    fun `split flow renders the subtask preview card and confirm creates the subtasks`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE)
+            .edit().putString("custom_gemini_api_key", "test-byok-key").apply()
+        recordingGemini.restResponse = splitJson
+        val parent = seedParentTask("Plan Diwali party")
+        setChatContent()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Hi! What can I help you get done today?")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNode(hasSetTextAction()).performTextInput("break down Plan Diwali party")
+        composeRule.onNodeWithContentDescription("Send").performClick()
+        // The split preview card lists the subtasks (no Edit button:
+        // a split has no time to edit and no title to change here).
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("draft_preview_card")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("draft_preview_card").assertIsDisplayed()
+        composeRule.onNodeWithText("Buy flour").assertIsDisplayed()
+        composeRule.onNodeWithText("Mix the dough").assertIsDisplayed()
+        composeRule.onNodeWithText("Bake for 30 minutes").assertIsDisplayed()
+        composeRule.onNodeWithTag("draft_edit_button").assertDoesNotExist()
+        runBlocking {
+            assertTrue(taskRepository.observeSubtasks(parent.id).first().isEmpty())
+        }
+        composeRule.onNodeWithTag("draft_confirm_button").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("draft_preview_card")
+                .fetchSemanticsNodes().isEmpty()
+        }
+        // The receipt arrives only after Confirm actually saved: its
+        // "into 3 subtasks:" (with the colon) appears nowhere on the
+        // preview card — the preview text is the model's own reply, and
+        // the card lists bare titles. This is the S3-2 pattern (wait
+        // for a receipt-only UI marker, then read the DB): polling the
+        // DB directly from waitUntil never observed the write land.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("into 3 subtasks:", substring = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        runBlocking {
+            val subtasks = taskRepository.observeSubtasks(parent.id).first()
+            assertEquals(3, subtasks.size)
+            assertEquals(
+                listOf("Buy flour", "Mix the dough", "Bake for 30 minutes"),
+                subtasks.map { it.title }
+            )
+            assertEquals(0 to 3, taskRepository.subtaskProgress(parent.id))
+        }
+    }
+
+    @Test
+    fun `split with no LLM available shows the manual path message`() {
+        // No BYOK key, central gate closed (the default): the split
+        // names the manual path instead of a generic fallback.
+        val parent = seedParentTask("Plan Diwali party")
+        setChatContent()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Hi! What can I help you get done today?")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNode(hasSetTextAction()).performTextInput("break down Plan Diwali party")
+        composeRule.onNodeWithContentDescription("Send").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("detail sheet", substring = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("detail sheet", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("draft_preview_card").assertDoesNotExist()
+        runBlocking {
+            assertTrue(taskRepository.observeSubtasks(parent.id).first().isEmpty())
+        }
     }
 }

@@ -113,6 +113,10 @@ fun TaskDetailSheet(
     onToggleSubtask: (TaskEntity) -> Unit,
     onDeleteSubtask: (String) -> Unit,
     onDismiss: () -> Unit,
+    // Sprint 3-5 — break the open task into subtasks (feature 20).
+    // Optional with a no-op default so existing callers keep
+    // compiling; the Tasks screen passes the chat's startSplit.
+    onSplitTask: (String) -> Unit = {},
     // Sprint 1-4 — attachments (Feature 10). Optional with no-op defaults
     // so existing callers keep compiling; the Tasks screen passes them.
     attachments: List<TaskAttachmentEntity> = emptyList(),
@@ -357,11 +361,26 @@ fun TaskDetailSheet(
             if (!isSubtask) {
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "Subtasks (${detail.subtasks.count { it.isCompleted }}/${detail.subtasks.size})",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = colorResource(R.color.nudgy_ink)
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Subtasks (${detail.subtasks.count { it.isCompleted }}/${detail.subtasks.size})",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = colorResource(R.color.nudgy_ink),
+                                modifier = Modifier.weight(1f)
+                            )
+                            // Sprint 3-5 — break this task down (feature
+                            // 20): asks the chat to split it with the
+                            // LLM. A group task is read-only and a
+                            // subtask has no subtask section, so the
+                            // button only ever shows on a personal
+                            // top-level task.
+                            if (!isGroup) {
+                                TextButton(
+                                    onClick = { onSplitTask(task.id) },
+                                    modifier = Modifier.testTag("split_task_button")
+                                ) { Text("Break down", color = colorResource(R.color.nudgy_teal)) }
+                            }
+                        }
                         detail.subtasks.forEach { subtask ->
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,

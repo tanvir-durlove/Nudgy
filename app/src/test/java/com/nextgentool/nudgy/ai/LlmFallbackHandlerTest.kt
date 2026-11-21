@@ -3,6 +3,8 @@ package com.nextgentool.nudgy.ai
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.ads.ChatTurnCap
+import com.nextgentool.nudgy.ai.DraftKind
+import com.nextgentool.nudgy.ai.SplitParent
 import com.nextgentool.nudgy.auth.AuthManager
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -102,6 +104,11 @@ class LlmFallbackHandlerTest {
         """{"action": "create_tasks", "tasks": [{"title": "Buy milk", "due": "2026-11-22T09:00:00", "priority": "HIGH"}], "events": [], "subtasks": [], "reply": "Got it, I'll add it."}"""
     private val validEventJson =
         """{"action": "create_event", "events": [{"title": "Dentist", "start": "2026-11-23T15:00:00", "end": "2026-11-23T15:45:00"}], "tasks": [], "subtasks": [], "reply": "Scheduled."}"""
+
+    // Sprint 3-5 — a valid split answer for the parent "Plan Diwali party".
+    private val validSplitJson =
+        """{"action": "split_task", "subtasks": [{"title": "Buy flour"}, {"title": "Mix the dough"}, {"title": "Bake for 30 minutes"}], "tasks": [], "events": [], "reply": "Here is how I'd break it down."}"""
+    private val splitParent = SplitParent("parent-1", "Plan Diwali party", 1793000000000L)
 
     @Before
     fun setUp() {
@@ -344,5 +351,130 @@ class LlmFallbackHandlerTest {
         assertTrue(result is LlmFallbackResult.Draft)
         assertEquals(LlmUsageCounter.Bucket.BONUS, server.seenBucket)
         assertEquals(0, ChatTurnCap.snapshot(context, 5L, 3L).bonusTurns)
+    }
+
+    // ---- Sprint 3-5 — the split entry point (feature 20) ----
+
+    @Test
+    fun `split with BYOK returns a SUBTASK_SPLIT draft via REST and never touches AI Logic`() = runTest {
+        setByokKey()
+        // The split instruction sent to Gemini must name the parent:
+        // a recording client that captures the user message proves it.
+        var sentMessage: String? = null
+        val recordingRest = object : RecordingGeminiClient(context) {
+            override suspend fun generateViaRest(
+                userMessage: String,
+                recentHistory: List<Pair<String, Boolean>>,
+                sanitizedModel: String,
+                apiKey: String,
+                systemInstruction: String,
+                maxOutputTokens: Int
+            ): String? {
+                sentMessage = userMessage
+                // super counts the call and answers with restResponse.
+                return super.generateViaRest(
+                    userMessage, recentHistory, sanitizedModel,
+                    apiKey, systemInstruction, maxOutputTokens
+                )
+            }
+        }
+        recordingRest.restResponse = validSplitJson
+        val handler = LlmFallbackHandler(
+            geminiClient = recordingRest,
+            context = context,
+            configProvider = LlmConfigProvider { config },
+            serverCounter = server,
+            connectivity = LlmConnectivity { true }
+        )
+        val result = handler.handleSplit(userId, splitParent, "break down Plan Diwali party")
+        assertTrue(result is LlmFallbackResult.Draft)
+        val draft = (result as LlmFallbackResult.Draft).draft
+        assertEquals(DraftKind.SUBTASK_SPLIT, draft.kind)
+        assertEquals("Plan Diwali party", draft.title)
+        assertEquals("parent-1", draft.parentTaskId)
+        assertEquals(
+            listOf("Buy flour", "Mix the dough", "Bake for 30 minutes"),
+            draft.subtaskTitles
+        )
+        assertEquals("Here is how I'd break it down.", result.previewText)
+        assertTrue(sentMessage?.contains("Plan Diwali party") == true)
+        assertEquals(1, recordingRest.restCalls)
+        assertEquals(0, recordingRest.aiLogicCalls)
+        assertEquals(1, server.calls)
+        assertEquals(1, freeTurnsUsed())
+    }
+
+    @Test
+    fun `split with the central gate on calls AI Logic`() = runTest {
+        config = config.copy(centralEnabled = true)
+        gemini.aiLogicResponse = validSplitJson
+        val result = newHandler().handleSplit(userId, splitParent, "break down Plan Diwali party")
+        assertTrue(result is LlmFallbackResult.Draft)
+        assertEquals(DraftKind.SUBTASK_SPLIT, (result as LlmFallbackResult.Draft).draft.kind)
+        assertEquals(1, gemini.aiLogicCalls)
+        assertEquals(0, gemini.restCalls)
+        assertEquals(1, freeTurnsUsed())
+    }
+
+    @Test
+    fun `split with no BYOK and central gate closed names the manual path and spends no turn`() = runTest {
+        // The critical gate proof for the split path: no key, gate off
+        // — no Gemini call, no turn, and the reply points at the
+        // manual path (detail sheet → "Add subtask"), not at a
+        // generic fallback.
+        val result = newHandler().handleSplit(userId, splitParent, "break down Plan Diwali party")
+        assertTrue(result is LlmFallbackResult.Reply)
+        assertTrue((result as LlmFallbackResult.Reply).text.contains("detail sheet"))
+        assertEquals(0, freeTurnsUsed())
+        assertEquals(0, server.calls)
+        assertEquals(0, gemini.restCalls)
+        assertEquals(0, gemini.aiLogicCalls)
+    }
+
+    @Test
+    fun `split while offline names the manual path and spends no turn`() = runTest {
+        setByokKey()
+        online = false
+        val result = newHandler().handleSplit(userId, splitParent, "break down Plan Diwali party")
+        assertTrue(result is LlmFallbackResult.Reply)
+        assertTrue((result as LlmFallbackResult.Reply).text.contains("detail sheet"))
+        assertEquals(0, freeTurnsUsed())
+        assertEquals(0, gemini.restCalls)
+    }
+
+    @Test
+    fun `split with invalid split JSON returns plain text and no draft`() = runTest {
+        setByokKey()
+        gemini.restResponse =
+            """{"action": "split_task", "subtasks": [{"title": "Buy flour"}, {"title": ""}], "reply": "I tried to split it."}"""
+        val result = newHandler().handleSplit(userId, splitParent, "break down Plan Diwali party")
+        assertTrue(result is LlmFallbackResult.Reply)
+        assertEquals("I tried to split it.", (result as LlmFallbackResult.Reply).text)
+        assertEquals(1, freeTurnsUsed()) // The turn was spent; the answer is plain text.
+    }
+
+    @Test
+    fun `split_task JSON without a parent stays a plain-text reply`() = runTest {
+        // S3-3 behaviour, preserved: handleUnhandled has no parent to
+        // attach the split to, so the split degrades to its reply.
+        setByokKey()
+        gemini.restResponse = validSplitJson
+        val result = newHandler().handleUnhandled(userId, "break down Plan Diwali party")
+        assertTrue(result is LlmFallbackResult.Reply)
+        assertEquals("Here is how I'd break it down.", (result as LlmFallbackResult.Reply).text)
+    }
+
+    @Test
+    fun `split with a capped cap returns Capped with the manual path and never calls Gemini`() = runTest {
+        setByokKey()
+        repeat(5) { ChatTurnCap.tryConsumeTurn(context, 5L, 3L) }
+        val result = newHandler().handleSplit(userId, splitParent, "break down Plan Diwali party")
+        assertTrue(result is LlmFallbackResult.Capped)
+        val text = (result as LlmFallbackResult.Capped).text
+        assertTrue(text.contains("5 free AI answers"))
+        assertTrue(text.contains("detail sheet"))
+        assertEquals(0, gemini.restCalls)
+        assertEquals(0, gemini.aiLogicCalls)
+        assertEquals(0, server.calls)
     }
 }

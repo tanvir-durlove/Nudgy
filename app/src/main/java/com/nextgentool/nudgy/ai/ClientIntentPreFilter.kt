@@ -1289,6 +1289,11 @@ class ClientIntentPreFilter(
                     "Block ${draft.focusDurationMinutes} minutes of Deep Work ($range)?"
                 }
             }
+            DraftKind.SUBTASK_SPLIT -> if (draft.isBengali) {
+                "\"${draft.title}\" ${draft.subtaskTitles.size}টা ভাগে ভাগ করব?"
+            } else {
+                "Break down \"${draft.title}\" into ${draft.subtaskTitles.size} subtasks?"
+            }
         }
     }
 
@@ -1365,6 +1370,47 @@ class ClientIntentPreFilter(
                     createdEvent = event,
                     quickSuggestions = listOf("Plan my day", "Show today's tasks", "What do you remember?")
                 )
+            }
+            DraftKind.SUBTASK_SPLIT -> {
+                // Sprint 3-5 (feature 20) — the split confirm: each
+                // validated subtask title becomes a subtask of the
+                // parent, through the same repository call the detail
+                // sheet's manual "Add subtask" uses. The backstop
+                // lives here too: a missing parent, a parent that is
+                // itself a subtask (one level only — createSubtask
+                // throws for it), or an empty list creates NOTHING.
+                val parentId = draft.parentTaskId
+                val parent = parentId?.let { runCatching { taskRepository.getTaskById(it) }.getOrNull() }
+                if (parent == null || parent.parentTaskId != null || draft.subtaskTitles.isEmpty()) {
+                    PreFilterResult.Handled(
+                        responseText = if (draft.isBengali) {
+                            "এই টাস্কটা ভাগ করা যায়নি — এটা নিজেই একটা subtask, অথবা টাস্কটা আর নেই।"
+                        } else {
+                            "I couldn't split that task — it's already a subtask, or the task no longer exists."
+                        },
+                        actionType = ChatActionType.NONE
+                    )
+                } else {
+                    var created = 0
+                    val createdTitles = mutableListOf<String>()
+                    for (title in draft.subtaskTitles) {
+                        runCatching { taskRepository.createSubtask(parentId, title) }
+                            .onSuccess { created++; createdTitles += title }
+                    }
+                    PreFilterResult.Handled(
+                        responseText = if (draft.isBengali) {
+                            val lines = StringBuilder("হয়ে গেছে — \"${draft.title}\" ${created}টা ভাগে ভাগ করেছি:\n")
+                            createdTitles.forEach { lines.append("• $it\n") }
+                            lines.toString().trimEnd()
+                        } else {
+                            val lines = StringBuilder("Done — split \"${draft.title}\" into $created subtasks:\n")
+                            createdTitles.forEach { lines.append("• $it\n") }
+                            lines.toString().trimEnd()
+                        },
+                        actionType = ChatActionType.NONE,
+                        quickSuggestions = listOf("Show today's tasks", "Plan my day")
+                    )
+                }
             }
         }
     }

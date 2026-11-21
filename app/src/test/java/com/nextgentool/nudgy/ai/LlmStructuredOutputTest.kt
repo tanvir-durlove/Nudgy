@@ -196,12 +196,14 @@ class LlmStructuredOutputTest {
     }
 
     @Test
-    fun `split_task validates subtasks but stays reply-only in S3-3`() {
+    fun `split_task validates subtasks and returns a SplitTask`() {
         val result = LlmStructuredOutput.parse(
             """{"action": "split_task", "subtasks": [{"title": "Buy flour"}, {"title": "Mix the dough"}], "reply": "Here is a breakdown."}"""
         )
-        assertTrue(result is LlmStructuredResult.ReplyOnly)
-        assertEquals("Here is a breakdown.", (result as LlmStructuredResult.ReplyOnly).reply)
+        assertTrue(result is LlmStructuredResult.SplitTask)
+        val split = result as LlmStructuredResult.SplitTask
+        assertEquals(listOf("Buy flour", "Mix the dough"), split.subtasks.map { it.title })
+        assertEquals("Here is a breakdown.", split.reply)
     }
 
     @Test

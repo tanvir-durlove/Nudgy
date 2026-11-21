@@ -41,17 +41,20 @@ import java.time.format.DateTimeParseException
  *   preview card holds ONE draft, so multi-task confirm waits for the
  *   S3-4 combined card (Q9). The system prompt asks the model for at
  *   most one item, so this path should stay rare.
- * - `split_task` is validated strictly (non-blank subtask titles) but
- *   returns [LlmStructuredResult.ReplyOnly]: there is no parent task in
- *   the S3-3 fallback context to attach subtasks to. S3-5 wires it.
+ * - `split_task` is validated strictly (non-blank subtask titles) and
+ *   returns [LlmStructuredResult.SplitTask]: the S3-3 handler maps it
+ *   to a plain-text reply (no parent task in the S3-3 fallback context
+ *   to attach subtasks to); the S3-5 split flow passes the parent and
+ *   turns it into a [ChatDraft] instead.
  * - A task with no due (`"due": null`) is [LlmStructuredResult.ReplyOnly]:
  *   the S3-2 draft model needs a concrete start time, and inventing one
  *   would break the never-guess rule. The reply should ask for the time.
  *
  * This is pure parsing — no Android, no network, no DB. The LLM's text
  * NEVER reaches createTask/addEvent from here: only a validated
- * [LlmStructuredResult.SingleTask]/[SingleEvent] may become a
- * [ChatDraft], and only after the user confirms it on the preview card.
+ * [LlmStructuredResult.SingleTask]/[SingleEvent]/[SplitTask] (the last
+ * only with a known parent task) may become a [ChatDraft], and only
+ * after the user confirms it on the preview card.
  */
 data class LlmTaskItem(
     val title: String,
@@ -76,6 +79,14 @@ sealed class LlmStructuredResult {
 
     /** Exactly one validated event — the caller may offer it as a draft. */
     data class SingleEvent(val event: LlmEventItem, val reply: String) : LlmStructuredResult()
+
+    /**
+     * Sprint 3-5 — a validated split: the model's subtask titles for
+     * the task the caller asked to break down. The caller may offer it
+     * as a draft ONLY when it knows the parent task; without one it
+     * degrades to a plain-text reply (see [LlmFallbackHandler]).
+     */
+    data class SplitTask(val subtasks: List<LlmSubtaskItem>, val reply: String) : LlmStructuredResult()
 
     /** Validation failed — show [reply] as plain text, save NOTHING.
      *  [reply] is the model's `reply` field when usable, else "". */
@@ -147,12 +158,14 @@ object LlmStructuredOutput {
     }
 
     private fun parseSplitTask(json: JSONObject, reply: String): LlmStructuredResult {
-        // Strict validation first (a bad subtask rejects the JSON),
-        // then reply-only: S3-3 has no parent task to attach to.
+        // Strict validation first (a bad subtask rejects the JSON).
+        // The caller decides what a valid split becomes: a draft when
+        // it knows the parent task (S3-5), a plain-text reply when it
+        // does not (S3-3).
         val subtasks = parseSubtasks(json.optJSONArray("subtasks"))
             ?: return LlmStructuredResult.Invalid(reply)
         if (subtasks.isEmpty()) return LlmStructuredResult.Invalid(reply)
-        return LlmStructuredResult.ReplyOnly(reply)
+        return LlmStructuredResult.SplitTask(subtasks, reply)
     }
 
     /** Parses the tasks array. Null (absent) means "no tasks". A null
