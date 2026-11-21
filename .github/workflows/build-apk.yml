@@ -2,9 +2,9 @@ name: Build Nudgy Android APK
 
 on:
   push:
-    branches: [ main, master, scratch/rebuild-v2, sprint0/**, sprint1/**, sprint2/** ]
+    branches: [ main, master, scratch/rebuild-v2, sprint0/**, sprint1/**, sprint2/**, sprint3/** ]
   pull_request:
-    branches: [ main, master, scratch/rebuild-v2, sprint0/**, sprint1/**, sprint2/** ]
+    branches: [ main, master, scratch/rebuild-v2, sprint0/**, sprint1/**, sprint2/**, sprint3/** ]
   workflow_dispatch:
     inputs:
       create_release:
@@ -169,7 +169,7 @@ jobs:
           path: build-artifacts/*
           retention-days: 3
       - name: Publish release build to GitHub Release
-        if: ${{ github.event_name == 'push' && (github.ref_name == 'scratch/rebuild-v2' || startsWith(github.ref_name, 'sprint0/') || startsWith(github.ref_name, 'sprint1/')) }}
+        if: ${{ github.event_name == 'push' && (github.ref_name == 'scratch/rebuild-v2' || startsWith(github.ref_name, 'sprint0/') || startsWith(github.ref_name, 'sprint1/') || startsWith(github.ref_name, 'sprint2/') || startsWith(github.ref_name, 'sprint3/')) }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -177,10 +177,12 @@ jobs:
           SHORT_SHA="$(echo "${{ github.sha }}" | cut -c1-7)"
           TAG_NAME="ci-${{ github.run_number }}"
           gh release create "$TAG_NAME" \
+            --target "${{ github.ref_name }}" \
             build-artifacts/nudgy-release.apk \
             build-artifacts/nudgy-release.aab \
             build-artifacts/mapping.txt \
             --title "CI build #${{ github.run_number }} – ${{ github.ref_name }} @ $SHORT_SHA" \
+            
             --notes "Automated CI build from push to ${{ github.ref_name }}." \
             --prerelease
 
