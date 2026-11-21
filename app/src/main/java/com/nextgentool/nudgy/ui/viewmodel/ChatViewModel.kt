@@ -745,13 +745,13 @@ class ChatViewModel @Inject constructor(
         }
         if (unparsed > 0) {
             lines.append(
-                if (isBengali) "• $unparsedটা বুঝতে পারিনি — আলাদা করে বললে বানাবো।\n"
+                if (isBengali) "• ${unparsed}টা বুঝতে পারিনি — আলাদা করে বললে বানাবো।\n"
                 else "• Couldn't place $unparsed ${if (unparsed == 1) "item" else "items"} — say ${if (unparsed == 1) "it" else "them"} again on ${if (unparsed == 1) "its" else "their"} own.\n"
             )
         }
         if (skipped > 0) {
             lines.append(
-                if (isBengali) "• $skippedটা টাস্ক নয় — বাদ দিয়েছি।\n"
+                if (isBengali) "• ${skipped}টা টাস্ক নয় — বাদ দিয়েছি।\n"
                 else "• Skipped $skipped ${if (skipped == 1) "item" else "items"} that ${if (skipped == 1) "wasn't" else "weren't"} a task.\n"
             )
         }
@@ -795,14 +795,14 @@ class ChatViewModel @Inject constructor(
                 // Neutral wording on purpose: a dump can mix tasks and
                 // events, so neither "tasks" nor "events" is right.
                 summary.append(
-                    if (isBengali) "হয়ে গেছে — $createdটা তৈরি করেছি:\n"
+                    if (isBengali) "হয়ে গেছে — ${created}টা তৈরি করেছি:\n"
                     else "Done — created $created:\n"
                 )
                 createdTitles.forEach { summary.append("• $it\n") }
             }
             if (failed > 0) {
                 summary.append(
-                    if (isBengali) "$failedটা তৈরি হয়নি — আবার চেষ্টা করো।"
+                    if (isBengali) "${failed}টা তৈরি হয়নি — আবার চেষ্টা করো।"
                     else "$failed couldn't be saved — please try again."
                 )
             }
