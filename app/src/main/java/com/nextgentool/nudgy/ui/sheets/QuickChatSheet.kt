@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.ui.components.ChatInputBar
 import com.nextgentool.nudgy.ui.screens.ChatMessage
+import com.nextgentool.nudgy.ui.viewmodel.ChatVoiceLanguage
 
 /**
  * Sprint 3-1 — Quick Chat sheet (spec Q8(a)): the centre + button
@@ -54,6 +55,11 @@ fun QuickChatSheet(
     onDismiss: () -> Unit,
     onStartVoice: () -> Unit,
     onStopVoice: () -> Unit,
+    // Sprint 3-7 (Q6 = (a)) — the explicit EN/বাংলা voice toggle,
+    // passed through to the shared input bar (same ViewModel state
+    // as the full chat, so the toggle never disagrees).
+    voiceLanguage: ChatVoiceLanguage = ChatVoiceLanguage.ENGLISH,
+    onToggleVoiceLanguage: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val teal = colorResource(R.color.nudgy_teal)
@@ -152,7 +158,9 @@ fun QuickChatSheet(
                     onExpandToFullChat()
                 },
                 onStartVoice = onStartVoice,
-                onStopVoice = onStopVoice
+                onStopVoice = onStopVoice,
+                voiceLanguage = voiceLanguage,
+                onToggleVoiceLanguage = onToggleVoiceLanguage
             )
         }
     }

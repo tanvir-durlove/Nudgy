@@ -201,6 +201,9 @@ class ChatScreenSmokeTest {
             val pendingPlanDrafts by viewModel.pendingPlanDrafts.collectAsState()
             val pendingPlanMessageId by viewModel.pendingPlanMessageId.collectAsState()
             val pendingPriorityMessageId by viewModel.pendingPriorityMessageId.collectAsState()
+            // Sprint 3-7 — the voice-language toggle wires exactly as
+            // the NavHost does: the mic starts with the toggle's code.
+            val voiceLanguage by viewModel.voiceLanguage.collectAsState()
             ChatScreen(
                 user = viewModel.user,
                 messages = messages,
@@ -209,8 +212,10 @@ class ChatScreenSmokeTest {
                 isThinking = isThinking,
                 thinkingText = thinkingText,
                 onSendMessage = { viewModel.sendMessage(it) },
-                onStartVoice = { viewModel.startVoice() },
+                onStartVoice = { viewModel.startVoice(viewModel.voiceLanguage.value.code) },
                 onStopVoice = { viewModel.stopVoice() },
+                voiceLanguage = voiceLanguage,
+                onToggleVoiceLanguage = { viewModel.toggleVoiceLanguage() },
                 onBlockFocusTime = { start, end, title, messageId ->
                     viewModel.onBlockFocusTime(start, end, title, messageId)
                 },
@@ -294,6 +299,65 @@ class ChatScreenSmokeTest {
             val tasks = taskRepository.getAllTasksOnce("test-user-1")
             assertEquals(1, tasks.size)
             assertTrue(tasks.single().title.contains("tasnim", ignoreCase = true))
+        }
+    }
+
+    // Sprint 3-7 — the EN/বাংলা toggle chip: it renders EN by
+    // default, tapping it flips the chip to বাংলা and the ViewModel
+    // state follows (the mic then starts with bn-BD — the
+    // startVoice-code path is pinned in ChatViewModelTest with the
+    // fake recognizer; the real SpeechRecognizer cannot run here).
+    @Test
+    fun `voice toggle chip flips EN to Bengali`() {
+        setChatContent()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Hi! What can I help you get done today?")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("EN").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Voice language: EN. Tap to switch language.").performClick()
+        composeRule.onNodeWithText("বাংলা").assertIsDisplayed()
+        assertEquals(
+            com.nextgentool.nudgy.ui.viewmodel.ChatVoiceLanguage.BENGALI,
+            viewModel.voiceLanguage.value
+        )
+        composeRule.onNodeWithContentDescription("Voice language: বাংলা. Tap to switch language.").performClick()
+        composeRule.onNodeWithText("EN").assertIsDisplayed()
+        assertEquals(
+            com.nextgentool.nudgy.ui.viewmodel.ChatVoiceLanguage.ENGLISH,
+            viewModel.voiceLanguage.value
+        )
+    }
+
+    // Sprint 3-7 — Bengali typed command end to end: type → send →
+    // Bengali preview card → Confirm → the task is in the DB.
+    @Test
+    fun `bengali typed command shows the preview card and confirm creates the task`() {
+        setChatContent()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Hi! What can I help you get done today?")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNode(hasSetTextAction()).performTextInput("কাল সকাল ৯টায় বাজার করতে হবে")
+        composeRule.onNodeWithContentDescription("Send").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("draft_preview_card")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("draft_preview_card").assertIsDisplayed()
+        runBlocking {
+            assertTrue(taskRepository.getAllTasksOnce("test-user-1").isEmpty())
+        }
+        composeRule.onNodeWithTag("draft_confirm_button").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("View Task")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("View Task").assertIsDisplayed()
+        runBlocking {
+            val tasks = taskRepository.getAllTasksOnce("test-user-1")
+            assertEquals(1, tasks.size)
+            assertTrue(tasks.single().title.contains("বাজার"))
         }
     }
 

@@ -1669,4 +1669,236 @@ class ChatViewModelTest {
             Dispatchers.resetMain()
         }
     }
+
+    // ---- Sprint 3-7 — Bengali voice toggle + Bengali commands ----
+
+    @Test
+    fun `voice toggle defaults to English and flips to Bengali and back`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            // Default is English; the toggle is explicit (Q6 = (a)) —
+            // no auto-detect, the user picks.
+            assertEquals(ChatVoiceLanguage.ENGLISH, viewModel.voiceLanguage.value)
+            assertEquals("en-US", viewModel.voiceLanguage.value.code)
+            assertEquals("EN", viewModel.voiceLanguage.value.label)
+            viewModel.toggleVoiceLanguage()
+            assertEquals(ChatVoiceLanguage.BENGALI, viewModel.voiceLanguage.value)
+            assertEquals("bn-BD", viewModel.voiceLanguage.value.code)
+            assertEquals("বাংলা", viewModel.voiceLanguage.value.label)
+            viewModel.toggleVoiceLanguage()
+            assertEquals(ChatVoiceLanguage.ENGLISH, viewModel.voiceLanguage.value)
+            // The toggle is ViewModel state (a StateFlow), so it
+            // survives a configuration change by construction — the
+            // screen re-collects the same flow after rotation.
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `voice toggle passes bn-BD to the voice session and Bengali replies follow`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.toggleVoiceLanguage()
+            // The NavHost wires the toggle code into startVoice —
+            // this call is exactly what the sheet / chat route does.
+            viewModel.startVoice(viewModel.voiceLanguage.value.code)
+            assertEquals("bn-BD", fakeVoice.lastLanguageCode)
+            fakeVoice.deliverResult("কাল সকাল ৯টায় বাজার করতে হবে")
+            // "বিকেলে" (with ে) is a daypart key — it resolves to
+            // 16:00 and drafts. Bare "বিকেল" is deliberately NOT a
+            // key (pinned §11 behaviour: it asks AM/PM instead), so
+            // the dump uses the suffixed form here.
+            fakeVoice.deliverResult("কাল বিকেলে ৪টায় মাকে কল করো")
+            viewModel.stopVoice()
+            val messages = viewModel.messages.first { it.size == 3 }
+            val drafts = viewModel.pendingBrainDumpDrafts.value
+            assertEquals(2, drafts.size)
+            assertTrue(drafts.any { it.title.contains("বাজার") })
+            assertTrue(drafts.any { it.title.contains("কল") })
+            // The preview and the receipt are in Bengali — the toggle
+            // decided the reply language for this voice-driven flow.
+            assertTrue(messages[2].text.contains("শুনেছি"))
+            viewModel.confirmBrainDump()
+            val afterConfirm = viewModel.messages.first { it.size == 4 }
+            assertTrue(afterConfirm[3].text.contains("তৈরি করেছি"))
+            val created = taskRepository.getAllTasksOnce(userId)
+            assertEquals(2, created.size)
+            // Local parse only, no LLM turn spent.
+            assertEquals(0, freeTurnsUsed())
+            assertEquals(0, recordingGemini.restCalls)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `bank-only split phrasing asks which task and calls no LLM`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("টাস্কটা ভেঙে ছোট ছোট subtask বানিয়ে দাও")
+            val messages = viewModel.messages.first { it.size == 3 }
+            // The bank is the second net (the parsers cannot read
+            // this phrasing) — the Command asks, it never guesses a
+            // parent and never calls the LLM.
+            assertTrue(messages[2].text.contains("কোন টাস্কটা ভেঙে দেব?"))
+            assertNull(viewModel.pendingDraft.value)
+            assertTrue(taskRepository.getAllTasksOnce(userId).isEmpty())
+            assertEquals(0, recordingGemini.restCalls)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `split the bill asks which task instead of creating a draft`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            // Documented behaviour change (spec §8): the bank matches
+            // "split the bill" to SPLIT_TASK at 0.420, so the old
+            // catch-all draft titled "Split the bill" is gone — the
+            // Command asks which task, and creates nothing.
+            viewModel.sendMessage("split the bill")
+            val messages = viewModel.messages.first { it.size == 3 }
+            assertTrue(messages[2].text.contains("Which task should I break down?"))
+            assertNull(viewModel.pendingDraft.value)
+            assertTrue(taskRepository.getAllTasksOnce(userId).isEmpty())
+            assertEquals(0, recordingGemini.restCalls)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `bengali priority order replies in Bengali and Apply receipt is Bengali`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            val overdue = seedTask("গতকালের রিপোর্ট", at(-1, 18))
+            val morning = seedTask("সকালের মেইল", at(0, 9))
+            val high = seedTask("জরুরি ফিক্স", at(0, 15), priority = Priority.HIGH)
+            val medium = seedTask("রুটিন রিভিউ", at(0, 15))
+            val timeless = seedTask("প্রবন্ধ পড়া", TaskRepository.NO_DUE_DATE, priority = Priority.LOW)
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("কোনটা আগে করবো")
+            val messages = viewModel.messages.first { it.size == 3 }
+            val reply = messages[2]
+            assertEquals(ChatActionType.DAILY_PLAN, reply.actionType)
+            assertEquals(
+                listOf(overdue.id, morning.id, high.id, medium.id, timeless.id),
+                viewModel.pendingPriorityOrder.value
+            )
+            assertTrue(reply.text.startsWith("আজ এভাবে করলে ভালো হবে:"))
+            assertTrue(reply.text.contains("সময় পেরিয়ে গেছে"))
+            assertTrue(reply.text.contains("বেশি জরুরি"))
+            val positions = listOf(overdue.title, morning.title, high.title, medium.title, timeless.title)
+                .map { reply.text.indexOf(it) }
+            assertTrue(positions.all { it >= 0 })
+            assertEquals(positions.sorted(), positions)
+            viewModel.applyPriorityOrder()
+            val afterApply = viewModel.messages.first { it.size == 4 }
+            assertTrue(afterApply[3].text.contains("হয়ে গেছে — My Day এখন এই ক্রমে সাজবে:"))
+            val todayString = com.nextgentool.nudgy.domain.todayDateString()
+            val stamped = taskRepository.getAllTasksOnce(userId)
+                .filter { it.id in listOf(overdue.id, morning.id, high.id, medium.id, timeless.id) }
+                .sortedBy { it.plannedStartEpochMillis }
+            assertTrue(stamped.all { it.plannedDate == todayString && it.plannedStartEpochMillis != null })
+            assertEquals(
+                listOf(overdue.id, morning.id, high.id, medium.id, timeless.id),
+                stamped.map { it.id }
+            )
+            assertNull(viewModel.pendingPriorityOrder.value)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `bengali plan my day previews in Bengali and confirm-all creates focus blocks`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            val morning = seedTask("সকালের রিপোর্ট", at(0, 9))
+            val anytime = seedTask("প্রিন্টারের কাগজ কেনা", TaskRepository.NO_DUE_DATE)
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("আমার দিনটা সাজাও")
+            val messages = viewModel.messages.first { it.size == 3 }
+            assertEquals(ChatActionType.DRAFT_PREVIEW, messages[2].actionType)
+            val drafts = viewModel.pendingPlanDrafts.value
+            if (drafts.isEmpty()) {
+                // Late night only: the day has no room left for a
+                // 45-minute block — the plain answer, not a preview.
+                assertTrue(isLateNight())
+                assertTrue(messages[2].text.contains("আজ আর ফাঁকা সময় নেই"))
+            } else {
+                assertEquals(2, drafts.size)
+                assertTrue(drafts.all { it.kind == DraftKind.FOCUS_EVENT })
+                assertEquals(
+                    setOf(morning.title, anytime.title),
+                    drafts.map { it.title }.toSet()
+                )
+                assertTrue(messages[2].text.contains("দিনের প্ল্যান"))
+                // Nothing is in the DB yet — the preview is only a
+                // question.
+                assertTrue(
+                    calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first().isEmpty()
+                )
+                viewModel.confirmPlan()
+                val afterConfirm = viewModel.messages.first { it.size == 4 }
+                assertTrue(afterConfirm[3].text.contains("ফোকাস ব্লক বসিয়েছি"))
+                val events = calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first()
+                assertEquals(2, events.size)
+            }
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `command piece inside a Bengali brain dump is skipped, the task still previews`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.startVoice("bn-BD")
+            // One utterance, two sentences: the first is a plan
+            // command (a Command, not a task), the second is a task.
+            fakeVoice.deliverResult("দিনটা সাজাও। কাল সকাল ৯টায় বাজার করতে হবে")
+            viewModel.stopVoice()
+            val messages = viewModel.messages.first { it.size == 3 }
+            val drafts = viewModel.pendingBrainDumpDrafts.value
+            assertEquals(1, drafts.size)
+            assertTrue(drafts.single().title.contains("বাজার"))
+            assertTrue(messages[2].text.contains("বাদ দিয়েছি"))
+            // The command piece was skipped, never executed mid-dump.
+            assertTrue(taskRepository.getAllTasksOnce(userId).isEmpty())
+            assertTrue(
+                calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first().isEmpty()
+            )
+            viewModel.confirmBrainDump()
+            // confirmBrainDump saves asynchronously — wait for the
+            // receipt before reading the DB (the existing dump tests
+            // do the same; reading straight away races the save).
+            viewModel.messages.first { it.size == 4 }
+            val created = taskRepository.getAllTasksOnce(userId)
+            assertEquals(1, created.size)
+            assertTrue(created.single().title.contains("বাজার"))
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
 }
