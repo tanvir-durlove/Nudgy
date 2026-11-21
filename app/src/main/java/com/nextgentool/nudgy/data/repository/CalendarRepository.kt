@@ -398,7 +398,11 @@ class CalendarRepository(
         var syncedCount = 0
         val now = System.currentTimeMillis()
         val searchStart = now - (7 * 24 * 60 * 60 * 1000L) // past 7 days
-        val searchEnd = now + (30 * 24 * 60 * 60 * 1000L) // next 30 days
+        // Sprint 2-1c — next 365 days (was 30): device-verified on
+        // ci-607 that the 30-day window cut off Christmas from Nov 21
+        // (window ended Dec 21; Dec 24/25/26 never imported), while Dec 16
+        // Victory Day came in. A planner shows a full year ahead.
+        val searchEnd = now + (365 * 24 * 60 * 60 * 1000L) // next 365 days
 
         // Sprint 2-1b — NO calendar is excluded: holiday calendars
         // (e.g. "Holidays in United States") import exactly like any
