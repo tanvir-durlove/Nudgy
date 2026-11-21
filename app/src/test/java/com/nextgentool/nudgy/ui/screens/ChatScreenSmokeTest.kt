@@ -3,6 +3,9 @@ package com.nextgentool.nudgy.ui.screens
 import android.content.Context
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -15,7 +18,10 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.nextgentool.nudgy.ads.ChatCapState
+import com.nextgentool.nudgy.ai.ChatDraft
 import com.nextgentool.nudgy.ai.ClientIntentPreFilter
+import com.nextgentool.nudgy.ai.DraftKind
 import com.nextgentool.nudgy.ai.GeminiClient
 import com.nextgentool.nudgy.ai.LlmConfig
 import com.nextgentool.nudgy.ai.LlmConfigProvider
@@ -152,14 +158,23 @@ class ChatScreenSmokeTest {
                 serverCounter = LlmServerCounter { _, _, _, _ -> LlmUsageCounter.CounterResult.ALLOWED },
                 connectivity = LlmConnectivity { true }
             ),
-            memoryRepository
+            memoryRepository,
+            context,
+            LlmConfigProvider {
+                LlmConfig(
+                    centralEnabled = false,
+                    freeTurnsPerDay = 5L,
+                    maxRewardedTurnsPerDay = 3L,
+                    modelVersion = "gemini-3.5-flash-lite"
+                )
+            },
+            com.nextgentool.nudgy.ads.NudgyAdsRewardedGateway(context)
         )
     }
 
     @After
     fun tearDown() {
         db.close()
-        val context = ApplicationProvider.getApplicationContext<Context>()
         context.getSharedPreferences("nudgy_ads", Context.MODE_PRIVATE).edit().clear().apply()
         context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE).edit().clear().apply()
     }
@@ -378,5 +393,103 @@ class ChatScreenSmokeTest {
         composeRule.onNodeWithText("Done — I will remind you about the plants.").assertExists()
         composeRule.onNodeWithText("Ask Nudgy anything...").assertExists()
         composeRule.onNodeWithContentDescription("Voice input").assertExists()
+    }
+
+    // Sprint 3-4 — the brain-dump combined preview card renders from
+    // a plain list (no recognizer: Robolectric cannot drive one):
+    // three drafts in ONE card, Confirm-all + Discard, and per-item
+    // remove. Removing a row drops it; Confirm-all fires once.
+    @Test
+    fun `brain dump combined card lists drafts and remove drops one`() {
+        val now = System.currentTimeMillis()
+        val drafts = listOf(
+            ChatDraft(kind = DraftKind.TASK, title = "Buy milk", startEpochMillis = now + 2 * 60 * 60 * 1000L),
+            ChatDraft(kind = DraftKind.TASK, title = "Call Tasnim", startEpochMillis = now + 5 * 60 * 60 * 1000L),
+            ChatDraft(kind = DraftKind.SCHEDULE, title = "Doctor appointment", startEpochMillis = now + 24 * 60 * 60 * 1000L, endEpochMillis = now + 24 * 60 * 60 * 1000L + 45 * 60 * 1000L)
+        )
+        val messages = listOf(
+            ChatMessage(id = "u1", senderIsUser = true, text = "buy milk. call tasnim at 5pm. doctor appointment tomorrow at 6am"),
+            ChatMessage(id = "dump-msg-1", senderIsUser = false, text = "Here's what I heard — 3 tasks:", actionType = ChatActionType.DRAFT_PREVIEW)
+        )
+        var confirmClicks = 0
+        var discardClicks = 0
+        composeRule.setContent {
+            var remaining by remember { mutableStateOf(drafts) }
+            ChatScreen(
+                user = viewModel.user,
+                messages = messages,
+                isListening = false,
+                isSpeaking = false,
+                isThinking = false,
+                thinkingText = "Nudgy is thinking...",
+                onSendMessage = {},
+                onStartVoice = {},
+                onStopVoice = {},
+                onBlockFocusTime = { _, _, _, _ -> },
+                pendingBrainDumpDrafts = remaining,
+                pendingBrainDumpMessageId = "dump-msg-1",
+                onConfirmBrainDump = { confirmClicks++ },
+                onDiscardBrainDump = { discardClicks++ },
+                onRemoveBrainDumpDraft = { index ->
+                    remaining = remaining.toMutableList().also { it.removeAt(index) }
+                }
+            )
+        }
+        composeRule.onNodeWithTag("brain_dump_preview_card").assertIsDisplayed()
+        composeRule.onNodeWithText("Brain dump — 3 tasks").assertIsDisplayed()
+        composeRule.onNodeWithText("Buy milk").assertIsDisplayed()
+        composeRule.onNodeWithText("Call Tasnim").assertIsDisplayed()
+        composeRule.onNodeWithText("Doctor appointment").assertIsDisplayed()
+        composeRule.onNodeWithTag("brain_dump_confirm_button").assertIsDisplayed()
+        composeRule.onNodeWithTag("brain_dump_discard_button").assertIsDisplayed()
+        // Removing the middle row drops it and renumbers the card.
+        composeRule.onNodeWithTag("brain_dump_remove_1").performClick()
+        composeRule.onNodeWithText("Call Tasnim").assertDoesNotExist()
+        composeRule.onNodeWithText("Brain dump — 2 tasks").assertIsDisplayed()
+        composeRule.onNodeWithText("Buy milk").assertIsDisplayed()
+        composeRule.onNodeWithText("Doctor appointment").assertIsDisplayed()
+        composeRule.onNodeWithTag("brain_dump_confirm_button").performClick()
+        assertEquals(1, confirmClicks)
+        assertEquals(0, discardClicks)
+    }
+
+    // Sprint 3-4 — the rewarded entry: a capped cap state renders the
+    // "+1 answer" offer, and tapping it calls the watch callback (the
+    // ad itself never plays in Robolectric — the gateway is the seam).
+    @Test
+    fun `capped cap state shows the rewarded offer and watch fires`() {
+        val messages = listOf(
+            ChatMessage(id = "a1", senderIsUser = false, text = "You've used your 5 free AI answers for today.")
+        )
+        var watchClicks = 0
+        var retryClicks = 0
+        composeRule.setContent {
+            ChatScreen(
+                user = viewModel.user,
+                messages = messages,
+                isListening = false,
+                isSpeaking = false,
+                isThinking = false,
+                thinkingText = "Nudgy is thinking...",
+                onSendMessage = {},
+                onStartVoice = {},
+                onStopVoice = {},
+                onBlockFocusTime = { _, _, _, _ -> },
+                chatCapState = ChatCapState(
+                    freeTurnsUsed = 5,
+                    freeTurnsPerDay = 5L,
+                    bonusTurns = 0,
+                    rewardedTurnsGrantedToday = 0,
+                    maxRewardedTurnsPerDay = 3L
+                ),
+                rewardedAdReady = true,
+                onWatchRewardedAd = { watchClicks++ },
+                onRetryRewardedAd = { retryClicks++ }
+            )
+        }
+        composeRule.onNodeWithText("Watch ad for +1 answer").assertIsDisplayed()
+        composeRule.onNodeWithTag("rewarded_watch_button").performClick()
+        assertEquals(1, watchClicks)
+        assertEquals(0, retryClicks)
     }
 }

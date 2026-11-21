@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material3.AlertDialog
@@ -38,6 +39,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -60,6 +62,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nextgentool.nudgy.R
@@ -131,6 +134,20 @@ fun ChatScreen(
     onConfirmDraft: () -> Unit = {},
     onDiscardDraft: () -> Unit = {},
     onDraftEdited: (ChatDraft) -> Unit = {},
+    // Sprint 3-4 — brain dump (feature 19, Q9 = (a)): the combined
+    // preview card — all split drafts in one card, one Confirm-all,
+    // per-item remove. All defaulted: the card never renders without
+    // pending drafts. isBrainDumpActive keeps the mic on Stop between
+    // utterances (the recognizer's isListening flickers false while
+    // the session restarts it); brainDumpTranscript is the "heard so
+    // far" line in the listening banner.
+    isBrainDumpActive: Boolean = false,
+    brainDumpTranscript: String = "",
+    pendingBrainDumpDrafts: List<ChatDraft> = emptyList(),
+    pendingBrainDumpMessageId: String? = null,
+    onConfirmBrainDump: () -> Unit = {},
+    onDiscardBrainDump: () -> Unit = {},
+    onRemoveBrainDumpDraft: (Int) -> Unit = {},
     // Ads: rewarded entry — non-null only when the free daily chat cap is
     // hit. The button grants +1 AI turn only after a completed ad view.
     chatCapState: ChatCapState? = null,
@@ -519,6 +536,97 @@ fun ChatScreen(
                                         }
                                     }
 
+                                    // S3-4 — Action Card 1d: Brain Dump
+                                    // combined preview (Q9 = (a)). One card
+                                    // for ALL split drafts: each row shows
+                                    // title + time with its own remove
+                                    // button; Confirm-all saves every
+                                    // remaining draft, Discard drops them
+                                    // all. Renders only on the message the
+                                    // dump is attached to, and only while
+                                    // the ViewModel still holds the drafts.
+                                    if (message.actionType == ChatActionType.DRAFT_PREVIEW &&
+                                        message.id == pendingBrainDumpMessageId && pendingBrainDumpDrafts.isNotEmpty()
+                                    ) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Surface(
+                                            modifier = Modifier.fillMaxWidth().testTag("brain_dump_preview_card"),
+                                            shape = RoundedCornerShape(16.dp),
+                                            color = cream,
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, teal.copy(alpha = 0.3f))
+                                        ) {
+                                            Column(modifier = Modifier.padding(14.dp)) {
+                                                Text(
+                                                    text = "Brain dump — ${pendingBrainDumpDrafts.size} ${if (pendingBrainDumpDrafts.size == 1) "task" else "tasks"}",
+                                                    style = MaterialTheme.typography.titleMedium.copy(
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 15.sp
+                                                    ),
+                                                    color = ink
+                                                )
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                pendingBrainDumpDrafts.forEachIndexed { index, item ->
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = if (item.kind == DraftKind.SCHEDULE || item.kind == DraftKind.FOCUS_EVENT) Icons.Default.Schedule else Icons.Outlined.TaskAlt,
+                                                            contentDescription = null,
+                                                            tint = teal,
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Text(
+                                                                text = item.title,
+                                                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                                                                color = ink
+                                                            )
+                                                            Text(
+                                                                text = draftDateTimeFormat.format(item.startEpochMillis),
+                                                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 11.sp),
+                                                                color = muted
+                                                            )
+                                                        }
+                                                        IconButton(
+                                                            onClick = { onRemoveBrainDumpDraft(index) },
+                                                            modifier = Modifier.testTag("brain_dump_remove_$index").size(28.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Close,
+                                                                contentDescription = "Remove ${item.title}",
+                                                                tint = muted,
+                                                                modifier = Modifier.size(16.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.height(10.dp))
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Button(
+                                                        onClick = onConfirmBrainDump,
+                                                        shape = RoundedCornerShape(100.dp),
+                                                        colors = ButtonDefaults.buttonColors(containerColor = teal),
+                                                        modifier = Modifier.testTag("brain_dump_confirm_button")
+                                                    ) {
+                                                        Text("Confirm all", fontSize = 13.sp, color = Color.White)
+                                                    }
+                                                    TextButton(
+                                                        onClick = onDiscardBrainDump,
+                                                        modifier = Modifier.testTag("brain_dump_discard_button")
+                                                    ) {
+                                                        Text("Discard", fontSize = 13.sp, color = muted)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
                                     // Action Card 2: Focus Time Proposal
                                     if (message.actionType == ChatActionType.FOCUS_TIME_PROPOSAL && message.focusStartMillis != null && message.focusEndMillis != null) {
                                         var focusScheduled by remember { mutableStateOf(message.focusActionCompleted) }
@@ -636,8 +744,12 @@ fun ChatScreen(
                     }
                 }
 
-                // Voice Listening Indicator Banner
-                if (isListening) {
+                // Voice Listening Indicator Banner. During a brain dump
+                // (S3-4) the banner stays up between utterances — the
+                // recognizer's isListening flickers false while the
+                // session restarts it — and shows the transcript heard
+                // so far, so the user sees what was caught.
+                if (isListening || isBrainDumpActive) {
                     item(key = "listening_banner") {
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
@@ -654,11 +766,23 @@ fun ChatScreen(
                                     strokeWidth = 2.dp
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
-                                Text(
-                                    text = "Listening... Speak now",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 14.sp),
-                                    color = ink
-                                )
+                                Column {
+                                    Text(
+                                        text = if (isBrainDumpActive) "Brain dump — keep talking, tap Stop when you're done" else "Listening... Speak now",
+                                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 14.sp),
+                                        color = ink
+                                    )
+                                    if (isBrainDumpActive && brainDumpTranscript.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = brainDumpTranscript,
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                            color = muted,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -792,7 +916,11 @@ fun ChatScreen(
                                 disabledContainerColor = muted,
                                 disabledContentColor = Color.White
                             ),
-                            shape = RoundedCornerShape(100.dp)
+                            shape = RoundedCornerShape(100.dp),
+                            // S3-4 — the smoke test taps the offer by
+                            // tag (clicking merged Button text is
+                            // fragile across Compose versions).
+                            modifier = Modifier.testTag("rewarded_watch_button")
                         ) {
                             Text(
                                 text = when {
@@ -811,10 +939,11 @@ fun ChatScreen(
             // Input Bar — the shared ChatInputBar (the same bar the
             // Quick Chat sheet uses). The floating push-to-talk button
             // is gone (S3-1 restyle): the mic in the bar is the one
-            // voice entry point.
+            // voice entry point. S3-4: the mic shows Stop while a
+            // brain-dump session is open, even between utterances.
             ChatInputBar(
                 isThinking = isThinking,
-                isListening = isListening,
+                isListening = isListening || isBrainDumpActive,
                 onSendMessage = onSendMessage,
                 onStartVoice = onStartVoice,
                 onStopVoice = onStopVoice,

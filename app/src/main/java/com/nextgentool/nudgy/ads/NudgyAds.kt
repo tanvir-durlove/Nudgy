@@ -328,6 +328,17 @@ object NudgyAds {
     }
 
     /**
+     * Retries the rewarded preload with the LAST requested (validated)
+     * unit id — the Chat screen's retry button. A plain loadRewarded()
+     * call with no id would fall back to the TEST id and overwrite the
+     * stored real id, so the retry must reuse the stored one.
+     * Sprint 3-4 (rewarded entry wiring).
+     */
+    fun reloadRewarded(context: Context) {
+        loadRewarded(context, currentRewardedUnitId)
+    }
+
+    /**
      * Shows the preloaded rewarded ad. [onRewardEarned] fires ONLY when
      * the user earns the reward (completed viewing) — never on load,
      * click, dismiss, or failure. Returns true when an ad was shown.
