@@ -87,12 +87,6 @@ fun CalendarShell() = ShellScaffold(
 )
 
 @Composable
-fun ChatShell() = ShellScaffold(
-    title = "Chat",
-    note = "Sprint 3-এ আসছে: Quick Chat sheet expanding to full chat. Confirmation card before anything is saved; ask instead of guessing. Nothing is saved from this shell."
-)
-
-@Composable
 fun GroupsShell() = ShellScaffold(
     title = "Groups",
     note = "Sprint 5 fills this in: join code, member list, group tasks with badge, completion count, admin notice."

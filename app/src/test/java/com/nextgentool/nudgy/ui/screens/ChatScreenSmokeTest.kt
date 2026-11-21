@@ -163,4 +163,38 @@ class ChatScreenSmokeTest {
         }
         composeRule.onNodeWithText("remind you about", substring = true).assertIsDisplayed()
     }
+
+    @Test
+    fun `restyled chat renders message bubbles and input from a plain list`() {
+        // Sprint 3-1 — restyle render check: the screen renders from a
+        // plain message list (no ViewModel, no seed race), with the
+        // shared input bar. The hero is NOT asserted here: it sits at
+        // the far end of the reversed list and LazyColumn only
+        // composes near-viewport items (the S3-0 flake). Mascot
+        // absence is a static check (zero NudgyMascot references in
+        // ChatScreen.kt) — the mascot carries no semantics node to
+        // assert on.
+        val messages = listOf(
+            ChatMessage(id = "u1", senderIsUser = true, text = "Plan my day"),
+            ChatMessage(id = "a1", senderIsUser = false, text = "Here is your plan for today.")
+        )
+        composeRule.setContent {
+            ChatScreen(
+                user = viewModel.user,
+                messages = messages,
+                isListening = false,
+                isSpeaking = false,
+                isThinking = false,
+                thinkingText = "Nudgy is thinking...",
+                onSendMessage = {},
+                onStartVoice = {},
+                onStopVoice = {},
+                onBlockFocusTime = { _, _, _, _ -> }
+            )
+        }
+        composeRule.onNodeWithText("Plan my day").assertExists()
+        composeRule.onNodeWithText("Here is your plan for today.").assertExists()
+        composeRule.onNodeWithText("Ask Nudgy anything...").assertExists()
+        composeRule.onNodeWithContentDescription("Voice input").assertExists()
+    }
 }

@@ -5,6 +5,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -23,6 +25,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -49,6 +54,7 @@ import com.nextgentool.nudgy.ui.screens.TasksScreen
 import com.nextgentool.nudgy.ui.screens.TemplatesScreen
 import com.nextgentool.nudgy.ui.screens.TodayScreen
 import com.nextgentool.nudgy.ui.sheets.CreateTaskSheet
+import com.nextgentool.nudgy.ui.sheets.QuickChatSheet
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
 import com.nextgentool.nudgy.ui.viewmodel.CalendarViewModel
 import com.nextgentool.nudgy.ui.viewmodel.ChatViewModel
@@ -61,10 +67,12 @@ import com.nextgentool.nudgy.ui.viewmodel.ShareIntentViewModel
  * dark/light) so MainActivity stays a one-line root.
  *
  * Bottom nav (locked): Today | Calendar | centre Quick Chat (+) |
- * Groups | Settings. The centre button IS the chat: first a compact
- * Quick Chat sheet, expanding to full-screen chat as the conversation
- * grows (Sprint 3). Here it navigates to the chat destination, which
- * keeps its shell until Sprint 3.
+ * Groups | Settings. The centre button IS the chat: it opens the
+ * compact Quick Chat sheet (Sprint 3-1); the first message sent
+ * there, or the expand button, moves to the full-screen chat
+ * destination. The sheet and the full chat share one Activity-scoped
+ * ChatViewModel (owned by NudgyApp), so history survives leaving and
+ * re-entering the sheet.
  *
  * Today is a nested graph ("today_graph"): TodayScreen + the Plan
  * route ("today/plan"). Back from Plan returns to Today.
@@ -91,16 +99,54 @@ fun NudgyApp() {
         }
     }
     NudgyTheme {
+        // Sprint 3-1 — the ChatViewModel is Activity-scoped (same
+        // instance the Chat route uses): the Quick Chat sheet and the
+        // full chat share it, so history survives leaving and
+        // re-entering the sheet. Same precedent as ShareIntentViewModel
+        // above (the Activity is the ViewModelStoreOwner at this root).
+        val chatViewModel: ChatViewModel = hiltViewModel()
+        var quickChatOpen by rememberSaveable { mutableStateOf(false) }
+        // Q7(a): the bottom nav hides while the keyboard is open — the
+        // chat gets the full height, one less inset layer in the
+        // keyboard-gap equation (S3-8 diagnoses the gap itself).
+        val isImeVisible = WindowInsets.isImeVisible
         Scaffold(
-            bottomBar = { NudgyBottomNav(navController) }
+            bottomBar = {
+                if (shouldShowBottomNav(isImeVisible)) {
+                    NudgyBottomNav(
+                        navController,
+                        onCentreChatClick = { quickChatOpen = true }
+                    )
+                }
+            }
         ) { innerPadding ->
             NudgyNavHost(
                 navController,
                 Modifier.padding(innerPadding),
+                chatViewModel = chatViewModel,
                 pendingDateLink = pendingDateLink,
                 onDateLinkConsumed = { shareViewModel.consumeDateLink() },
                 pendingInsertEvent = pendingInsertEvent,
                 onInsertEventConsumed = { shareViewModel.consumeInsertEvent() }
+            )
+        }
+        // Sprint 3-1 — Quick Chat sheet over the current tab.
+        if (quickChatOpen) {
+            val sheetMessages by chatViewModel.messages.collectAsState()
+            val sheetThinking by chatViewModel.isThinking.collectAsState()
+            val sheetListening by chatViewModel.isListening.collectAsState()
+            QuickChatSheet(
+                messages = sheetMessages,
+                isThinking = sheetThinking,
+                isListening = sheetListening,
+                onSendMessage = { chatViewModel.sendMessage(it) },
+                onExpandToFullChat = {
+                    quickChatOpen = false
+                    navigateTo(navController, NudgyRoute.Chat)
+                },
+                onDismiss = { quickChatOpen = false },
+                onStartVoice = { chatViewModel.startVoice() },
+                onStopVoice = { chatViewModel.stopVoice() }
             )
         }
         val share = pendingShare
@@ -132,6 +178,10 @@ fun NudgyApp() {
 fun NudgyNavHost(
     navController: NavHostController,
     modifier: Modifier = Modifier,
+    // Sprint 3-1 — the shared Activity-scoped ChatViewModel (owned by
+    // NudgyApp): the same instance the Quick Chat sheet uses, so the
+    // sheet and the full chat never diverge.
+    chatViewModel: ChatViewModel,
     // Sprint 2-4 — a pending date link / create-event intent, passed
     // to the Calendar destination (which acts on it, then consumes
     // it). Null in every other flow.
@@ -232,12 +282,14 @@ fun NudgyNavHost(
             )
         }
         // Sprint 3-0 — Chat is wired: the real ChatScreen on the
-        // ChatViewModel (Hilt). The route owns no state; the ViewModel
-        // owns the send pipeline (guardrails → prefilter → local
-        // fallback) and the reply sound. The ChatShell placeholder is
-        // gone; the Quick Chat sheet + approved restyle is S3-1.
+        // shared Activity-scoped ChatViewModel (owned by NudgyApp —
+        // the same instance the Quick Chat sheet uses). The route owns
+        // no state; the ViewModel owns the send pipeline (guardrails →
+        // prefilter → local fallback) and the reply sound. The
+        // ChatShell placeholder is deleted (S3-1); the sheet lives in
+        // NudgyApp and the approved restyle is in ChatScreen.
         composable(NudgyRoute.Chat.route) {
-            val viewModel: ChatViewModel = hiltViewModel()
+            val viewModel = chatViewModel
             val messages by viewModel.messages.collectAsState()
             val isThinking by viewModel.isThinking.collectAsState()
             val isSpeaking by viewModel.isSpeaking.collectAsState()
@@ -281,8 +333,22 @@ private val bottomNavEntries = listOf(
     BottomNavEntry(NudgyRoute.Settings, "Settings", Icons.Outlined.Settings)
 )
 
+/**
+ * Sprint 3-1 — Q7(a): the bottom nav hides while the keyboard is open,
+ * on every tab (the chat gets the full height). A pure function so the
+ * rule is unit-testable: a live IME cannot be driven in Robolectric,
+ * so the flip itself is a device-test item (spec §10.15).
+ */
+internal fun shouldShowBottomNav(isImeVisible: Boolean): Boolean = !isImeVisible
+
 @Composable
-fun NudgyBottomNav(navController: NavController) {
+fun NudgyBottomNav(
+    navController: NavController,
+    // Sprint 3-1 — the centre + button opens the Quick Chat sheet; it
+    // does not navigate (Q8(a)). The full chat is reached from the
+    // sheet (first message / expand).
+    onCentreChatClick: () -> Unit = {}
+) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = NudgyRoute.fromRoute(navBackStackEntry?.destination?.route)
     NavigationBar {
@@ -291,7 +357,10 @@ fun NudgyBottomNav(navController: NavController) {
             if (entry.isCentreChat) {
                 NavigationBarItem(
                     selected = selected,
-                    onClick = { navigateTo(navController, entry.route) },
+                    onClick = {
+                        // Already in the full chat — nothing to open.
+                        if (currentRoute != NudgyRoute.Chat) onCentreChatClick()
+                    },
                     icon = {
                         Box(
                             contentAlignment = Alignment.Center,
