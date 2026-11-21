@@ -154,6 +154,60 @@ class ClientIntentPreFilterTest {
         assertTrue(handled.responseText.contains("What time"))
     }
 
+    // Device feedback 2026-11-21 (ci-677) — a time-less REMINDER
+    // silently defaulted to today 15:00 ("তাসনিমকে কল করো" got a
+    // 3 PM card instead of a question). Same never-guess rule as
+    // SCHEDULE: ask, create nothing. A reminder WITH a time still
+    // drafts at that time (pinned by "reminder draft creates
+    // nothing until confirmed" below).
+    @Test
+    fun `reminder with no time asks for the time instead of inventing 3pm`() = runTest {
+        val result = preFilter.tryHandle("test-user", "remind me to buy milk", emptyList(), emptyList())
+        assertTrue(result is PreFilterResult.Handled)
+        val handled = result as PreFilterResult.Handled
+        assertNull(handled.createdTask)
+        assertNull(handled.createdEvent)
+        assertTrue(handled.responseText.contains("What time"))
+    }
+
+    @Test
+    fun `bengali reminder with no time asks for the time instead of inventing 3pm`() = runTest {
+        val result = preFilter.tryHandle("test-user", "দুধ কিনতে মনে করিয়ে দিও", emptyList(), emptyList())
+        assertTrue(result is PreFilterResult.Handled)
+        val handled = result as PreFilterResult.Handled
+        assertNull(handled.createdTask)
+        assertNull(handled.createdEvent)
+        assertTrue(handled.responseText.contains("কয়টায়"))
+    }
+
+    // Device feedback 2026-11-21 — follow-on: the bare TASK_CREATE
+    // bank entries ("buy milk" etc., added so a bare to-do drafts as
+    // a task instead of asking) outscore the REMINDER docs for
+    // "set a reminder to buy milk" at the bank level, so the
+    // explicit-phrase shortcut must catch that family first — the
+    // reminder still asks, never drafts.
+    @Test
+    fun `set a reminder with no time asks for the time instead of drafting as a task`() = runTest {
+        val result = preFilter.tryHandle("test-user", "set a reminder to buy milk", emptyList(), emptyList())
+        assertTrue(result is PreFilterResult.Handled)
+        val handled = result as PreFilterResult.Handled
+        assertNull(handled.createdTask)
+        assertNull(handled.createdEvent)
+        assertTrue(handled.responseText.contains("What time"))
+    }
+
+    // Device feedback 2026-11-21 — follow-on: a bare to-do with no
+    // reminder wording is a TASK, not a reminder — it drafts at the
+    // intended TASK default (now+2h) instead of asking for a time.
+    // This is what keeps the voice brain dump drafting "buy milk".
+    @Test
+    fun `bare to-do buy milk drafts as a task instead of asking for a time`() = runTest {
+        val result = preFilter.tryHandle("test-user", "buy milk", emptyList(), emptyList())
+        assertTrue(result is PreFilterResult.PendingDraft)
+        val draft = (result as PreFilterResult.PendingDraft).draft
+        assertTrue(draft.title.contains("buy milk", ignoreCase = true))
+    }
+
     // Sprint 3-0 — branch coverage for the paths the ChatViewModel
     // send pipeline now exercises (query / focus / plan / memory /
     // clear / complete). The 6 original tests only covered the parser

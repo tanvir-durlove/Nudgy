@@ -63,6 +63,11 @@ import com.nextgentool.nudgy.ui.components.TaskBoard
 import com.nextgentool.nudgy.ui.components.TaskDetailSheet
 import com.nextgentool.nudgy.ui.components.TaskViewMode
 import com.nextgentool.nudgy.ui.components.colorFromHex
+import com.nextgentool.nudgy.ui.theme.NudgyAccent
+import com.nextgentool.nudgy.ui.theme.NudgyCanvas
+import com.nextgentool.nudgy.ui.theme.NudgyCard
+import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
+import com.nextgentool.nudgy.ui.theme.NudgyMuted
 import com.nextgentool.nudgy.ui.theme.NudgyTokens
 import com.nextgentool.nudgy.ui.viewmodel.TaskListItem
 import com.nextgentool.nudgy.ui.viewmodel.TasksViewModel
@@ -118,7 +123,7 @@ fun TasksScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorResource(R.color.nudgy_background))
+            .background(NudgyCanvas)
     ) {
         // Top bar (back — Tasks is not a bottom destination).
         Row(
@@ -131,19 +136,19 @@ fun TasksScreen(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Back",
-                    tint = colorResource(R.color.nudgy_ink)
+                    tint = NudgyCharcoal
                 )
             }
             Text(
                 text = "My tasks",
                 style = MaterialTheme.typography.titleLarge,
-                color = colorResource(R.color.nudgy_ink)
+                color = NudgyCharcoal
             )
             Spacer(modifier = Modifier.weight(1f))
             Text(
                 text = "${uiState.totalCount}",
                 style = MaterialTheme.typography.bodyMedium,
-                color = colorResource(R.color.nudgy_muted)
+                color = NudgyMuted
             )
             Spacer(modifier = Modifier.width(16.dp))
             // Sprint 1-4 — templates (Feature 13).
@@ -151,7 +156,7 @@ fun TasksScreen(
                 onClick = onNavigateToTemplates,
                 modifier = Modifier.testTag("templates_button")
             ) {
-                Text("Templates", color = colorResource(R.color.nudgy_teal))
+                Text("Templates", color = NudgyAccent)
             }
         }
 
@@ -192,12 +197,12 @@ fun TasksScreen(
                 OutlinedTextField(
                     value = uiState.filter.text,
                     onValueChange = { viewModel.setSearchText(it) },
-                    placeholder = { Text("Search tasks", color = colorResource(R.color.nudgy_muted)) },
+                    placeholder = { Text("Search tasks", color = NudgyMuted) },
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Filled.Search,
                             contentDescription = null,
-                            tint = colorResource(R.color.nudgy_muted)
+                            tint = NudgyMuted
                         )
                     },
                     singleLine = true,
@@ -224,7 +229,15 @@ fun TasksScreen(
                                 label = { Text(view.name) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = colorResource(R.color.nudgy_teal),
-                                    selectedLabelColor = colorResource(R.color.nudgy_cream)
+                                    selectedLabelColor = colorResource(R.color.nudgy_cream),
+                                    // Unselected: explicit theme-aware
+                                    // colors — the M3 defaults put a light
+                                    // onSurface label on a transparent
+                                    // container, invisible over a light
+                                    // background in dark mode (device
+                                    // 2026-11-21: washed-out filter chips).
+                                    containerColor = NudgyCard,
+                                    labelColor = NudgyCharcoal
                                 )
                             )
                         }
@@ -233,14 +246,14 @@ fun TasksScreen(
                         TextButton(onClick = {
                             uiState.activeViewId?.let { viewModel.deleteSavedView(it) }
                         }) {
-                            Text("Delete", color = colorResource(R.color.nudgy_muted))
+                            Text("Delete", color = NudgyMuted)
                         }
                     }
                     TextButton(
                         onClick = { showSaveViewDialog = true },
                         enabled = !uiState.filter.isEmpty()
                     ) {
-                        Text("Save view", color = colorResource(R.color.nudgy_teal))
+                        Text("Save view", color = NudgyAccent)
                     }
                 }
             }
@@ -267,7 +280,12 @@ fun TasksScreen(
                             },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = colorResource(R.color.nudgy_teal),
-                                selectedLabelColor = colorResource(R.color.nudgy_cream)
+                                selectedLabelColor = colorResource(R.color.nudgy_cream),
+                                // Unselected: explicit theme-aware colors
+                                // (same white-on-white-in-dark-mode trap
+                                // as the saved-view chips above).
+                                containerColor = NudgyCard,
+                                labelColor = NudgyCharcoal
                             ),
                             modifier = Modifier.testTag(
                                 "view_mode_${mode.name.lowercase()}"
@@ -300,7 +318,7 @@ fun TasksScreen(
                                     "No tasks match this filter"
                                 },
                                 style = MaterialTheme.typography.titleMedium,
-                                color = colorResource(R.color.nudgy_ink)
+                                color = NudgyCharcoal
                             )
                             Text(
                                 text = if (uiState.filter.isEmpty()) {
@@ -309,11 +327,11 @@ fun TasksScreen(
                                     "Try a different filter or search."
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = colorResource(R.color.nudgy_muted)
+                                color = NudgyMuted
                             )
                             if (!uiState.filter.isEmpty()) {
                                 TextButton(onClick = { viewModel.clearFilter() }) {
-                                    Text("Clear filter", color = colorResource(R.color.nudgy_teal))
+                                    Text("Clear filter", color = NudgyAccent)
                                 }
                             }
                         }
@@ -346,7 +364,7 @@ fun TasksScreen(
                         Text(
                             text = "Completed (${doneItems.size})",
                             style = MaterialTheme.typography.labelLarge,
-                            color = colorResource(R.color.nudgy_muted),
+                            color = NudgyMuted,
                             modifier = Modifier.padding(top = 8.dp, start = 4.dp)
                         )
                     }
@@ -449,7 +467,7 @@ fun TasksScreen(
                         }
                     },
                     enabled = saveViewName.isNotBlank()
-                ) { Text("Save", color = colorResource(R.color.nudgy_teal)) }
+                ) { Text("Save", color = NudgyAccent) }
             },
             dismissButton = {
                 TextButton(onClick = { showSaveViewDialog = false }) { Text("Cancel") }
@@ -572,7 +590,13 @@ private fun FilterChipRow(
 @Composable
 private fun filterChipColors() = FilterChipDefaults.filterChipColors(
     selectedContainerColor = colorResource(R.color.nudgy_teal),
-    selectedLabelColor = colorResource(R.color.nudgy_cream)
+    selectedLabelColor = colorResource(R.color.nudgy_cream),
+    // Unselected: explicit theme-aware colors — the M3 defaults put a
+    // light onSurface label on a transparent container, which reads as
+    // washed-out / invisible over a light background in dark mode
+    // (device 2026-11-21: "Low / Medium / High / To do" unreadable).
+    containerColor = NudgyCard,
+    labelColor = NudgyCharcoal
 )
 
 /** Priority marker: a dot only — coral for High, teal for Medium, muted for Low. Never text. */
@@ -629,9 +653,9 @@ private fun TaskRow(
                         }
                     ),
                     color = if (task.isCompleted) {
-                        colorResource(R.color.nudgy_muted)
+                        NudgyMuted
                     } else {
-                        colorResource(R.color.nudgy_ink)
+                        NudgyCharcoal
                     }
                 )
                 Spacer(modifier = Modifier.height(2.dp))
@@ -642,20 +666,20 @@ private fun TaskRow(
                     Text(
                         text = formatDueLabel(task.dueDateEpochMillis, task.isCompleted),
                         style = MaterialTheme.typography.bodySmall,
-                        color = colorResource(R.color.nudgy_muted)
+                        color = NudgyMuted
                     )
                     if (item.project != null) {
                         Text(
                             text = "· ${item.project.name}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = colorResource(R.color.nudgy_muted)
+                            color = NudgyMuted
                         )
                     }
                     if (item.subtaskTotal > 0) {
                         Text(
                             text = "· ${item.subtaskDone}/${item.subtaskTotal}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = colorResource(R.color.nudgy_muted)
+                            color = NudgyMuted
                         )
                     }
                 }
@@ -672,7 +696,7 @@ private fun TaskRow(
                                 Text(
                                     text = tag.name,
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = colorResource(R.color.nudgy_ink)
+                                    color = NudgyCharcoal
                                 )
                             }
                         }
@@ -688,7 +712,7 @@ private fun TaskRow(
                                 Text(
                                     text = "Group",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = colorResource(R.color.nudgy_teal)
+                                    color = NudgyAccent
                                 )
                             }
                         }

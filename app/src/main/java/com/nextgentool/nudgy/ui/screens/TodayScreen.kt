@@ -51,6 +51,11 @@ import com.nextgentool.nudgy.domain.timeLabel
 import com.nextgentool.nudgy.ui.components.QuickAddTask
 import com.nextgentool.nudgy.ui.components.TaskBoard
 import com.nextgentool.nudgy.ui.components.TaskViewMode
+import com.nextgentool.nudgy.ui.theme.NudgyAccent
+import com.nextgentool.nudgy.ui.theme.NudgyCanvas
+import com.nextgentool.nudgy.ui.theme.NudgyCard
+import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
+import com.nextgentool.nudgy.ui.theme.NudgyMuted
 import com.nextgentool.nudgy.ui.theme.NudgyTokens
 import com.nextgentool.nudgy.ui.viewmodel.TaskListItem
 import com.nextgentool.nudgy.ui.viewmodel.TasksViewModel
@@ -100,7 +105,7 @@ fun TodayScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorResource(R.color.nudgy_background))
+            .background(NudgyCanvas)
             .verticalScroll(scrollState)
             .padding(NudgyTokens.screenPadding)
     ) {
@@ -118,7 +123,7 @@ fun TodayScreen(
                 Text(
                     text = "Make today count.",
                     style = MaterialTheme.typography.titleLarge,
-                    color = colorResource(R.color.nudgy_ink)
+                    color = NudgyCharcoal
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Box(
@@ -141,7 +146,7 @@ fun TodayScreen(
                     Text(
                         text = "${uiState.doneCount} of ${uiState.todayTotal} done",
                         style = MaterialTheme.typography.bodySmall,
-                        color = colorResource(R.color.nudgy_muted)
+                        color = NudgyMuted
                     )
                 }
                 Spacer(modifier = Modifier.height(12.dp))
@@ -177,7 +182,7 @@ fun TodayScreen(
                     Text(
                         text = "আজকের দিন সাজাবে?",
                         style = MaterialTheme.typography.titleMedium,
-                        color = colorResource(R.color.nudgy_ink),
+                        color = NudgyCharcoal,
                         modifier = Modifier.weight(1f)
                     )
                     Button(
@@ -301,7 +306,7 @@ fun TodayScreen(
                 Text(
                     text = "My Day",
                     style = MaterialTheme.typography.titleMedium,
-                    color = colorResource(R.color.nudgy_ink),
+                    color = NudgyCharcoal,
                     modifier = Modifier.weight(1f)
                 )
                 // Sprint 1-4 — List / Board toggle (Feature 5).
@@ -314,7 +319,14 @@ fun TodayScreen(
                         },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = colorResource(R.color.nudgy_teal),
-                            selectedLabelColor = colorResource(R.color.nudgy_cream)
+                            selectedLabelColor = colorResource(R.color.nudgy_cream),
+                            // Unselected: explicit theme-aware colors. The
+                            // M3 defaults put a light onSurface label on
+                            // a transparent container — over the light
+                            // screen that read as white-on-white in dark
+                            // mode ("Board" invisible, device 2026-11-21).
+                            containerColor = NudgyCard,
+                            labelColor = NudgyCharcoal
                         ),
                         modifier = Modifier.testTag(
                             "my_day_view_mode_${mode.name.lowercase()}"
@@ -330,7 +342,7 @@ fun TodayScreen(
                 Text(
                     text = "Nothing planned for today yet",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = colorResource(R.color.nudgy_muted),
+                    color = NudgyMuted,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
             } else if (myDayViewMode == TaskViewMode.BOARD) {
@@ -372,7 +384,7 @@ fun TodayScreen(
                 Text(
                     text = "Timeline",
                     style = MaterialTheme.typography.titleMedium,
-                    color = colorResource(R.color.nudgy_ink)
+                    color = NudgyCharcoal
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -398,7 +410,7 @@ fun TodayScreen(
                         Text(
                             text = "Anytime",
                             style = MaterialTheme.typography.titleSmall,
-                            color = colorResource(R.color.nudgy_muted)
+                            color = NudgyMuted
                         )
                         uiState.untimedTodayItems.forEach { item ->
                             TodayTaskRow(
@@ -422,7 +434,7 @@ fun TodayScreen(
                 Text(
                     text = "Nothing coming up",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = colorResource(R.color.nudgy_muted),
+                    color = NudgyMuted,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
             } else {
@@ -432,7 +444,7 @@ fun TodayScreen(
                             Text(
                                 text = day.label,
                                 style = MaterialTheme.typography.titleMedium,
-                                color = colorResource(R.color.nudgy_ink)
+                                color = NudgyCharcoal
                             )
                             day.items.forEach { item ->
                                 TodayTaskRow(
@@ -448,7 +460,7 @@ fun TodayScreen(
                             Text(
                                 text = "No date",
                                 style = MaterialTheme.typography.titleMedium,
-                                color = colorResource(R.color.nudgy_ink)
+                                color = NudgyCharcoal
                             )
                             uiState.noDateItems.forEach { item ->
                                 TodayTaskRow(
@@ -502,19 +514,19 @@ private fun WeeklyReviewCard(review: com.nextgentool.nudgy.domain.usecase.Weekly
                 Text(
                     text = "Weekly review",
                     style = MaterialTheme.typography.titleMedium,
-                    color = colorResource(R.color.nudgy_ink),
+                    color = NudgyCharcoal,
                     modifier = Modifier.weight(1f)
                 )
                 Text(
                     text = review.weekLabel,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = colorResource(R.color.nudgy_muted)
+                    color = NudgyMuted
                 )
             }
             Text(
                 text = "What finished, what was missed, what slipped this week.",
                 style = MaterialTheme.typography.bodySmall,
-                color = colorResource(R.color.nudgy_muted)
+                color = NudgyMuted
             )
             WeeklyReviewSection(
                 title = "Finished",
@@ -549,13 +561,13 @@ private fun WeeklyReviewSection(
         Text(
             text = title,
             style = MaterialTheme.typography.titleSmall,
-            color = colorResource(R.color.nudgy_ink)
+            color = NudgyCharcoal
         )
         if (tasks.isEmpty()) {
             Text(
                 text = emptyText,
                 style = MaterialTheme.typography.bodyMedium,
-                color = colorResource(R.color.nudgy_muted)
+                color = NudgyMuted
             )
         } else {
             tasks.forEach { task ->
@@ -576,9 +588,9 @@ private fun WeeklyReviewSection(
                             }
                         ),
                         color = if (task.isCompleted) {
-                            colorResource(R.color.nudgy_muted)
+                            NudgyMuted
                         } else {
-                            colorResource(R.color.nudgy_ink)
+                            NudgyCharcoal
                         },
                         modifier = Modifier.weight(1f)
                     )
@@ -588,7 +600,7 @@ private fun WeeklyReviewSection(
                         Text(
                             text = formatMinutes(task.actualMinutes),
                             style = MaterialTheme.typography.bodySmall,
-                            color = colorResource(R.color.nudgy_muted)
+                            color = NudgyMuted
                         )
                     }
                     if (task.groupId != null) {
@@ -603,7 +615,7 @@ private fun WeeklyReviewSection(
                             Text(
                                 text = "Group",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = colorResource(R.color.nudgy_teal)
+                                color = NudgyAccent
                             )
                         }
                     }
@@ -643,7 +655,7 @@ private fun TodayTabButton(
                 color = if (selected) {
                     colorResource(R.color.nudgy_cream)
                 } else {
-                    colorResource(R.color.nudgy_ink)
+                    NudgyCharcoal
                 }
             )
         }
@@ -674,19 +686,19 @@ private fun AllTasksRow(
             Text(
                 text = "All tasks",
                 style = MaterialTheme.typography.titleMedium,
-                color = colorResource(R.color.nudgy_ink),
+                color = NudgyCharcoal,
                 modifier = Modifier.weight(1f)
             )
             Text(
                 text = "$count tasks",
                 style = MaterialTheme.typography.bodyMedium,
-                color = colorResource(R.color.nudgy_muted)
+                color = NudgyMuted
             )
             Spacer(modifier = Modifier.width(4.dp))
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
-                tint = colorResource(R.color.nudgy_muted)
+                tint = NudgyMuted
             )
         }
     }
@@ -742,22 +754,22 @@ private fun TodayTaskRow(
                         }
                     ),
                     color = if (task.isCompleted) {
-                        colorResource(R.color.nudgy_muted)
+                        NudgyMuted
                     } else {
-                        colorResource(R.color.nudgy_ink)
+                        NudgyCharcoal
                     }
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         text = timeLabel,
                         style = MaterialTheme.typography.bodySmall,
-                        color = colorResource(R.color.nudgy_muted)
+                        color = NudgyMuted
                     )
                     if (item.subtaskTotal > 0) {
                         Text(
                             text = "· ${item.subtaskDone}/${item.subtaskTotal}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = colorResource(R.color.nudgy_muted)
+                            color = NudgyMuted
                         )
                     }
                 }
@@ -774,7 +786,7 @@ private fun TodayTaskRow(
                         Text(
                             text = "Group",
                             style = MaterialTheme.typography.bodySmall,
-                            color = colorResource(R.color.nudgy_teal)
+                            color = NudgyAccent
                         )
                     }
                 }
