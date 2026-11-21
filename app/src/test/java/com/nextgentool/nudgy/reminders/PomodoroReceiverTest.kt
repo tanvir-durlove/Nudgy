@@ -88,7 +88,7 @@ class PomodoroReceiverTest {
 
     private fun postedTitles(): List<String> =
         shadowOf(notificationManager).allNotifications.mapNotNull {
-            it.notification.extras.getString(Notification.EXTRA_TITLE)
+            it.extras.getString(Notification.EXTRA_TITLE)
         }
 
     @Test
