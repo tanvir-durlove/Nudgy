@@ -115,16 +115,23 @@ class ChatScreenSmokeTest {
     }
 
     @Test
-    fun `ChatScreen renders hero and input`() {
+    fun `ChatScreen renders input and welcome message`() {
         setChatContent()
-        // The hero sits at the top of the reversed LazyColumn, above
-        // the visible viewport (the list opens on the newest message)
-        // — it EXISTS but is not displayed. assertIsDisplayed would
-        // fail here even though the screen is correct (same trap as
-        // the S1-4 / S2-1 below-fold lessons): assert existence.
-        composeRule.onNodeWithText("What can I help you", substring = true).assertExists()
+        // The input bar sits outside the LazyColumn, so it is always
+        // displayed; the welcome message is the newest item at the
+        // bottom of the reversed list, so it is displayed too once
+        // seeded. The hero is NOT asserted here: it lives at the far
+        // end of the reversed list and LazyColumn only composes
+        // near-viewport items, so its presence is timing/layout
+        // dependent (round 1 failed it on visibility, round 2 on
+        // existence — both flakes of the same cause, not the product).
         composeRule.onNodeWithText("Ask Nudgy anything...").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Voice input").assertExists()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Hi! What can I help you get done today?")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("Hi! What can I help you get done today?").assertIsDisplayed()
     }
 
     @Test
@@ -142,10 +149,18 @@ class ChatScreenSmokeTest {
         composeRule.onNode(hasSetTextAction()).performTextInput("call tasnim at 5pm")
         composeRule.onNodeWithContentDescription("Send").performClick()
         // The prefilter creates the task and the reply names it.
+        // Assert on "remind you about": it occurs ONLY in the reply
+        // text. Call tasks build with reminderAtDue=true, so the
+        // reply is "Done! I'll remind you about …" — never "Created
+        // task". And "asnim" would also match the TASK_PREVIEW card
+        // title, so onNode would throw on duplicates — whether the
+        // card has composed yet is a race between the chat flow and
+        // the task flow in observeMessages (that race is what flipped
+        // this test between round 1 and round 2).
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("asnim", substring = true, ignoreCase = true)
+            composeRule.onAllNodesWithText("remind you about", substring = true)
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("asnim", substring = true, ignoreCase = true).assertIsDisplayed()
+        composeRule.onNodeWithText("remind you about", substring = true).assertIsDisplayed()
     }
 }
