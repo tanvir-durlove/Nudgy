@@ -10,8 +10,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.nextgentool.nudgy.data.local.dao.CalendarDao
 import com.nextgentool.nudgy.data.local.dao.ChatDao
 import com.nextgentool.nudgy.data.local.dao.DailyBriefDao
+import com.nextgentool.nudgy.data.local.dao.FocusSessionDao
 import com.nextgentool.nudgy.data.local.dao.GroupDao
 import com.nextgentool.nudgy.data.local.dao.GroupMemberDao
+import com.nextgentool.nudgy.data.local.dao.HabitDao
 import com.nextgentool.nudgy.data.local.dao.MemoryDao
 import com.nextgentool.nudgy.data.local.dao.ProjectDao
 import com.nextgentool.nudgy.data.local.dao.SavedViewDao
@@ -22,8 +24,11 @@ import com.nextgentool.nudgy.data.local.dao.TaskTemplateDao
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.ChatMessageEntity
 import com.nextgentool.nudgy.data.local.entity.DailyBriefEntity
+import com.nextgentool.nudgy.data.local.entity.FocusSessionEntity
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.GroupMemberEntity
+import com.nextgentool.nudgy.data.local.entity.HabitCheckInEntity
+import com.nextgentool.nudgy.data.local.entity.HabitEntity
 import com.nextgentool.nudgy.data.local.entity.NudgyMemoryEntity
 import com.nextgentool.nudgy.data.local.entity.ProjectEntity
 import com.nextgentool.nudgy.data.local.entity.SavedViewEntity
@@ -253,6 +258,48 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
     }
 }
 
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Sprint 4-0 (spec §3): three new tables, no column changes.
+        // No backfill — a tester install has no focus/habit rows yet.
+        // Every CREATE TABLE below MUST match its entity definition
+        // exactly (column order, types, FK clauses) — Room validates
+        // the migrated schema against the entities on open.
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `focus_sessions` (
+                `id` TEXT NOT NULL,
+                `userId` TEXT NOT NULL,
+                `taskId` TEXT,
+                `startedAtEpochMillis` INTEGER NOT NULL,
+                `plannedEndEpochMillis` INTEGER NOT NULL,
+                `endedAtEpochMillis` INTEGER,
+                `durationMinutes` INTEGER NOT NULL,
+                `completed` INTEGER NOT NULL,
+                `kind` TEXT NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `habits` (
+                `id` TEXT NOT NULL,
+                `userId` TEXT NOT NULL,
+                `title` TEXT NOT NULL,
+                `createdAtEpochMillis` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `habit_check_ins` (
+                `habitId` TEXT NOT NULL,
+                `localDate` TEXT NOT NULL,
+                `checkedAtEpochMillis` INTEGER NOT NULL,
+                PRIMARY KEY(`habitId`, `localDate`),
+                FOREIGN KEY(`habitId`) REFERENCES `habits`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+        """.trimIndent())
+    }
+}
+
 @Database(
     entities = [
         TaskEntity::class,
@@ -267,9 +314,12 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
         ProjectEntity::class,
         SavedViewEntity::class,
         TaskAttachmentEntity::class,
-        TaskTemplateEntity::class
+        TaskTemplateEntity::class,
+        FocusSessionEntity::class,
+        HabitEntity::class,
+        HabitCheckInEntity::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -286,6 +336,9 @@ abstract class NudgyDatabase : RoomDatabase() {
     abstract fun savedViewDao(): SavedViewDao
     abstract fun taskAttachmentDao(): TaskAttachmentDao
     abstract fun taskTemplateDao(): TaskTemplateDao
+    // Sprint 4-0.
+    abstract fun focusSessionDao(): FocusSessionDao
+    abstract fun habitDao(): HabitDao
 
     companion object {
         @Volatile
@@ -298,7 +351,7 @@ abstract class NudgyDatabase : RoomDatabase() {
                     NudgyDatabase::class.java,
                     "nudgy_local_db"
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                     // Public-launch policy (revisited from the pre-launch
                     // note): destructive fallback is RETIRED from v5.
                     // Every distributed install is v4 (1.0.2 was the first

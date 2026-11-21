@@ -15,6 +15,7 @@ import com.nextgentool.nudgy.ai.VoiceAssistantManager
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.data.repository.ChatRepository
+import com.nextgentool.nudgy.data.repository.FocusHabitRepository
 import com.nextgentool.nudgy.data.repository.GroupRepository
 import com.nextgentool.nudgy.data.repository.MemoryRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
@@ -91,6 +92,18 @@ object TaskModule {
         @ApplicationContext context: Context,
         database: NudgyDatabase
     ): MemoryRepository = MemoryRepository(context, database)
+
+    // Sprint 4-0 — the Focus + Habit data layer. Plain class (constructed
+    // manually elsewhere, like CalendarRepository), so this module is
+    // its only Hilt binding — exactly one instance. No UI uses it yet
+    // (S4-1/S4-2 will); the binding lands now so the foundation is
+    // usable the moment the first screen arrives.
+    @Provides
+    @Singleton
+    fun provideFocusHabitRepository(
+        @ApplicationContext context: Context,
+        database: NudgyDatabase
+    ): FocusHabitRepository = FocusHabitRepository(context, database)
 
     @Provides
     @Singleton

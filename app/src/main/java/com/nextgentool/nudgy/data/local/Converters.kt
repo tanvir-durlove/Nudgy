@@ -1,6 +1,7 @@
 package com.nextgentool.nudgy.data.local
 
 import androidx.room.TypeConverter
+import com.nextgentool.nudgy.data.model.FocusSessionKind
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskStatus
 import com.nextgentool.nudgy.data.model.TaskCategory
@@ -34,5 +35,17 @@ class Converters {
         TaskStatus.valueOf(value)
     } catch (e: Exception) {
         TaskStatus.TODO
+    }
+
+    // Sprint 4-0 — FocusSessionKind, same TEXT pattern. An unknown value
+    // (e.g. a hand-edited DB) falls back to FOCUS, never crashes.
+    @TypeConverter
+    fun fromFocusSessionKind(kind: FocusSessionKind): String = kind.name
+
+    @TypeConverter
+    fun toFocusSessionKind(value: String): FocusSessionKind = try {
+        FocusSessionKind.valueOf(value)
+    } catch (e: Exception) {
+        FocusSessionKind.FOCUS
     }
 }
