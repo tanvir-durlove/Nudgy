@@ -602,8 +602,14 @@ class ChatViewModelTest {
                 proposal.focusStartMillis!!, proposal.focusEndMillis!!,
                 "Focus Time", proposal.id
             )
-            val today = startOfDayMillis(System.currentTimeMillis())
-            val events = calendarRepository.observeEventsForDay(userId, today)
+            // S4-1 round 4 — the proposal's slot can cross midnight:
+            // after 23:20 the empty-day slot (next :00/:30 after
+            // now + 10 min) starts at 00:00 tomorrow, so the blocked
+            // event lands on the proposal's own day, not "today".
+            // (Round-3 CI 23:26 UTC failed here; round-2 CI 23:10
+            // passed with a 23:30 slot that still started today.)
+            val dayOfProposal = startOfDayMillis(proposal.focusStartMillis!!)
+            val events = calendarRepository.observeEventsForDay(userId, dayOfProposal)
                 .first { it.any { event -> event.title == "Focus Time" } }
             assertTrue(events.any { it.title == "Focus Time" })
             val updated = viewModel.messages.first { list ->
