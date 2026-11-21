@@ -1,7 +1,7 @@
 {
 "version": 1,
 "source": "nudgy-chat-intent-bank-v2-clean.md",
-"count": 6600,
+"count": 6611,
 "entries": [
 {
 "intent": "TASK_CREATE",
@@ -10587,6 +10587,61 @@
 "intent": "TASK_CREATE",
 "lang": "en",
 "text": "140. I have to buy groceries tomorrow at 3 PM"
+},
+{
+"intent": "TASK_CREATE",
+"lang": "en",
+"text": "buy milk"
+},
+{
+"intent": "TASK_CREATE",
+"lang": "en",
+"text": "buy groceries"
+},
+{
+"intent": "TASK_CREATE",
+"lang": "en",
+"text": "buy vegetables"
+},
+{
+"intent": "TASK_CREATE",
+"lang": "en",
+"text": "buy bread"
+},
+{
+"intent": "TASK_CREATE",
+"lang": "en",
+"text": "buy eggs"
+},
+{
+"intent": "TASK_CREATE",
+"lang": "en",
+"text": "buy coffee"
+},
+{
+"intent": "TASK_CREATE",
+"lang": "en",
+"text": "buy fruit"
+},
+{
+"intent": "TASK_CREATE",
+"lang": "en",
+"text": "buy rice"
+},
+{
+"intent": "TASK_CREATE",
+"lang": "en",
+"text": "wash the car"
+},
+{
+"intent": "TASK_CREATE",
+"lang": "en",
+"text": "do the laundry"
+},
+{
+"intent": "TASK_CREATE",
+"lang": "en",
+"text": "take out the trash"
 },
 {
 "intent": "SCHEDULE_CREATE",

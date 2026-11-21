@@ -732,7 +732,13 @@ class ClientIntentPreFilter(
     private val explicitReminderPhrases = listOf(
         "মনে করিয়ে দিও", "মনে করিয়ে দিবে", "মনে করিয়ে দাও", "মনে করিয়ে",
         "remind me to", "remind me", "don't forget to", "dont forget to",
-        "remember to", "remember"
+        "remember to", "remember",
+        // Device feedback 2026-11-21 — "set/create/add a reminder"
+        // is the same explicit family: without these the bare
+        // TASK_CREATE bank entries ("buy milk" etc.) outscore the
+        // REMINDER docs for "set a reminder to buy milk", and a
+        // time-less reminder would draft instead of asking (F1).
+        "set a reminder", "create a reminder", "add a reminder"
     )
 
     private fun parseIntent(rawInput: String): ParsedIntent {
