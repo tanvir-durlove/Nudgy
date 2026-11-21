@@ -39,6 +39,12 @@ class FakeCalendarProviderGateway : CalendarProviderGateway {
 
     private val events = mutableListOf<FakeGoogleEvent>()
     private var nextId = 100L
+    /** Extra calendars beyond the primary one (e.g. a read-only holiday calendar). */
+    private val extraCalendars = mutableListOf<ProviderCalendar>()
+
+    fun addCalendar(calendar: ProviderCalendar) {
+        synchronized(extraCalendars) { extraCalendars.add(calendar) }
+    }
     var insertAttempts = 0
         private set
     var updateAttempts = 0
@@ -97,7 +103,7 @@ class FakeCalendarProviderGateway : CalendarProviderGateway {
             accessLevel = CalendarContract.Calendars.CAL_ACCESS_OWNER,
             displayName = "test@gmail.com"
         )
-    )
+    ) + synchronized(extraCalendars) { extraCalendars.toList() }
 
     override fun insertEvent(values: ProviderEventValues): Long? {
         insertAttempts++

@@ -400,20 +400,13 @@ class CalendarRepository(
         val searchStart = now - (7 * 24 * 60 * 60 * 1000L) // past 7 days
         val searchEnd = now + (30 * 24 * 60 * 60 * 1000L) // next 30 days
 
-        // Holiday calendars (e.g. "Holidays in Bangladesh") are read-only
-        // Google calendars whose events would otherwise pollute the
-        // schedule. Exclude them by calendar id: the name contains
-        // "holiday" AND access is below contributor, so writable calendars
-        // are never treated as holidays, even if oddly named. If this
-        // lookup fails, the set stays empty and sync behaves as before.
-        val holidayCalendarIds = providerGateway.queryCalendars()
-            .filter { calendar ->
-                calendar.displayName != null &&
-                    calendar.displayName.contains("holiday", ignoreCase = true) &&
-                    calendar.accessLevel < CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR
-            }
-            .map { it.id }
-            .toMutableSet()
+        // Sprint 2-1b — NO calendar is excluded: holiday calendars
+        // (e.g. "Holidays in United States") import exactly like any
+        // other calendar. The old exclusion dropped every Thanksgiving /
+        // Veterans Day / Election Day, so the sync looked broken on
+        // device (ci-604). All-day events render as labels at the top of
+        // the day (CalendarScreen) and never block a slot (checkConflict
+        // / findSuggestedFocusSlot filter them out below).
 
         // Query Instances (not Events) so recurring series expand into
         // their individual occurrences inside the window. No selection:
@@ -429,7 +422,6 @@ class CalendarRepository(
             val markerByKey = HashMap<Pair<Long, Long>, String>()
             for (instance in providerGateway.queryInstances(searchStart, searchEnd)) {
                 val gId = instance.googleEventId
-                if (instance.calendarId in holidayCalendarIds) continue
                 val rawTitle = instance.title ?: "Untitled Event"
                 val start = instance.beginEpochMillis
                 var end = instance.endEpochMillis
@@ -826,8 +818,11 @@ class CalendarRepository(
         endEpochMillis: Long
     ): ConflictResult = withContext(Dispatchers.IO) {
         val events = calendarDao.getAllEventsFlow(userId).first()
+        // Sprint 2-1b — all-day events are labels, not blocks: a
+        // 00:00–24:00 holiday must never count as a conflict.
         val conflict = events.firstOrNull { event ->
-            event.startEpochMillis < endEpochMillis && event.endEpochMillis > startEpochMillis
+            !event.isAllDay &&
+                event.startEpochMillis < endEpochMillis && event.endEpochMillis > startEpochMillis
         }
 
         if (conflict != null) {
@@ -860,7 +855,11 @@ class CalendarRepository(
         // Busy timeline = calendar events + any extra busy intervals (the
         // caller passes timed tasks, so a suggested slot never collides with
         // a task even though tasks are not shown on the schedule).
+        // Sprint 2-1b — all-day events are labels, not blocks: a
+        // 00:00–24:00 holiday would otherwise leave the day with no
+        // suggested focus slot at all.
         val events = (calendarDao.getEventsForDayFlow(userId, startOfDay, endOfDay).first()
+            .filter { !it.isAllDay }
             .map { it.startEpochMillis to it.endEpochMillis } +
             busyIntervals.filter { it.first in startOfDay..endOfDay })
             .sortedBy { it.first }
