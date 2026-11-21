@@ -1264,12 +1264,39 @@ class ChatViewModelTest {
     private suspend fun seedMeeting(title: String, start: Long, end: Long) =
         calendarRepository.addEvent(userId, title, start, end)
 
-    /** True after 22:00: a 45-minute focus block can no longer fit
-     *  in the day, so auto-schedule legitimately answers "no free
-     *  slot" instead of proposing one. Tests that propose slots
-     *  branch on this (both outcomes are correct behaviour). */
+    /** True after 22:00. Only ever asserted in an empty-drafts
+     *  branch — and empty drafts can only happen after 22:50 (see
+     *  focusBlocksThatFitTonight), so the check always holds there.
+     *  It is NOT the "no block fits" boundary: a block still fits
+     *  until 22:50. */
     private fun isLateNight(): Boolean =
         Calendar.getInstance().get(Calendar.HOUR_OF_DAY) >= 22
+
+    /**
+     * Sprint 4-0 — how many 45-minute focus blocks still fit before
+     * midnight (the slot math in findSuggestedFocusSlot +
+     * handleAutoScheduleCommand): the first block starts at the next
+     * :00/:30 after now + 10 min, each next block needs 45 min + a
+     * 15-min gap, and a block that would end past midnight is never
+     * proposed. So the second block fits only while now < 21:50
+     * (first block 22:00–22:45), the first only while now < 22:50
+     * (23:00–23:45), and none fit after that.
+     *
+     * The old isLateNight() (>= 22:00) covers neither boundary: from
+     * 21:50 to 22:50 exactly ONE block fits, so a test that seeds two
+     * tasks and demands two drafts fails there — and after 22:50 the
+     * answer is "no free slot", not a preview. The two-task tests
+     * below pin their count against this, never a hard-coded 2.
+     */
+    private fun focusBlocksThatFitTonight(): Int {
+        val cal = Calendar.getInstance()
+        val nowMinutes = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+        return when {
+            nowMinutes < 21 * 60 + 50 -> 2
+            nowMinutes < 22 * 60 + 50 -> 1
+            else -> 0
+        }
+    }
 
     @Test
     fun `plan my day previews focus slots and creates nothing yet`() = runTest {
@@ -1282,18 +1309,24 @@ class ChatViewModelTest {
             viewModel.messages.first { it.size == 1 } // welcome seeded
             viewModel.sendMessage("plan my day")
             val messages = viewModel.messages.first { it.size == 3 }
-            assertEquals(ChatActionType.DRAFT_PREVIEW, messages[2].actionType)
             val drafts = viewModel.pendingPlanDrafts.value
+            val expected = focusBlocksThatFitTonight()
             if (drafts.isEmpty()) {
-                // Late night only: the day has no room left for a
-                // 45-minute block — the plain answer, not a preview.
+                // After 22:50: no 45-minute block ends tonight — the
+                // plain answer, not a preview.
+                assertEquals(0, expected)
                 assertTrue(isLateNight())
+                assertEquals(ChatActionType.NONE, messages[2].actionType)
                 assertTrue(messages[2].text.contains("No free slot"))
             } else {
-                assertEquals(2, drafts.size)
+                assertEquals(ChatActionType.DRAFT_PREVIEW, messages[2].actionType)
+                assertEquals(expected, drafts.size)
                 assertTrue(drafts.all { it.kind == DraftKind.FOCUS_EVENT })
+                // scheduleOrder is due-first, timeless last: the
+                // morning task takes the first slot, so a partial
+                // evening fit keeps it and drops the timeless one.
                 assertEquals(
-                    setOf(morning.title, anytime.title),
+                    listOf(morning.title, anytime.title).take(expected).toSet(),
                     drafts.map { it.title }.toSet()
                 )
                 val now = System.currentTimeMillis()
@@ -1469,20 +1502,31 @@ class ChatViewModelTest {
             viewModel.sendMessage("plan my day")
             viewModel.messages.first { it.size == 3 }
             val drafts = viewModel.pendingPlanDrafts.value
+            val expected = focusBlocksThatFitTonight()
             if (drafts.isEmpty()) {
                 // Late night only: nothing was proposed, so there is
                 // nothing to confirm.
+                assertEquals(0, expected)
                 assertTrue(isLateNight())
                 return@runTest
             }
-            assertEquals(2, drafts.size)
+            assertEquals(expected, drafts.size)
             viewModel.confirmPlan()
             val afterConfirm = viewModel.messages.first { it.size == 4 }
-            assertTrue(afterConfirm[3].text.contains("scheduled 2 focus blocks"))
+            assertTrue(
+                afterConfirm[3].text.contains(
+                    "scheduled $expected ${if (expected == 1) "focus block" else "focus blocks"}"
+                )
+            )
             val events = calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first()
                 .filter { it.eventType == "FOCUS_TIME" }
-            assertEquals(2, events.size)
-            assertEquals(setOf("Task one", "Task two"), events.map { it.title }.toSet())
+            assertEquals(expected, events.size)
+            // scheduleOrder is due-first: "Task one" (09:00) takes
+            // the first slot, so a partial evening fit keeps it.
+            assertEquals(
+                listOf("Task one", "Task two").take(expected).toSet(),
+                events.map { it.title }.toSet()
+            )
             assertTrue(viewModel.pendingPlanDrafts.value.isEmpty())
         } finally {
             Dispatchers.resetMain()
@@ -1501,8 +1545,22 @@ class ChatViewModelTest {
             viewModel.sendMessage("plan my day")
             viewModel.messages.first { it.size == 3 }
             val drafts = viewModel.pendingPlanDrafts.value
+            val expected = focusBlocksThatFitTonight()
             if (drafts.isEmpty()) {
+                assertEquals(0, expected)
                 assertTrue(isLateNight())
+                return@runTest
+            }
+            if (expected == 1) {
+                // Late evening: only "Keep me" (due first) got a
+                // slot — there is no second draft to remove, so
+                // confirm the one there is.
+                assertEquals(listOf("Keep me"), drafts.map { it.title })
+                viewModel.confirmPlan()
+                viewModel.messages.first { it.size == 4 }
+                val single = calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first()
+                    .filter { it.eventType == "FOCUS_TIME" }
+                assertEquals(listOf("Keep me"), single.map { it.title })
                 return@runTest
             }
             val dropIndex = drafts.indexOfFirst { it.title == "Drop me" }
@@ -1836,18 +1894,24 @@ class ChatViewModelTest {
             viewModel.messages.first { it.size == 1 } // welcome seeded
             viewModel.sendMessage("আমার দিনটা সাজাও")
             val messages = viewModel.messages.first { it.size == 3 }
-            assertEquals(ChatActionType.DRAFT_PREVIEW, messages[2].actionType)
             val drafts = viewModel.pendingPlanDrafts.value
+            val expected = focusBlocksThatFitTonight()
             if (drafts.isEmpty()) {
-                // Late night only: the day has no room left for a
-                // 45-minute block — the plain answer, not a preview.
+                // After 22:50: no 45-minute block ends tonight — the
+                // plain answer, not a preview.
+                assertEquals(0, expected)
                 assertTrue(isLateNight())
+                assertEquals(ChatActionType.NONE, messages[2].actionType)
                 assertTrue(messages[2].text.contains("আজ আর ফাঁকা সময় নেই"))
             } else {
-                assertEquals(2, drafts.size)
+                assertEquals(ChatActionType.DRAFT_PREVIEW, messages[2].actionType)
+                assertEquals(expected, drafts.size)
                 assertTrue(drafts.all { it.kind == DraftKind.FOCUS_EVENT })
+                // scheduleOrder is due-first, timeless last: the
+                // morning task takes the first slot, so a partial
+                // evening fit keeps it.
                 assertEquals(
-                    setOf(morning.title, anytime.title),
+                    listOf(morning.title, anytime.title).take(expected).toSet(),
                     drafts.map { it.title }.toSet()
                 )
                 assertTrue(messages[2].text.contains("দিনের প্ল্যান"))
@@ -1860,7 +1924,7 @@ class ChatViewModelTest {
                 val afterConfirm = viewModel.messages.first { it.size == 4 }
                 assertTrue(afterConfirm[3].text.contains("ফোকাস ব্লক বসিয়েছি"))
                 val events = calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first()
-                assertEquals(2, events.size)
+                assertEquals(expected, events.size)
             }
         } finally {
             Dispatchers.resetMain()
