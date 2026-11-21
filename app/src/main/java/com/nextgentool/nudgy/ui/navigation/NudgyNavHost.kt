@@ -221,7 +221,16 @@ fun NudgyNavHost(
         composable(NudgyRoute.Tasks.route) {
             TasksScreen(
                 onBackClick = { navController.popBackStack() },
-                onNavigateToTemplates = { navController.navigate(NudgyRoute.Templates.route) }
+                onNavigateToTemplates = { navController.navigate(NudgyRoute.Templates.route) },
+                // Sprint 3-5 — the detail sheet's "Break down" button:
+                // the split starts at once on the shared ChatViewModel
+                // and the user lands on Chat, where the preview card
+                // appears. The sheet's task is dismissed by the
+                // navigation itself (leaving Tasks pops the sheet).
+                onSplitTask = { taskId ->
+                    chatViewModel.startSplit(taskId)
+                    navigateTo(navController, NudgyRoute.Chat)
+                }
             )
         }
         // Sprint 1-4 — Templates. NOT a bottom destination either.
@@ -337,6 +346,8 @@ fun NudgyNavHost(
                 onConfirmDraft = { viewModel.confirmDraft() },
                 onDiscardDraft = { viewModel.discardDraft() },
                 onDraftEdited = { viewModel.editDraft(it) },
+                // Sprint 3-5 — per-item remove on the split preview card.
+                onRemoveSplitSubtask = { viewModel.removeSplitSubtask(it) },
                 isBrainDumpActive = isBrainDumpActive,
                 brainDumpTranscript = brainDumpTranscript,
                 pendingBrainDumpDrafts = pendingBrainDumpDrafts,

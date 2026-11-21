@@ -134,6 +134,11 @@ fun ChatScreen(
     onConfirmDraft: () -> Unit = {},
     onDiscardDraft: () -> Unit = {},
     onDraftEdited: (ChatDraft) -> Unit = {},
+    // Sprint 3-5 — subtask split (feature 20): the split preview card
+    // lists the subtasks with a per-item remove (the brain-dump card's
+    // Q9 pattern, on the single pending draft). No Edit: a split has
+    // no time to edit and the parent title is not editable here.
+    onRemoveSplitSubtask: (Int) -> Unit = {},
     // Sprint 3-4 — brain dump (feature 19, Q9 = (a)): the combined
     // preview card — all split drafts in one card, one Confirm-all,
     // per-item remove. All defaulted: the card never renders without
@@ -483,12 +488,83 @@ fun ChatScreen(
                                                     )
                                                 }
                                                 Spacer(modifier = Modifier.height(4.dp))
+                                                // Sprint 3-5 — the split preview: the parent
+                                                // title is the header above; the card lists
+                                                // the subtasks with a per-item remove, then
+                                                // Confirm / Discard. No time line (a split
+                                                // has no time) and no Edit button.
+                                                if (draft.kind == DraftKind.SUBTASK_SPLIT) {
+                                                    Text(
+                                                        text = if (draft.isBengali) {
+                                                            "${draft.subtaskTitles.size}টা ছোট ভাগে ভাগ করব:"
+                                                        } else {
+                                                            "Smaller steps:"
+                                                        },
+                                                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                                        color = muted
+                                                    )
+                                                    draft.subtaskTitles.forEachIndexed { index, sub ->
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Outlined.TaskAlt,
+                                                                contentDescription = null,
+                                                                tint = teal,
+                                                                modifier = Modifier.size(16.dp)
+                                                            )
+                                                            Spacer(modifier = Modifier.width(6.dp))
+                                                            Text(
+                                                                text = sub,
+                                                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                                                                color = ink,
+                                                                modifier = Modifier.weight(1f)
+                                                            )
+                                                            IconButton(
+                                                                onClick = { onRemoveSplitSubtask(index) },
+                                                                modifier = Modifier.testTag("split_subtask_remove_$index").size(28.dp)
+                                                            ) {
+                                                                Icon(
+                                                                    imageVector = Icons.Default.Close,
+                                                                    contentDescription = "Remove $sub",
+                                                                    tint = muted,
+                                                                    modifier = Modifier.size(16.dp)
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                    Spacer(modifier = Modifier.height(10.dp))
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Button(
+                                                            onClick = onConfirmDraft,
+                                                            shape = RoundedCornerShape(100.dp),
+                                                            colors = ButtonDefaults.buttonColors(containerColor = teal),
+                                                            modifier = Modifier.testTag("draft_confirm_button")
+                                                        ) {
+                                                            Text("Confirm", fontSize = 13.sp, color = Color.White)
+                                                        }
+                                                        TextButton(
+                                                            onClick = onDiscardDraft,
+                                                            modifier = Modifier.testTag("draft_discard_button")
+                                                        ) {
+                                                            Text("Discard", fontSize = 13.sp, color = muted)
+                                                        }
+                                                    }
+                                                } else {
                                                 Text(
                                                     text = when (draft.kind) {
                                                         DraftKind.TASK -> "Due: ${draftDateTimeFormat.format(draft.startEpochMillis)} • Priority: ${draft.priority.name.lowercase().replaceFirstChar { it.uppercase() }}"
                                                         DraftKind.REMINDER -> "Reminder: ${draftDateTimeFormat.format(draft.startEpochMillis)}"
                                                         DraftKind.SCHEDULE -> "${draftDateTimeFormat.format(draft.startEpochMillis)} – ${timeFormat.format(draft.endEpochMillis ?: draft.startEpochMillis)} • ${draft.scheduleLocation ?: "Google Meet"}"
                                                         DraftKind.FOCUS_EVENT -> "${draftDateTimeFormat.format(draft.startEpochMillis)} – ${timeFormat.format(draft.endEpochMillis ?: draft.startEpochMillis)} • ${draft.focusDurationMinutes} min"
+                                                        // Unreachable: a split renders in the
+                                                        // branch above, never this subtitle.
+                                                        DraftKind.SUBTASK_SPLIT -> ""
                                                     },
                                                     style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
                                                     color = muted
@@ -531,6 +607,7 @@ fun ChatScreen(
                                                     ) {
                                                         Text("Discard", fontSize = 13.sp, color = muted)
                                                     }
+                                                }
                                                 }
                                             }
                                         }

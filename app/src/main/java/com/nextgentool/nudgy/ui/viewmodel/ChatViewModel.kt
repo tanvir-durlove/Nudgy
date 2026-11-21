@@ -12,11 +12,15 @@ import com.nextgentool.nudgy.ai.BrainDumpSplitter
 import com.nextgentool.nudgy.ai.ChatDraft
 import com.nextgentool.nudgy.ai.ClientIntentPreFilter
 import com.nextgentool.nudgy.ai.ChatGuardrails
+import com.nextgentool.nudgy.ai.DraftKind
 import com.nextgentool.nudgy.ai.LlmConfigProvider
 import com.nextgentool.nudgy.ai.LlmFallbackHandler
 import com.nextgentool.nudgy.ai.LlmFallbackResult
 import com.nextgentool.nudgy.ai.PreFilterResult
 import com.nextgentool.nudgy.ai.ReplySoundPlayer
+import com.nextgentool.nudgy.ai.SplitCommand
+import com.nextgentool.nudgy.ai.SplitCommandParser
+import com.nextgentool.nudgy.ai.SplitParent
 import com.nextgentool.nudgy.ai.VoiceInput
 import com.nextgentool.nudgy.ai.VoiceInputError
 import com.nextgentool.nudgy.auth.AuthManager
@@ -116,6 +120,28 @@ import javax.inject.Inject
  * pendingClarification in the prefilter). Sending a NEW message
  * abandons the pending draft: a stale draft must never be
  * confirmable after the user moved on.
+ *
+ * Sprint 3-5 (feature 20) — break a big task into subtasks. A split
+ * command ("break this down" / "এই টাস্কটা ভেঙে দাও", optionally with
+ * a title) is detected LOCALLY by [SplitCommandParser] before the
+ * prefilter runs — the prefilter has no split branch, and the target
+ * task must be resolved before the LLM is called (the split needs a
+ * parent to attach to). Target resolution is local too: an exact
+ * title match among the user's top-level tasks (one match → split;
+ * none → "couldn't find"; several → list them and ask); a bare
+ * "break this down" with no title asks which task — never a guess.
+ * The split itself runs through [LlmFallbackHandler.handleSplit]
+ * (the S3-3 cap chain + central gate, unchanged): a validated
+ * `split_task` becomes a SUBTASK_SPLIT draft on the SAME preview
+ * card as any other draft — only [confirmDraft] writes, through
+ * [ClientIntentPreFilter.confirmDraft] → createSubtask per title.
+ * A subtask can never be split (one level only): the title match
+ * excludes subtasks, [startSplit] refuses a subtask id, and
+ * confirmDraft re-checks — three backstops. LLM unavailable →
+ * the handler's plain message + the manual path (detail sheet →
+ * "Add subtask"), no turn spent. The detail sheet's "Break down"
+ * button calls [startSplit] with the open task's id and navigates
+ * here; the split starts at once, no typing needed.
  *
  * Sound (§4.4): every assistant reply plays the short notification
  * sound ([ReplySoundPlayer]). [speak] is NEVER called from the chat
@@ -301,48 +327,19 @@ class ChatViewModel @Inject constructor(
                         val historyBefore = messages.value.takeLast(6)
                             .map { it.text to it.senderIsUser }
                         addMessage(senderIsUser = true, text = trimmed)
-                        val result = runCatching {
-                            val today = startOfDayMillis(System.currentTimeMillis())
-                            val todayTasks = taskRepository.getAllTasksOnce(userId)
-                                .filter { it.dueDateEpochMillis in today..endOfDayMillis(today) }
-                            val events = calendarRepository
-                                .observeEventsForDay(userId, today).first()
-                            preFilter.tryHandle(userId, trimmed, todayTasks, events)
-                        }.getOrNull()
-                        when (result) {
-                            // S3-2: a creation parsed but NOT saved — the
-                            // draft waits for Confirm / Edit / Discard.
-                            is PreFilterResult.PendingDraft -> {
-                                _pendingDraft.value = result.draft
-                                val messageId = postAssistantMessage(
-                                    text = result.previewText,
-                                    actionType = ChatActionType.DRAFT_PREVIEW,
-                                    quickSuggestions = result.quickSuggestions
-                                )
-                                _pendingDraftMessageId.value = messageId
-                            }
-                            is PreFilterResult.Handled -> postAssistantMessage(
-                                text = result.responseText,
-                                actionType = result.actionType,
-                                task = result.createdTask,
-                                event = result.createdEvent,
-                                focusStartMillis = result.focusStartMillis,
-                                focusEndMillis = result.focusEndMillis,
-                                focusDurationMinutes = result.focusDurationMinutes,
-                                quickSuggestions = result.quickSuggestions
-                            )
-                            // Unhandled (small talk, questions, anything
-                            // the local rules cannot parse) → the LLM
-                            // fallback (S3-3): cap chain → Gemini →
-                            // validated draft or plain-text reply.
-                            is PreFilterResult.Unhandled ->
-                                handleLlmFallback(trimmed, historyBefore)
-                            // The prefilter itself failed: the old
-                            // behaviour — a local fallback answer, no
-                            // LLM call, no turn spent.
-                            null -> postAssistantMessage(
-                                llmFallbackHandler.localFallbackReply(trimmed)
-                            )
+                        // Sprint 3-5 — a split command is detected
+                        // locally and never reaches the prefilter (it
+                        // has no split branch): the target task is
+                        // resolved first, then the LLM splits it. A
+                        // pending clarification wins over the split
+                        // check — the user's words may be its answer.
+                        val splitCommand =
+                            if (preFilter.hasPendingClarification()) null
+                            else SplitCommandParser.parse(trimmed)
+                        if (splitCommand != null) {
+                            handleSplitCommand(splitCommand, trimmed, historyBefore)
+                        } else {
+                            handlePrefilterMessage(trimmed, historyBefore)
                         }
                     }
                 }
@@ -359,6 +356,231 @@ class ChatViewModel @Inject constructor(
                 // snapshot (and the rewarded offer) must not go stale.
                 refreshCapState()
             }
+        }
+    }
+
+    /**
+     * The prefilter half of a send (extracted from [sendMessage] for
+     * the Sprint 3-5 split branch — behaviour unchanged): the local
+     * parse first; a creation waits as a pending draft, a handled
+     * command answers at once, Unhandled goes to the LLM fallback.
+     */
+    private suspend fun handlePrefilterMessage(
+        trimmed: String,
+        historyBefore: List<Pair<String, Boolean>>
+    ) {
+        val result = runCatching {
+            val today = startOfDayMillis(System.currentTimeMillis())
+            val todayTasks = taskRepository.getAllTasksOnce(userId)
+                .filter { it.dueDateEpochMillis in today..endOfDayMillis(today) }
+            val events = calendarRepository
+                .observeEventsForDay(userId, today).first()
+            preFilter.tryHandle(userId, trimmed, todayTasks, events)
+        }.getOrNull()
+        when (result) {
+            // S3-2: a creation parsed but NOT saved — the draft waits
+            // for Confirm / Edit / Discard.
+            is PreFilterResult.PendingDraft -> {
+                _pendingDraft.value = result.draft
+                val messageId = postAssistantMessage(
+                    text = result.previewText,
+                    actionType = ChatActionType.DRAFT_PREVIEW,
+                    quickSuggestions = result.quickSuggestions
+                )
+                _pendingDraftMessageId.value = messageId
+            }
+            is PreFilterResult.Handled -> postAssistantMessage(
+                text = result.responseText,
+                actionType = result.actionType,
+                task = result.createdTask,
+                event = result.createdEvent,
+                focusStartMillis = result.focusStartMillis,
+                focusEndMillis = result.focusEndMillis,
+                focusDurationMinutes = result.focusDurationMinutes,
+                quickSuggestions = result.quickSuggestions
+            )
+            // Unhandled (small talk, questions, anything the local
+            // rules cannot parse) → the LLM fallback (S3-3): cap chain
+            // → Gemini → validated draft or plain-text reply.
+            is PreFilterResult.Unhandled ->
+                handleLlmFallback(trimmed, historyBefore)
+            // The prefilter itself failed: the old behaviour — a local
+            // fallback answer, no LLM call, no turn spent.
+            null -> postAssistantMessage(
+                llmFallbackHandler.localFallbackReply(trimmed)
+            )
+        }
+    }
+
+    /**
+     * Sprint 3-5 — a typed split command. The target is resolved
+     * LOCALLY (no LLM call, no turn) before anything is split:
+     * - a named title: exactly one top-level match → split it; none →
+     *   "couldn't find"; several → list them and ask which one.
+     * - no title ("break this down"): ask which task — never guess.
+     * - a title that only matches subtasks → the one-level refusal
+     *   (a subtask has no subtasks of its own).
+     * Nothing is created here — [runSplitFor] only ever produces a
+     * preview draft, and only Confirm saves it.
+     */
+    private suspend fun handleSplitCommand(
+        split: SplitCommand,
+        prompt: String,
+        historyBefore: List<Pair<String, Boolean>>
+    ) {
+        val isBengali = prompt.any { it in '\u0980'..'\u09FF' }
+        val title = split.targetTitle
+        if (title == null) {
+            postAssistantMessage(
+                if (isBengali) "কোন টাস্কটা ভেঙে দেব? টাইটেলসহ বলো — যেমন \"পার্টির আয়োজনটা ভেঙে দাও\"।"
+                else "Which task should I break down? Say it with the title — e.g. \"break down Plan party\"."
+            )
+            return
+        }
+        val allTasks = runCatching { taskRepository.getAllTasksOnce(userId) }
+            .getOrDefault(emptyList())
+        val topLevel = allTasks.filter {
+            it.parentTaskId == null && !it.isCompleted &&
+                it.title.contains(title, ignoreCase = true)
+        }
+        when {
+            topLevel.size == 1 -> runSplitFor(topLevel.single(), prompt, historyBefore)
+            topLevel.size > 1 -> {
+                val listed = topLevel.take(5).joinToString("\n") { "• ${it.title}" }
+                postAssistantMessage(
+                    if (isBengali) {
+                        "\"${title}\" নামে ${topLevel.size}টা টাস্ক পেয়েছি:\n$listed\nকোনটা ভেঙে দেব?"
+                    } else {
+                        "I found ${topLevel.size} tasks matching \"$title\":\n$listed\nWhich one should I break down?"
+                    }
+                )
+            }
+            else -> {
+                val subtaskMatch = allTasks.any {
+                    it.parentTaskId != null && it.title.contains(title, ignoreCase = true)
+                }
+                postAssistantMessage(
+                    when {
+                        subtaskMatch -> if (isBengali) {
+                            "\"${title}\" নিজেই একটা subtask — subtask-কে আর ভাগ করা যায় না।"
+                        } else {
+                            "\"$title\" is already a subtask — subtasks can't be split further."
+                        }
+                        else -> if (isBengali) {
+                            "\"${title}\" নামে কোনো টাস্ক পেলাম না — টাইটেলটা ঠিক করে আবার বলো।"
+                        } else {
+                            "I couldn't find a task called \"$title\" — check the title and try again."
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    /**
+     * Sprint 3-5 — the LLM split for a KNOWN parent (from a typed
+     * command or the detail sheet). The thinking phase shows while the
+     * cap chain / Gemini call runs; a validated split becomes the SAME
+     * pending draft any other creation produces (preview card →
+     * Confirm / Discard / per-item remove); a reply or a capped
+     * answer is posted as a plain assistant message. The DB is never
+     * touched here — only [confirmDraft] writes.
+     */
+    private suspend fun runSplitFor(
+        parent: TaskEntity,
+        prompt: String,
+        historyBefore: List<Pair<String, Boolean>>
+    ) {
+        val isBengali = prompt.any { it in '\u0980'..'\u09FF' }
+            || parent.title.any { it in '\u0980'..'\u09FF' }
+        _thinkingText.value = if (isBengali) "ভাবছি…" else "Thinking…"
+        val memories = runCatching {
+            memoryRepository.getMemories(userId).map { it.content }
+        }.getOrDefault(emptyList())
+        when (val llm = llmFallbackHandler.handleSplit(
+            userId = userId,
+            parent = SplitParent(parent.id, parent.title, parent.dueDateEpochMillis),
+            prompt = prompt,
+            recentHistory = historyBefore,
+            userMemories = memories
+        )) {
+            is LlmFallbackResult.Reply -> postAssistantMessage(llm.text)
+            is LlmFallbackResult.Capped -> postAssistantMessage(llm.text)
+            is LlmFallbackResult.Draft -> {
+                _pendingDraft.value = llm.draft
+                val messageId = postAssistantMessage(
+                    text = llm.previewText,
+                    actionType = ChatActionType.DRAFT_PREVIEW
+                )
+                _pendingDraftMessageId.value = messageId
+            }
+        }
+    }
+
+    /**
+     * Sprint 3-5 — the detail sheet's "Break down" button. The split
+     * starts at once for the open task (no typing needed) and the
+     * caller navigates here, where the preview card appears. A second
+     * tap while a split is running is a no-op (same C1 backstop as a
+     * send while thinking). A missing task or a subtask id answers
+     * with a plain message — no LLM call, no turn.
+     */
+    fun startSplit(taskId: String) {
+        if (_isThinking.value) return
+        viewModelScope.launch {
+            _isThinking.value = true
+            try {
+                val parent = runCatching { taskRepository.getTaskById(taskId) }.getOrNull()
+                when {
+                    parent == null -> postAssistantMessage(
+                        "I couldn't find that task anymore."
+                    )
+                    parent.parentTaskId != null -> postAssistantMessage(
+                        if (parent.title.any { it in '\u0980'..'\u09FF' }) {
+                            "এটা নিজেই একটা subtask — subtask-কে আর ভাগ করা যায় না।"
+                        } else {
+                            "That's already a subtask — subtasks can't be split further."
+                        }
+                    )
+                    else -> {
+                        val historyBefore = messages.value.takeLast(6)
+                            .map { it.text to it.senderIsUser }
+                        runSplitFor(parent, "Break down \"${parent.title}\"", historyBefore)
+                    }
+                }
+            } catch (e: Exception) {
+                runCatching { postAssistantMessage("Something went wrong — please try again.") }
+            } finally {
+                _isThinking.value = false
+                _thinkingText.value = "Nudgy is thinking..."
+                refreshCapState()
+            }
+        }
+    }
+
+    /**
+     * Sprint 3-5 — per-item remove on the split preview card: drops
+     * one subtask before Confirm (the brain-dump card's Q9 pattern,
+     * on the single pending draft). Removing the last item clears the
+     * card and posts the same note as Discard — nothing was created.
+     * A remove with no split draft pending is a no-op.
+     */
+    fun removeSplitSubtask(index: Int) {
+        val draft = _pendingDraft.value ?: return
+        if (draft.kind != DraftKind.SUBTASK_SPLIT) return
+        if (index !in draft.subtaskTitles.indices) return
+        val remaining = draft.subtaskTitles.toMutableList().also { it.removeAt(index) }
+        if (remaining.isEmpty()) {
+            _pendingDraft.value = null
+            _pendingDraftMessageId.value = null
+            viewModelScope.launch {
+                postAssistantMessage(
+                    if (draft.isBengali) "ঠিক আছে, কিছু তৈরি করিনি — ড্রাফটটা বাতিল করেছি।"
+                    else "No problem — I discarded the draft, nothing was created."
+                )
+            }
+        } else {
+            _pendingDraft.value = draft.copy(subtaskTitles = remaining)
         }
     }
 

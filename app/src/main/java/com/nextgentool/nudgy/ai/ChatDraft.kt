@@ -23,8 +23,15 @@ import com.nextgentool.nudgy.data.model.TaskCategory
  *   the old immediate-save path passed to createTask).
  * - [conflictingTitle]: read-only conflict found at draft time
  *   (SCHEDULE only); confirmDraft re-checks it fresh.
+ * - SUBTASK_SPLIT (Sprint 3-5, feature 20): [parentTaskId] is the task
+ *   being broken down, [subtaskTitles] the LLM's split (each becomes a
+ *   subtask via [TaskRepository.createSubtask] on Confirm). [title] is
+ *   the parent's title, [startEpochMillis] the parent's due (the card
+ *   renders the subtask list, never a time). A split draft is never
+ *   time-edited: the preview card offers Confirm / Discard / per-item
+ *   remove, no Edit.
  */
-enum class DraftKind { TASK, SCHEDULE, REMINDER, FOCUS_EVENT }
+enum class DraftKind { TASK, SCHEDULE, REMINDER, FOCUS_EVENT, SUBTASK_SPLIT }
 
 data class ChatDraft(
     val kind: DraftKind,
@@ -39,7 +46,9 @@ data class ChatDraft(
     val scheduleType: String = "MEETING",
     val isBengali: Boolean = false,
     val conflictingTitle: String? = null,
-    val focusDurationMinutes: Int = 45
+    val focusDurationMinutes: Int = 45,
+    val parentTaskId: String? = null,
+    val subtaskTitles: List<String> = emptyList()
 ) {
     fun withTitle(newTitle: String): ChatDraft = copy(title = newTitle)
 

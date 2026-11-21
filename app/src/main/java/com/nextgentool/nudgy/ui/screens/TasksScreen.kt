@@ -93,7 +93,10 @@ import java.util.Locale
 fun TasksScreen(
     viewModel: TasksViewModel = hiltViewModel(),
     onBackClick: () -> Unit = {},
-    onNavigateToTemplates: () -> Unit = {}
+    onNavigateToTemplates: () -> Unit = {},
+    // Sprint 3-5 — break the open task down (feature 20): the detail
+    // sheet's button hands the task id to the chat's startSplit.
+    onSplitTask: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showSaveViewDialog by remember { mutableStateOf(false) }
@@ -384,6 +387,8 @@ fun TasksScreen(
             onToggleSubtask = { viewModel.toggleSubtask(it) },
             onDeleteSubtask = { viewModel.deleteSubtask(it) },
             onDismiss = { viewModel.dismissDetail() },
+            // Sprint 3-5 — the detail sheet's "Break down" button.
+            onSplitTask = onSplitTask,
             attachments = attachments,
             attachmentError = attachmentError,
             onAddAttachment = {

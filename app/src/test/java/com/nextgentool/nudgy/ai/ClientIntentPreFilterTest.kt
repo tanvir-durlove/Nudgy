@@ -406,4 +406,50 @@ class ClientIntentPreFilterTest {
         assertEquals("Call Tasnim about the launch", handled.createdTask!!.title)
         assertEquals(18, hourOf(handled.createdTask.dueDateEpochMillis))
     }
+
+    // ---- Sprint 3-5 — the SUBTASK_SPLIT confirm backstop (feature 20) ----
+
+    @Test
+    fun `confirmDraft of a split draft under a subtask creates nothing`() = runTest {
+        val parent = tasks.createTask(
+            userId = "test-user",
+            title = "Plan Diwali party",
+            dueEpochMillis = System.currentTimeMillis() + 86_400_000L
+        )
+        val subtask = tasks.createSubtask(parent.id, "Buy flour")
+        // A stale or hostile draft naming a subtask as the parent: the
+        // one-level rule is enforced HERE, not only in the ViewModel.
+        val draft = ChatDraft(
+            kind = DraftKind.SUBTASK_SPLIT,
+            title = subtask.title,
+            startEpochMillis = System.currentTimeMillis(),
+            parentTaskId = subtask.id,
+            subtaskTitles = listOf("Weigh the flour", "Sift it")
+        )
+        val confirmed = preFilter.confirmDraft("test-user", draft)
+        val handled = confirmed as PreFilterResult.Handled
+        assertTrue(handled.responseText.contains("already a subtask"))
+        assertTrue(tasks.observeSubtasks(subtask.id).first().isEmpty())
+        assertEquals(1, tasks.observeSubtasks(parent.id).first().size)
+    }
+
+    @Test
+    fun `confirmDraft of a split draft with no titles creates nothing`() = runTest {
+        val parent = tasks.createTask(
+            userId = "test-user",
+            title = "Plan Diwali party",
+            dueEpochMillis = System.currentTimeMillis() + 86_400_000L
+        )
+        val draft = ChatDraft(
+            kind = DraftKind.SUBTASK_SPLIT,
+            title = parent.title,
+            startEpochMillis = System.currentTimeMillis(),
+            parentTaskId = parent.id,
+            subtaskTitles = emptyList()
+        )
+        val confirmed = preFilter.confirmDraft("test-user", draft)
+        val handled = confirmed as PreFilterResult.Handled
+        assertTrue(handled.responseText.contains("couldn't split"))
+        assertTrue(tasks.observeSubtasks(parent.id).first().isEmpty())
+    }
 }

@@ -9,6 +9,7 @@ import com.nextgentool.nudgy.ads.ChatTurnCap
 import com.nextgentool.nudgy.ads.RewardedAdGateway
 import com.nextgentool.nudgy.ai.BrainDumpSession
 import com.nextgentool.nudgy.ai.ClientIntentPreFilter
+import com.nextgentool.nudgy.ai.DraftKind
 import com.nextgentool.nudgy.ai.GeminiClient
 import com.nextgentool.nudgy.ai.LlmConfig
 import com.nextgentool.nudgy.ai.LlmConfigProvider
@@ -950,6 +951,282 @@ class ChatViewModelTest {
             // Retry goes through the gateway, not the SDK.
             viewModel.retryRewardedAd()
             assertEquals(1, fakeRewarded.retryCalls)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    // ---- Sprint 3-5 — subtask split (feature 20) ----
+
+    private val splitJson =
+        """{"action": "split_task", "subtasks": [{"title": "Buy flour"}, {"title": "Mix the dough"}, {"title": "Bake for 30 minutes"}], "tasks": [], "events": [], "reply": "Here is how I'd break it down."}"""
+
+    private suspend fun createParentTask(title: String) =
+        taskRepository.createTask(
+            userId = userId,
+            title = title,
+            dueEpochMillis = System.currentTimeMillis() + 86_400_000L
+        )
+
+    @Test
+    fun `split by title with BYOK drafts subtasks and confirm creates them and updates progress`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            setByokKey()
+            recordingGemini.restResponse = splitJson
+            val parent = createParentTask("Plan Diwali party")
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("break down Plan Diwali party")
+            val messages = viewModel.messages.first { it.size == 3 }
+            assertEquals(ChatActionType.DRAFT_PREVIEW, messages[2].actionType)
+            assertEquals("Here is how I'd break it down.", messages[2].text)
+            val draft = viewModel.pendingDraft.value
+            assertNotNull(draft)
+            assertEquals(DraftKind.SUBTASK_SPLIT, draft!!.kind)
+            assertEquals("Plan Diwali party", draft.title)
+            assertEquals(parent.id, draft.parentTaskId)
+            assertEquals(
+                listOf("Buy flour", "Mix the dough", "Bake for 30 minutes"),
+                draft.subtaskTitles
+            )
+            // Nothing is in the DB yet — the preview is only a question.
+            assertTrue(taskRepository.observeSubtasks(parent.id).first().isEmpty())
+            assertEquals(0 to 0, taskRepository.subtaskProgress(parent.id))
+            assertEquals(1, recordingGemini.restCalls)
+            assertEquals(0, recordingGemini.aiLogicCalls)
+            assertEquals(1, freeTurnsUsed())
+            // Confirm creates the subtasks and posts the receipt.
+            viewModel.confirmDraft()
+            val afterConfirm = viewModel.messages.first { it.size == 4 }
+            assertTrue(afterConfirm[3].text.contains("Buy flour"))
+            assertNull(viewModel.pendingDraft.value)
+            val subtasks = taskRepository.observeSubtasks(parent.id).first()
+            assertEquals(3, subtasks.size)
+            assertEquals(
+                listOf("Buy flour", "Mix the dough", "Bake for 30 minutes"),
+                subtasks.map { it.title }
+            )
+            assertTrue(subtasks.all { it.parentTaskId == parent.id })
+            // The detail sheet's progress label reads this: 0 done of 3.
+            assertEquals(0 to 3, taskRepository.subtaskProgress(parent.id))
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `split by title with no BYOK names the manual path and creates nothing`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val parent = createParentTask("Plan Diwali party")
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("break down Plan Diwali party")
+            val messages = viewModel.messages.first { it.size == 3 }
+            assertTrue(messages[2].text.contains("detail sheet"))
+            assertNull(viewModel.pendingDraft.value)
+            assertTrue(taskRepository.observeSubtasks(parent.id).first().isEmpty())
+            assertEquals(0, freeTurnsUsed())
+            assertEquals(0, recordingGemini.restCalls)
+            assertEquals(0, recordingGemini.aiLogicCalls)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `split with an unknown title asks nothing of the LLM`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            setByokKey()
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("break down Plan Diwali party")
+            val messages = viewModel.messages.first { it.size == 3 }
+            assertTrue(messages[2].text.contains("couldn't find"))
+            assertNull(viewModel.pendingDraft.value)
+            assertEquals(0, recordingGemini.restCalls)
+            assertEquals(0, freeTurnsUsed())
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `split with an ambiguous title lists the matches and calls no LLM`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            setByokKey()
+            createParentTask("Plan Diwali party")
+            createParentTask("Plan Diwali decorations")
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("break down Plan Diwali")
+            val messages = viewModel.messages.first { it.size == 3 }
+            assertTrue(messages[2].text.contains("Plan Diwali party"))
+            assertTrue(messages[2].text.contains("Plan Diwali decorations"))
+            assertNull(viewModel.pendingDraft.value)
+            assertEquals(0, recordingGemini.restCalls)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `bare break this down asks which task and calls no LLM`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            setByokKey()
+            createParentTask("Plan Diwali party")
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("break this down")
+            val messages = viewModel.messages.first { it.size == 3 }
+            assertTrue(messages[2].text.contains("Which task"))
+            assertNull(viewModel.pendingDraft.value)
+            assertEquals(0, recordingGemini.restCalls)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `split from the detail sheet starts at once for the selected task`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            setByokKey()
+            recordingGemini.restResponse = splitJson
+            val parent = createParentTask("Plan Diwali party")
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            // No typed message: the sheet's button starts the split.
+            viewModel.startSplit(parent.id)
+            val messages = viewModel.messages.first { it.size == 2 }
+            assertEquals(ChatActionType.DRAFT_PREVIEW, messages[1].actionType)
+            val draft = viewModel.pendingDraft.value
+            assertNotNull(draft)
+            assertEquals(DraftKind.SUBTASK_SPLIT, draft!!.kind)
+            assertEquals(parent.id, draft.parentTaskId)
+            assertEquals(3, draft.subtaskTitles.size)
+            // Confirm creates the subtasks, as from a typed command.
+            viewModel.confirmDraft()
+            viewModel.messages.first { it.size == 3 }
+            assertEquals(3, taskRepository.observeSubtasks(parent.id).first().size)
+            assertEquals(0 to 3, taskRepository.subtaskProgress(parent.id))
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `split of a subtask is refused with no LLM call`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            setByokKey()
+            recordingGemini.restResponse = splitJson
+            val parent = createParentTask("Plan Diwali party")
+            val subtask = taskRepository.createSubtask(parent.id, "Buy flour")
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            // From the detail sheet: a subtask id is refused outright.
+            viewModel.startSplit(subtask.id)
+            val messages = viewModel.messages.first { it.size == 2 }
+            assertTrue(messages[1].text.contains("already a subtask"))
+            assertNull(viewModel.pendingDraft.value)
+            assertEquals(0, recordingGemini.restCalls)
+            // Typed, by the subtask's title: the same refusal.
+            viewModel.sendMessage("break down Buy flour")
+            val typed = viewModel.messages.first { it.size == 4 }
+            assertTrue(typed[3].text.contains("already a subtask"))
+            assertNull(viewModel.pendingDraft.value)
+            assertEquals(0, recordingGemini.restCalls)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `split with invalid split JSON answers in plain text and creates nothing`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            setByokKey()
+            recordingGemini.restResponse =
+                """{"action": "split_task", "subtasks": [{"title": "Buy flour"}, {"title": ""}], "reply": "I tried to split it."}"""
+            val parent = createParentTask("Plan Diwali party")
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("break down Plan Diwali party")
+            val messages = viewModel.messages.first { it.size == 3 }
+            assertEquals("I tried to split it.", messages[2].text)
+            assertNull(viewModel.pendingDraft.value)
+            assertTrue(taskRepository.observeSubtasks(parent.id).first().isEmpty())
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `removeSplitSubtask drops one item and the last removal clears the draft`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            setByokKey()
+            recordingGemini.restResponse = splitJson
+            createParentTask("Plan Diwali party")
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("break down Plan Diwali party")
+            viewModel.messages.first { it.size == 3 }
+            assertEquals(3, viewModel.pendingDraft.value!!.subtaskTitles.size)
+            viewModel.removeSplitSubtask(0)
+            assertEquals(
+                listOf("Mix the dough", "Bake for 30 minutes"),
+                viewModel.pendingDraft.value!!.subtaskTitles
+            )
+            viewModel.removeSplitSubtask(0)
+            viewModel.removeSplitSubtask(0)
+            assertNull(viewModel.pendingDraft.value)
+            // The empty-card note says nothing was created.
+            val messages = viewModel.messages.first { it.size == 4 }
+            assertTrue(messages[3].text.contains("nothing was created"))
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `bengali split command drafts bengali subtasks`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            setByokKey()
+            recordingGemini.restResponse =
+                """{"action": "split_task", "subtasks": [{"title": "ময়দা কেনা"}, {"title": "ময়দা মাখা"}], "tasks": [], "events": [], "reply": "এভাবে ভাগ করেছি।"}"""
+            val parent = createParentTask("পার্টির আয়োজন")
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("পার্টির আয়োজনটা ভেঙে দাও")
+            val messages = viewModel.messages.first { it.size == 3 }
+            assertEquals(ChatActionType.DRAFT_PREVIEW, messages[2].actionType)
+            val draft = viewModel.pendingDraft.value
+            assertNotNull(draft)
+            assertEquals(DraftKind.SUBTASK_SPLIT, draft!!.kind)
+            assertEquals(parent.id, draft.parentTaskId)
+            assertEquals(listOf("ময়দা কেনা", "ময়দা মাখা"), draft.subtaskTitles)
+            viewModel.confirmDraft()
+            viewModel.messages.first { it.size == 4 }
+            val subtasks = taskRepository.observeSubtasks(parent.id).first()
+            assertEquals(listOf("ময়দা কেনা", "ময়দা মাখা"), subtasks.map { it.title })
+            assertEquals(0 to 2, taskRepository.subtaskProgress(parent.id))
         } finally {
             Dispatchers.resetMain()
         }
