@@ -51,6 +51,9 @@ import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.domain.model.TaskTemplate
 import com.nextgentool.nudgy.domain.model.TemplateDraft
 import com.nextgentool.nudgy.ui.components.NudgyDatePickerDialog
+import com.nextgentool.nudgy.ui.theme.NudgyAccent
+import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
+import com.nextgentool.nudgy.ui.theme.NudgyMuted
 import com.nextgentool.nudgy.ui.theme.NudgyTokens
 import com.nextgentool.nudgy.ui.viewmodel.TemplatesViewModel
 import kotlinx.coroutines.launch
@@ -121,7 +124,7 @@ fun TemplatesScreen(
                     Text(
                         text = "No templates yet. Tap + to create one.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = colorResource(R.color.nudgy_muted)
+                        color = NudgyMuted
                     )
                 }
             }
@@ -257,20 +260,20 @@ private fun TemplateCard(
                     Text(
                         text = template.name,
                         style = MaterialTheme.typography.titleMedium,
-                        color = colorResource(R.color.nudgy_ink)
+                        color = NudgyCharcoal
                     )
                     Text(
                         text = "${template.drafts.size} tasks · " +
                             formatTotalMinutes(template.totalEstimatedMinutes),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = colorResource(R.color.nudgy_muted)
+                        color = NudgyMuted
                     )
                 }
                 if (template.isBuiltIn) {
                     Text(
                         text = "Built-in",
                         style = MaterialTheme.typography.bodySmall,
-                        color = colorResource(R.color.nudgy_teal)
+                        color = NudgyAccent
                     )
                 } else {
                     IconButton(onClick = onEdit) {
@@ -287,14 +290,14 @@ private fun TemplateCard(
                     Text(
                         text = "• ${draft.title}",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = colorResource(R.color.nudgy_ink),
+                        color = NudgyCharcoal,
                         modifier = Modifier.weight(1f)
                     )
                     draft.estimatedMinutes?.let {
                         Text(
                             text = formatTotalMinutes(it),
                             style = MaterialTheme.typography.bodySmall,
-                            color = colorResource(R.color.nudgy_muted)
+                            color = NudgyMuted
                         )
                     }
                 }
@@ -401,9 +404,9 @@ private fun TemplateEditorDialog(
                                             Priority.LOW -> "Low"
                                         },
                                         color = if (row.priority == priority) {
-                                            colorResource(R.color.nudgy_teal)
+                                            NudgyAccent
                                         } else {
-                                            colorResource(R.color.nudgy_muted)
+                                            NudgyMuted
                                         }
                                     )
                                 }

@@ -62,6 +62,10 @@ import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.domain.formatMinutes
+import com.nextgentool.nudgy.ui.theme.NudgyAccent
+import com.nextgentool.nudgy.ui.theme.NudgyCard
+import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
+import com.nextgentool.nudgy.ui.theme.NudgyMuted
 import com.nextgentool.nudgy.ui.theme.NudgyTokens
 import com.nextgentool.nudgy.ui.viewmodel.TaskDetailState
 import java.text.SimpleDateFormat
@@ -153,7 +157,7 @@ fun TaskDetailSheet(
                 Text(
                     text = if (isGroup) "Group task" else if (isSubtask) "Subtask" else "Task details",
                     style = MaterialTheme.typography.titleLarge,
-                    color = colorResource(R.color.nudgy_ink)
+                    color = NudgyCharcoal
                 )
             }
 
@@ -162,7 +166,7 @@ fun TaskDetailSheet(
                     Text(
                         text = "Group task — editing comes in Sprint 5.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = colorResource(R.color.nudgy_muted)
+                        color = NudgyMuted
                     )
                 }
             }
@@ -196,7 +200,7 @@ fun TaskDetailSheet(
                     Text(
                         text = "Due",
                         style = MaterialTheme.typography.labelLarge,
-                        color = colorResource(R.color.nudgy_ink)
+                        color = NudgyCharcoal
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         val dueLabel = if (task.dueDateEpochMillis == TaskRepository.NO_DUE_DATE) {
@@ -208,16 +212,16 @@ fun TaskDetailSheet(
                         TextButton(
                             onClick = { showDatePicker = true },
                             enabled = !isGroup
-                        ) { Text(dueLabel, color = colorResource(R.color.nudgy_teal)) }
+                        ) { Text(dueLabel, color = NudgyAccent) }
                         if (task.dueDateEpochMillis != TaskRepository.NO_DUE_DATE) {
                             TextButton(
                                 onClick = { showTimePicker = true },
                                 enabled = !isGroup
-                            ) { Text("Change time", color = colorResource(R.color.nudgy_teal)) }
+                            ) { Text("Change time", color = NudgyAccent) }
                             TextButton(
                                 onClick = { onUpdateTask(task.copy(dueDateEpochMillis = TaskRepository.NO_DUE_DATE)) },
                                 enabled = !isGroup
-                            ) { Text("Clear", color = colorResource(R.color.nudgy_muted)) }
+                            ) { Text("Clear", color = NudgyMuted) }
                         }
                     }
                 }
@@ -280,7 +284,7 @@ fun TaskDetailSheet(
                     Text(
                         text = "Priority",
                         style = MaterialTheme.typography.labelLarge,
-                        color = colorResource(R.color.nudgy_ink)
+                        color = NudgyCharcoal
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Priority.entries.forEach { priority ->
@@ -293,7 +297,11 @@ fun TaskDetailSheet(
                                 },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = colorResource(R.color.nudgy_teal),
-                                    selectedLabelColor = colorResource(R.color.nudgy_cream)
+selectedLabelColor = colorResource(R.color.nudgy_cream),
+                                    // Unselected: explicit theme-aware colors (same
+                                    // M3-defaults trap as the task-list chips).
+                                    containerColor = NudgyCard,
+                                    labelColor = NudgyCharcoal
                                 )
                             )
                         }
@@ -307,14 +315,14 @@ fun TaskDetailSheet(
                     Text(
                         text = "Project",
                         style = MaterialTheme.typography.labelLarge,
-                        color = colorResource(R.color.nudgy_ink)
+                        color = NudgyCharcoal
                     )
                     val projectName = allProjects.firstOrNull { it.id == task.projectId }?.name
                         ?: "No project"
                     TextButton(
                         onClick = { showProjectDialog = true },
                         enabled = !isGroup
-                    ) { Text(projectName, color = colorResource(R.color.nudgy_teal)) }
+                    ) { Text(projectName, color = NudgyAccent) }
                 }
             }
 
@@ -324,14 +332,14 @@ fun TaskDetailSheet(
                     Text(
                         text = "Tags",
                         style = MaterialTheme.typography.labelLarge,
-                        color = colorResource(R.color.nudgy_ink)
+                        color = NudgyCharcoal
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (detail.tags.isEmpty()) {
                             Text(
                                 text = "No tags",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = colorResource(R.color.nudgy_muted)
+                                color = NudgyMuted
                             )
                         } else {
                             detail.tags.forEach { tag ->
@@ -344,7 +352,7 @@ fun TaskDetailSheet(
                                     Text(
                                         text = tag.name,
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = colorResource(R.color.nudgy_ink)
+                                        color = NudgyCharcoal
                                     )
                                 }
                             }
@@ -352,7 +360,7 @@ fun TaskDetailSheet(
                         TextButton(
                             onClick = { showTagDialog = true },
                             enabled = !isGroup
-                        ) { Text("Edit tags", color = colorResource(R.color.nudgy_teal)) }
+                        ) { Text("Edit tags", color = NudgyAccent) }
                     }
                 }
             }
@@ -365,7 +373,7 @@ fun TaskDetailSheet(
                             Text(
                                 text = "Subtasks (${detail.subtasks.count { it.isCompleted }}/${detail.subtasks.size})",
                                 style = MaterialTheme.typography.labelLarge,
-                                color = colorResource(R.color.nudgy_ink),
+                                color = NudgyCharcoal,
                                 modifier = Modifier.weight(1f)
                             )
                             // Sprint 3-5 — break this task down (feature
@@ -378,7 +386,7 @@ fun TaskDetailSheet(
                                 TextButton(
                                     onClick = { onSplitTask(task.id) },
                                     modifier = Modifier.testTag("split_task_button")
-                                ) { Text("Break down", color = colorResource(R.color.nudgy_teal)) }
+                                ) { Text("Break down", color = NudgyAccent) }
                             }
                         }
                         detail.subtasks.forEach { subtask ->
@@ -404,9 +412,9 @@ fun TaskDetailSheet(
                                         }
                                     ),
                                     color = if (subtask.isCompleted) {
-                                        colorResource(R.color.nudgy_muted)
+                                        NudgyMuted
                                     } else {
-                                        colorResource(R.color.nudgy_ink)
+                                        NudgyCharcoal
                                     },
                                     modifier = Modifier.weight(1f)
                                 )
@@ -415,7 +423,7 @@ fun TaskDetailSheet(
                                         Icon(
                                             imageVector = Icons.Filled.Delete,
                                             contentDescription = "Delete subtask",
-                                            tint = colorResource(R.color.nudgy_muted)
+                                            tint = NudgyMuted
                                         )
                                     }
                                 }
@@ -597,7 +605,7 @@ private fun EstimateSection(
         Text(
             text = "Estimate",
             style = MaterialTheme.typography.labelLarge,
-            color = colorResource(R.color.nudgy_ink)
+            color = NudgyCharcoal
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             EstimateQuickPick.entries.forEach { pick ->
@@ -611,7 +619,11 @@ private fun EstimateSection(
                     label = { Text(pick.label) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = colorResource(R.color.nudgy_teal),
-                        selectedLabelColor = colorResource(R.color.nudgy_cream)
+selectedLabelColor = colorResource(R.color.nudgy_cream),
+                        // Unselected: explicit theme-aware colors (same
+                        // M3-defaults trap as the task-list chips).
+                        containerColor = NudgyCard,
+                        labelColor = NudgyCharcoal
                     ),
                     modifier = Modifier.testTag("estimate_pick_${pick.minutes}")
                 )
@@ -622,7 +634,11 @@ private fun EstimateSection(
                 label = { Text("Custom") },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = colorResource(R.color.nudgy_teal),
-                    selectedLabelColor = colorResource(R.color.nudgy_cream)
+selectedLabelColor = colorResource(R.color.nudgy_cream),
+                    // Unselected: explicit theme-aware colors (same
+                    // M3-defaults trap as the task-list chips).
+                    containerColor = NudgyCard,
+                    labelColor = NudgyCharcoal
                 ),
                 modifier = Modifier.testTag("estimate_pick_custom")
             )
@@ -633,7 +649,7 @@ private fun EstimateSection(
                         onUpdateTask(task.copy(estimatedMinutes = null))
                     },
                     modifier = Modifier.testTag("estimate_clear")
-                ) { Text("Clear", color = colorResource(R.color.nudgy_muted)) }
+                ) { Text("Clear", color = NudgyMuted) }
             }
         }
         if (showCustom) {
@@ -675,7 +691,7 @@ private fun EstimateSection(
             Text(
                 text = "Estimated ${formatMinutes(estimate)}",
                 style = MaterialTheme.typography.bodyMedium,
-                color = colorResource(R.color.nudgy_muted)
+                color = NudgyMuted
             )
         }
     }
@@ -713,12 +729,12 @@ private fun ActualTimeSection(
         Text(
             text = "Actual time",
             style = MaterialTheme.typography.labelLarge,
-            color = colorResource(R.color.nudgy_ink)
+            color = NudgyCharcoal
         )
         Text(
             text = "How long it actually took — enter by hand.",
             style = MaterialTheme.typography.bodySmall,
-            color = colorResource(R.color.nudgy_muted)
+            color = NudgyMuted
         )
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -755,14 +771,14 @@ private fun ActualTimeSection(
                 TextButton(
                     onClick = { onUpdateTask(task.copy(actualMinutes = null)) },
                     modifier = Modifier.testTag("actual_minutes_clear")
-                ) { Text("Clear", color = colorResource(R.color.nudgy_muted)) }
+                ) { Text("Clear", color = NudgyMuted) }
             }
         }
         if (task.actualMinutes != null) {
             Text(
                 text = "Actually took ${formatMinutes(task.actualMinutes)}",
                 style = MaterialTheme.typography.bodyMedium,
-                color = colorResource(R.color.nudgy_muted)
+                color = NudgyMuted
             )
         }
     }
@@ -791,7 +807,7 @@ private fun AttachmentSection(
             Text(
                 text = "Attachments",
                 style = MaterialTheme.typography.labelLarge,
-                color = colorResource(R.color.nudgy_ink),
+                color = NudgyCharcoal,
                 modifier = Modifier.weight(1f)
             )
             TextButton(onClick = onAdd) {
@@ -800,14 +816,14 @@ private fun AttachmentSection(
                     contentDescription = null,
                     tint = colorResource(R.color.nudgy_teal)
                 )
-                Text("Add file", color = colorResource(R.color.nudgy_teal))
+                Text("Add file", color = NudgyAccent)
             }
         }
         if (error != null) {
             Text(
                 text = error,
                 style = MaterialTheme.typography.bodyMedium,
-                color = colorResource(R.color.nudgy_coral),
+                color = NudgyAccent,
                 modifier = Modifier.clickable { onClearError() }
             )
         }
@@ -815,7 +831,7 @@ private fun AttachmentSection(
             Text(
                 text = "No files attached yet",
                 style = MaterialTheme.typography.bodyMedium,
-                color = colorResource(R.color.nudgy_muted)
+                color = NudgyMuted
             )
         }
         attachments.forEach { attachment ->
@@ -827,19 +843,19 @@ private fun AttachmentSection(
                 Icon(
                     imageVector = Icons.Filled.AttachFile,
                     contentDescription = null,
-                    tint = colorResource(R.color.nudgy_muted)
+                    tint = NudgyMuted
                 )
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = attachment.fileName,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = colorResource(R.color.nudgy_ink),
+                        color = NudgyCharcoal,
                         maxLines = 1
                     )
                     Text(
                         text = formatFileSize(attachment.sizeBytes),
                         style = MaterialTheme.typography.bodySmall,
-                        color = colorResource(R.color.nudgy_muted)
+                        color = NudgyMuted
                     )
                 }
                 IconButton(onClick = { onOpen(attachment) }) {
@@ -853,7 +869,7 @@ private fun AttachmentSection(
                     Icon(
                         imageVector = Icons.Filled.Delete,
                         contentDescription = "Delete ${attachment.fileName}",
-                        tint = colorResource(R.color.nudgy_muted)
+                        tint = NudgyMuted
                     )
                 }
             }
@@ -945,7 +961,7 @@ fun LabelSelectorDialog(
                                 Text(
                                     text = label.name,
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = colorResource(R.color.nudgy_ink),
+                                    color = NudgyCharcoal,
                                     modifier = Modifier
                                         .weight(1f)
                                         .clickable {
@@ -958,7 +974,7 @@ fun LabelSelectorDialog(
                                 Icon(
                                     imageVector = Icons.Filled.Delete,
                                     contentDescription = "Delete ${label.name}",
-                                    tint = colorResource(R.color.nudgy_muted)
+                                    tint = NudgyMuted
                                 )
                             }
                         }
@@ -1003,7 +1019,7 @@ fun LabelSelectorDialog(
                         }
                     },
                     enabled = newName.isNotBlank()
-                ) { Text("Add", color = colorResource(R.color.nudgy_teal)) }
+                ) { Text("Add", color = NudgyAccent) }
             }
         },
         confirmButton = {

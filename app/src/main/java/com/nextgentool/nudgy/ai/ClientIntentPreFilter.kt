@@ -989,6 +989,10 @@ class ClientIntentPreFilter(
             return eventCal
         }
         return when (parsed.kind) {
+            // Unreachable for a null time token since the step-3 ask
+            // branch (SCHEDULE/REMINDER with no time asks instead) —
+            // kept as the defensive fallback for a token-less
+            // REMINDER, never a user-facing default.
             ParsedKind.REMINDER -> {
                 eventCal.set(Calendar.HOUR_OF_DAY, 15)
                 eventCal.set(Calendar.MINUTE, 0)
@@ -1872,12 +1876,15 @@ class ClientIntentPreFilter(
                         kindCertain = parsed.kindCertain
                     )
                     buildClarificationQuestion(parsed, now)
-                } else if (parsed.kind == ParsedKind.SCHEDULE && parsed.timeToken == null) {
-                    // SCHEDULE with no time at all: ask for the time
-                    // instead of silently inventing 14:00 (the 4 PM bug
-                    // — 14:00 +2h when past). A schedule without a time
-                    // is not a schedule; the TASK no-token default
-                    // (now+2h) is untouched.
+                } else if ((parsed.kind == ParsedKind.SCHEDULE || parsed.kind == ParsedKind.REMINDER) && parsed.timeToken == null) {
+                    // SCHEDULE / REMINDER with no time at all: ask for
+                    // the time instead of silently inventing one (the
+                    // 4 PM bug — 14:00 +2h when past — for SCHEDULE;
+                    // the 3 PM bug — REMINDER defaulted to 15:00 — for
+                    // REMINDER, caught on device 2026-11-21: "তাসনিমকে
+                    // কল করো" got a 3 PM card instead of a question).
+                    // A schedule/reminder without a time is not one;
+                    // the TASK no-token default (now+2h) is untouched.
                     pendingClarification = PendingClarification(
                         kind = parsed.kind, title = parsed.title,
                         dayCal = parsed.dayCal, timeToken = parsed.timeToken,

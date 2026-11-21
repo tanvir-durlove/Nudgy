@@ -23,6 +23,9 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.unit.dp
 import com.nextgentool.nudgy.R
+import com.nextgentool.nudgy.ui.theme.NudgyCanvas
+import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
+import com.nextgentool.nudgy.ui.theme.NudgyMuted
 import com.nextgentool.nudgy.ui.theme.NudgyTokens
 
 /**
@@ -39,11 +42,11 @@ private fun ShellScaffold(title: String, note: String) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorResource(R.color.nudgy_background))
+            .background(NudgyCanvas)
             .padding(NudgyTokens.screenPadding),
         verticalArrangement = Arrangement.Top
     ) {
-        Text(text = title, color = colorResource(R.color.nudgy_ink))
+        Text(text = title, color = NudgyCharcoal)
         Spacer(modifier = Modifier.height(16.dp))
         NudgySkeletonRow()
         Spacer(modifier = Modifier.height(12.dp))
@@ -51,7 +54,7 @@ private fun ShellScaffold(title: String, note: String) {
         Spacer(modifier = Modifier.height(12.dp))
         NudgySkeletonRow()
         Spacer(modifier = Modifier.height(16.dp))
-        Text(text = note, color = colorResource(R.color.nudgy_muted))
+        Text(text = note, color = NudgyMuted)
     }
 }
 

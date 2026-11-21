@@ -1,7 +1,7 @@
 {
 "version": 1,
 "source": "nudgy-chat-intent-bank-v2-clean.md",
-"count": 6516,
+"count": 6600,
 "entries": [
 {
 "intent": "TASK_CREATE",
@@ -31932,6 +31932,426 @@
 "intent": "SPLIT_TASK",
 "lang": "bn",
 "text": "প্রজেক্টটা ছোট ছোট টাস্কে ভাগ করে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই টাস্কটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই টাস্কটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই টাস্কটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই টাস্কটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই কাজটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই কাজটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই কাজটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই কাজটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই বড় টাস্কটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই বড় টাস্কটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই বড় টাস্কটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "এই বড় টাস্কটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পার্টির আয়োজনটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পার্টির আয়োজনটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পার্টির আয়োজনটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পার্টির আয়োজনটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রজেক্টটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রজেক্টটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রজেক্টটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রজেক্টটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পড়াশোনার কাজটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পড়াশোনার কাজটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পড়াশোনার কাজটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পড়াশোনার কাজটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "অফিসের কাজটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "অফিসের কাজটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "অফিসের কাজটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "অফিসের কাজটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বিয়ের আয়োজনটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বিয়ের আয়োজনটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বিয়ের আয়োজনটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বিয়ের আয়োজনটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ঘর সাজানোর কাজটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ঘর সাজানোর কাজটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ঘর সাজানোর কাজটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ঘর সাজানোর কাজটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পরীক্ষার প্রস্তুতিটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পরীক্ষার প্রস্তুতিটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পরীক্ষার প্রস্তুতিটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "পরীক্ষার প্রস্তুতিটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "রিপোর্ট লেখার কাজটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "রিপোর্ট লেখার কাজটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "রিপোর্ট লেখার কাজটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "রিপোর্ট লেখার কাজটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বাজার করার কাজটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বাজার করার কাজটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বাজার করার কাজটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বাজার করার কাজটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভ্রমণের পরিকল্পনাটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভ্রমণের পরিকল্পনাটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভ্রমণের পরিকল্পনাটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভ্রমণের পরিকল্পনাটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রেজেন্টেশনের কাজটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রেজেন্টেশনের কাজটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রেজেন্টেশনের কাজটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "প্রেজেন্টেশনের কাজটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বাড়ি বদলের কাজটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বাড়ি বদলের কাজটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বাড়ি বদলের কাজটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বাড়ি বদলের কাজটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ওয়েবসাইট বানানোর কাজটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ওয়েবসাইট বানানোর কাজটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ওয়েবসাইট বানানোর কাজটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ওয়েবসাইট বানানোর কাজটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "থিসিস লেখার কাজটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "থিসিস লেখার কাজটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "থিসিস লেখার কাজটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "থিসিস লেখার কাজটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ইন্টারভিউয়ের প্রস্তুতিটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ইন্টারভিউয়ের প্রস্তুতিটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ইন্টারভিউয়ের প্রস্তুতিটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ইন্টারভিউয়ের প্রস্তুতিটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বইটা পড়ার কাজটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বইটা পড়ার কাজটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বইটা পড়ার কাজটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "বইটা পড়ার কাজটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "অনুষ্ঠানের আয়োজনটা ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "অনুষ্ঠানের আয়োজনটা ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "অনুষ্ঠানের আয়োজনটা ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "অনুষ্ঠানের আয়োজনটা ভাঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভেংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভেঙ্গে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভাংগে দাও"
+},
+{
+"intent": "SPLIT_TASK",
+"lang": "bn",
+"text": "ভাঙ্গে দাও"
 },
 {
 "intent": "SPLIT_TASK",

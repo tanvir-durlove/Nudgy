@@ -75,6 +75,35 @@ class SplitCommandTest {
     }
 
     @Test
+    fun `bengali split verb with anusvara-plus-ga spelling parses too`() {
+        // Device feedback 2026-11-21 (ci-677) — Tanvir typed "ভেংগে
+        // দাও" (ংগ); the parser only knew "ভেঙে দাও" (ং), so the
+        // command fell through to a reminder draft. All ংগ variants
+        // of the verb are the same command.
+        assertEquals(
+            SplitCommand("তাসনিমলে কল"),
+            SplitCommandParser.parse("এই টাস্ক টাকে ভেংগে দাও তাসনিমলে কল")
+        )
+        assertEquals(SplitCommand(null), SplitCommandParser.parse("এই টাস্কটা ভেংগে দাও"))
+        assertEquals(
+            SplitCommand("পার্টির আয়োজনটা"),
+            SplitCommandParser.parse("পার্টির আয়োজনটা ভেংগে দাও")
+        )
+        assertEquals(
+            SplitCommand("পার্টির আয়োজনটা"),
+            SplitCommandParser.parse("ভেঙ্গে দাও পার্টির আয়োজনটা")
+        )
+        assertEquals(
+            SplitCommand("বাড়ির কাজটা"),
+            SplitCommandParser.parse("বাড়ির কাজটা ভাংগে দাও")
+        )
+        assertEquals(
+            SplitCommand("বাড়ির কাজটা"),
+            SplitCommandParser.parse("বাড়ির কাজটা ভাঙ্গে দাও")
+        )
+    }
+
+    @Test
     fun `non-split sentences return null`() {
         assertNull(SplitCommandParser.parse("buy milk"))
         assertNull(SplitCommandParser.parse("give me a breakdown of my day"))

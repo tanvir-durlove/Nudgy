@@ -37,6 +37,9 @@ import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.ui.theme.NudgyCard
+import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
+import com.nextgentool.nudgy.ui.theme.NudgyMuted
 import com.nextgentool.nudgy.ui.theme.NudgyTokens
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -84,7 +87,7 @@ fun QuickAddTask(
         OutlinedTextField(
             value = text,
             onValueChange = { text = it },
-            placeholder = { Text("Add task", color = colorResource(R.color.nudgy_muted)) },
+            placeholder = { Text("Add task", color = NudgyMuted) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { submit() }),
@@ -96,7 +99,7 @@ fun QuickAddTask(
                         tint = if (canCreate) {
                             colorResource(R.color.nudgy_teal)
                         } else {
-                            colorResource(R.color.nudgy_muted)
+                            NudgyMuted
                         }
                     )
                 }
@@ -166,7 +169,13 @@ fun QuickAddTask(
                                 label = { Text(priority.name.lowercase().replaceFirstChar { it.uppercase() }) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = colorResource(R.color.nudgy_teal),
-                                    selectedLabelColor = colorResource(R.color.nudgy_cream)
+                                    selectedLabelColor = colorResource(R.color.nudgy_cream),
+                                    // Unselected: explicit theme-aware
+                                    // colors (same M3-defaults trap as the
+                                    // task-list chips — light label on a
+                                    // transparent container in dark mode).
+                                    containerColor = NudgyCard,
+                                    labelColor = NudgyCharcoal
                                 )
                             )
                         }
