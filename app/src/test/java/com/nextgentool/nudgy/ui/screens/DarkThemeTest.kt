@@ -7,6 +7,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.core.graphics.ColorUtils
+import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
@@ -24,7 +25,6 @@ import com.nextgentool.nudgy.domain.usecase.WeeklyReviewUseCase
 import com.nextgentool.nudgy.ui.theme.NudgyCard
 import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
-import com.nextgentool.nudgy.ui.theme.nudgyPaletteFor
 import com.nextgentool.nudgy.ui.viewmodel.TasksViewModel
 import com.nextgentool.nudgy.ui.viewmodel.TodayViewModel
 import org.junit.After
@@ -47,17 +47,27 @@ import org.robolectric.annotation.Config
  * NudgyMuted / NudgyAccent).
  *
  * What this pins:
- *  - the dark palette's text tokens pass WCAG 4.5:1 on the dark card
- *    and canvas (pure unit test on the palette values);
- *  - the light palette's token values are the approved ones, so the
- *    swap does not move light mode;
  *  - the Today screen renders under NudgyTheme(darkTheme = true)
  *    without crashing, with the dark palette actually resolved during
  *    composition (captured from the CompositionLocal).
+ *  - the pure palette assertions (dark contrast ≥ 4.5:1, light token
+ *    values) live in DarkPaletteTest — a plain JUnit class with no
+ *    ViewModels or DB, so they can never be poisoned by a leaked
+ *    ViewModel scope again.
  *
  * What it does NOT prove (stays device-verified): the rendered
  * pixels — Robolectric semantics carry no text color, so the final
  * visual check is the device retest of the §10 checklist.
+ *
+ * TearDown ordering is load-bearing: the ViewModel scopes MUST be
+ * cleared before db.close(). TasksViewModel.init launches a Room
+ * seed in viewModelScope and both ViewModels collect Room flows via
+ * stateIn(viewModelScope); if those coroutines outlive the DB, a
+ * Room call against the closed DB throws uncaught and the
+ * coroutines-test harness reports it as UncaughtExceptionsBeforeTest
+ * on the next test (2026-11-21: the pure contrast test failed that
+ * way 3 runs in a row). ViewModelStore.clear() cancels the scopes
+ * first, so no Room work can start against a closed DB.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -70,6 +80,11 @@ class DarkThemeTest {
     private lateinit var repository: TaskRepository
     private lateinit var tasksViewModel: TasksViewModel
     private lateinit var todayViewModel: TodayViewModel
+
+    // Owns the ViewModels so tearDown can cancel their scopes
+    // (ViewModelStore.clear() -> ViewModel.onCleared() -> the
+    // viewModelScope Job is cancelled). See the class KDoc.
+    private val viewModelStore = ViewModelStore()
 
     @Before
     fun setUp() {
@@ -95,36 +110,17 @@ class DarkThemeTest {
             timelineUseCase = GetTodayTimelineUseCase(),
             weeklyReviewUseCase = WeeklyReviewUseCase()
         )
+        viewModelStore.put("tasks", tasksViewModel)
+        viewModelStore.put("today", todayViewModel)
     }
 
     @After
     fun tearDown() {
+        // Order matters: cancel the ViewModel scopes FIRST so no
+        // viewModelScope coroutine can run Room work against the
+        // DB once it is closed (see the class KDoc).
+        viewModelStore.clear()
         db.close()
-    }
-
-    @Test
-    fun `dark palette text passes contrast on dark card and canvas`() {
-        val dark = nudgyPaletteFor(true)
-        // The exact pairs the swapped call sites sit on: primary and
-        // secondary text on cards (surface), and section headers on
-        // the screen background (canvas). Small accent text (links,
-        // "Group" badges) must pass on the card too.
-        assertTrue(ColorUtils.calculateContrast(dark.charcoal.toArgb(), dark.card.toArgb()) >= 4.5)
-        assertTrue(ColorUtils.calculateContrast(dark.muted.toArgb(), dark.card.toArgb()) >= 4.5)
-        assertTrue(ColorUtils.calculateContrast(dark.accent.toArgb(), dark.card.toArgb()) >= 4.5)
-        assertTrue(ColorUtils.calculateContrast(dark.charcoal.toArgb(), dark.canvas.toArgb()) >= 4.5)
-        assertTrue(ColorUtils.calculateContrast(dark.muted.toArgb(), dark.canvas.toArgb()) >= 4.5)
-        assertTrue(ColorUtils.calculateContrast(dark.accent.toArgb(), dark.canvas.toArgb()) >= 4.5)
-    }
-
-    @Test
-    fun `light palette token values are the approved ones`() {
-        val light = nudgyPaletteFor(false)
-        assertEquals(Color(0xFF1C1B1F), light.charcoal)
-        assertEquals(Color(0xFF6F6A72), light.muted)
-        assertEquals(Color(0xFFFFFFFF), light.card)
-        assertEquals(Color(0xFFFBF9F4), light.canvas)
-        assertEquals(Color(0xFFCC3F27), light.accent)
     }
 
     @Test
