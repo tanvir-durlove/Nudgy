@@ -274,7 +274,7 @@ open class GeminiClient(private val context: Context? = null) {
         recentHistory: List<Pair<String, Boolean>>,
         modelId: String,
         systemInstruction: String,
-        maxOutputTokens: Int
+        maxTokens: Int
     ): String? {
         return try {
             val model = Firebase.ai(backend = GenerativeBackend.googleAI())
@@ -284,7 +284,7 @@ open class GeminiClient(private val context: Context? = null) {
                         temperature = 0.6f
                         // The caller sets the ceiling: 180 for plain
                         // replies, 256 for structured JSON.
-                        maxOutputTokens = maxOutputTokens
+                        maxOutputTokens = maxTokens
                     },
                     systemInstruction = content { text(systemInstruction) }
                 )
@@ -318,7 +318,7 @@ open class GeminiClient(private val context: Context? = null) {
         sanitizedModel: String,
         apiKey: String,
         systemInstruction: String,
-        maxOutputTokens: Int
+        maxTokens: Int
     ): String? {
         try {
             val primaryUrl = "https://generativelanguage.googleapis.com/v1beta/models/$sanitizedModel:generateContent?key=$apiKey"
@@ -350,7 +350,7 @@ open class GeminiClient(private val context: Context? = null) {
                 })
                 put("generationConfig", JSONObject().apply {
                     put("temperature", 0.6)
-                    put("maxOutputTokens", maxOutputTokens)
+                    put("maxOutputTokens", maxTokens)
                 })
             }
 
