@@ -287,12 +287,19 @@ class ClientIntentPreFilterTest {
 
     @Test
     fun `event fallback drafts the appointment and creates it only on confirm`() = runTest {
-        // NOTE: "Gym session tomorrow at 6am" does NOT reach step 4 —
-        // the bank matcher catches it as SCHEDULE_CREATE (step 3).
-        // "workout" has zero bank coverage in any form, so the matcher
-        // misses and the step-4 fallback fires.
+        // NOTE: reaching step 4 needs a genuine matcher MISS (score
+        // < 0.30). Short English phrases with a time token all score
+        // 0.42+ — "Gym session tomorrow at 6am" (0.46) and "Workout
+        // tomorrow at 6am" (0.45) are both caught by the bank (step 3).
+        // This Bengali phrase scores 0.27 on a faithful replica of
+        // IntentBankMatcher (TF-IDF cosine, same tokenize + nukta fold),
+        // so the matcher abstains and the step-4 fallback fires. The
+        // "gym" keeps hasActionContext true; "বিকেল" resolves "৪টায়"
+        // to 16:00 (not a bare hour). Title keeps "আগামীকাল"/"বিকেল":
+        // step 4's \b-anchored Bengali strip does not match on the JVM
+        // (Robolectric) — pre-existing quirk, not fixed here.
         val result = preFilter.tryHandle(
-            "test-user", "Workout tomorrow at 6am", emptyList(), emptyList()
+            "test-user", "আগামীকাল বিকেল ৪টায় সাঁতার কাটতে যাব gym-এ বন্ধুর সাথে", emptyList(), emptyList()
         )
         assertTrue(result is PreFilterResult.PendingDraft)
         val draft = (result as PreFilterResult.PendingDraft).draft
@@ -300,13 +307,15 @@ class ClientIntentPreFilterTest {
         // Step 4 (not step 3): an EVENT on the Personal calendar.
         assertEquals("EVENT", draft.scheduleType)
         assertEquals("Personal", draft.scheduleLocation)
-        assertEquals(6, hourOf(draft.startEpochMillis))
+        assertTrue(draft.title.contains("সাঁতার"))
+        assertEquals(16, hourOf(draft.startEpochMillis))
         val tomorrow = startOfDayMillis(System.currentTimeMillis() + 86_400_000L)
         assertTrue(calendar.observeEventsForDay("test-user", tomorrow).first().isEmpty())
         val confirmed = preFilter.confirmDraft("test-user", draft)
         val handled = confirmed as PreFilterResult.Handled
         assertNotNull(handled.createdEvent)
-        assertEquals(6, hourOf(handled.createdEvent!!.startEpochMillis))
+        assertEquals(16, hourOf(handled.createdEvent!!.startEpochMillis))
+        assertTrue(handled.createdEvent.title.contains("সাঁতার"))
     }
 
     @Test
