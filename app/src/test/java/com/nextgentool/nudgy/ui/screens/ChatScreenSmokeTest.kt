@@ -175,8 +175,8 @@ class ChatScreenSmokeTest {
         // ChatScreen.kt) — the mascot carries no semantics node to
         // assert on.
         val messages = listOf(
-            ChatMessage(id = "u1", senderIsUser = true, text = "Plan my day"),
-            ChatMessage(id = "a1", senderIsUser = false, text = "Here is your plan for today.")
+            ChatMessage(id = "u1", senderIsUser = true, text = "Water the plants at 6pm"),
+            ChatMessage(id = "a1", senderIsUser = false, text = "Done — I will remind you about the plants.")
         )
         composeRule.setContent {
             ChatScreen(
@@ -192,8 +192,11 @@ class ChatScreenSmokeTest {
                 onBlockFocusTime = { _, _, _, _ -> }
             )
         }
-        composeRule.onNodeWithText("Plan my day").assertExists()
-        composeRule.onNodeWithText("Here is your plan for today.").assertExists()
+        // Unique texts on purpose: "Plan my day" would also match the
+        // quick-prompt pill of the same words, and onNode throws on
+        // more than one match (that was the round-2 failure).
+        composeRule.onNodeWithText("Water the plants at 6pm").assertExists()
+        composeRule.onNodeWithText("Done — I will remind you about the plants.").assertExists()
         composeRule.onNodeWithText("Ask Nudgy anything...").assertExists()
         composeRule.onNodeWithContentDescription("Voice input").assertExists()
     }

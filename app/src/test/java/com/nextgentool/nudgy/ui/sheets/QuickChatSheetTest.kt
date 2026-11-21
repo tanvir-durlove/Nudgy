@@ -3,6 +3,8 @@ package com.nextgentool.nudgy.ui.sheets
 import android.content.Context
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -190,7 +192,29 @@ class QuickChatSheetTest {
     @Test
     fun `history survives leaving and re-entering the sheet`() {
         val expandCount = intArrayOf(0)
-        renderSheetOnViewModel(expandCount = expandCount)
+        // The sheet is conditionally composed on a state flag — the
+        // same shape as NudgyApp's `if (quickChatOpen)`. Toggling the
+        // flag is the leave / re-enter path; replacing the whole
+        // content with setContent { } while the sheet's popup is
+        // attached throws IllegalStateException (round-2 failure).
+        var showSheet by mutableStateOf(true)
+        composeRule.setContent {
+            if (showSheet) {
+                val messages by viewModel.messages.collectAsState()
+                val isThinking by viewModel.isThinking.collectAsState()
+                val isListening by viewModel.isListening.collectAsState()
+                QuickChatSheet(
+                    messages = messages,
+                    isThinking = isThinking,
+                    isListening = isListening,
+                    onSendMessage = { viewModel.sendMessage(it) },
+                    onExpandToFullChat = { expandCount[0]++ },
+                    onDismiss = {},
+                    onStartVoice = {},
+                    onStopVoice = {}
+                )
+            }
+        }
         waitForWelcome()
         // Send through the shared ViewModel (the real send path), then
         // the sent text is in the sheet's recent messages.
@@ -200,10 +224,11 @@ class QuickChatSheetTest {
             composeRule.onAllNodesWithText("call tasnim at 5pm")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        // Leave the sheet (content replaced) and come back on the SAME
-        // ViewModel instance — the message must still be there.
-        composeRule.setContent { }
-        renderSheetOnViewModel(expandCount = expandCount)
+        // Leave the sheet and come back on the SAME ViewModel instance
+        // — the message must still be there.
+        composeRule.runOnIdle { showSheet = false }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle { showSheet = true }
         composeRule.onNodeWithText("call tasnim at 5pm").assertExists()
     }
 }
