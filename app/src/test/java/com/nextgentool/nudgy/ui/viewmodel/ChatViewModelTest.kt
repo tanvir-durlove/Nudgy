@@ -1586,7 +1586,22 @@ class ChatViewModelTest {
             seedTask("Task one", at(0, 9))
             viewModel.messages.first { it.size == 1 } // welcome seeded
             viewModel.sendMessage("plan my day")
-            viewModel.messages.first { it.size == 3 }
+            val messages = viewModel.messages.first { it.size == 3 }
+            val drafts = viewModel.pendingPlanDrafts.value
+            if (drafts.isEmpty()) {
+                // S4-1 round 3 — the 5th late-evening flake of the
+                // class S4-0 round 3 fixed for 4 sibling tests: after
+                // 22:50 no 45-minute block ends tonight, so the plan
+                // reply is the plain "No free slot" answer, not a
+                // preview — there is nothing to discard, and
+                // discardPlan() correctly does nothing.
+                assertEquals(0, focusBlocksThatFitTonight())
+                assertEquals(ChatActionType.NONE, messages[2].actionType)
+                assertTrue(messages[2].text.contains("No free slot"))
+                assertTrue(calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first().isEmpty())
+                assertTrue(viewModel.pendingPlanDrafts.value.isEmpty())
+                return@runTest
+            }
             viewModel.discardPlan()
             val afterDiscard = viewModel.messages.first { it.size == 4 }
             assertTrue(afterDiscard[3].text.contains("didn't schedule anything"))
