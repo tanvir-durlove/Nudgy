@@ -115,6 +115,17 @@ class FocusViewModelTest {
         // PR #86 rule: cancel the ViewModel scopes (the ticker) before
         // the database closes.
         store.clear()
+        // S4-1 round 5 — the ViewModel's init coroutines (restore +
+        // refreshStats + the tasks Flow) dispatch Room work to real
+        // Dispatchers.IO threads, while the test body runs on virtual
+        // time and can return microseconds later: an init query can
+        // still be in flight when tearDown runs. Closing the DB under
+        // it throws against the closed pool, and the uncaught
+        // exception poisons the coroutines-test collector — BoardDragTest
+        // (the next TestScope) then fails with UncaughtExceptionsBeforeTest
+        // on every run (6/6, rounds 2-4). Let the real IO threads finish
+        // before closing (in-memory queries take a few ms).
+        Thread.sleep(500)
         db.close()
     }
 
