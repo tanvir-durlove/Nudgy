@@ -117,7 +117,12 @@ class ChatScreenSmokeTest {
     @Test
     fun `ChatScreen renders hero and input`() {
         setChatContent()
-        composeRule.onNodeWithText("What can I help you", substring = true).assertIsDisplayed()
+        // The hero sits at the top of the reversed LazyColumn, above
+        // the visible viewport (the list opens on the newest message)
+        // — it EXISTS but is not displayed. assertIsDisplayed would
+        // fail here even though the screen is correct (same trap as
+        // the S1-4 / S2-1 below-fold lessons): assert existence.
+        composeRule.onNodeWithText("What can I help you", substring = true).assertExists()
         composeRule.onNodeWithText("Ask Nudgy anything...").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Voice input").assertExists()
     }
