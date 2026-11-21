@@ -1,9 +1,5 @@
 package com.nextgentool.nudgy.ui.screens
 
-import android.Manifest
-import android.content.pm.PackageManager
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -34,23 +30,16 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.outlined.GraphicEq
-import androidx.compose.material.icons.outlined.Mic
-import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -62,30 +51,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
+import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.ads.ChatCapState
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
-import com.nextgentool.nudgy.ui.components.MascotMood
-import com.nextgentool.nudgy.ui.components.NudgyMascot
-import com.nextgentool.nudgy.ui.theme.NudgyAccent
-import com.nextgentool.nudgy.ui.theme.NudgyCard
-import com.nextgentool.nudgy.ui.theme.NudgyButter
-import com.nextgentool.nudgy.ui.theme.NudgyCardBorder
-import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
-import com.nextgentool.nudgy.ui.theme.NudgyLavender
-import com.nextgentool.nudgy.ui.theme.NudgyMuted
-import com.nextgentool.nudgy.ui.theme.NudgyPeach
-import com.nextgentool.nudgy.ui.theme.NudgyPrimary
-import com.nextgentool.nudgy.ui.theme.NudgySage
+import com.nextgentool.nudgy.ui.components.ChatInputBar
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -121,8 +98,8 @@ fun ChatScreen(
     isSpeaking: Boolean,
     isThinking: Boolean,
     // Thinking indicator: phase text for the thinking bubble, set by
-    // MainActivity.handleUserChat ("ভাবছি…" / "শিডিউল করছি…" /
-    // "টাস্ক তৈরি করছি…", or the English equivalents).
+    // ChatViewModel ("ভাবছি…" / "শিডিউল করছি…" / "টাস্ক তৈরি করছি…",
+    // or the English equivalents).
     thinkingText: String = "Nudgy is thinking...",
     onSendMessage: (String) -> Unit,
     onStartVoice: () -> Unit,
@@ -138,31 +115,17 @@ fun ChatScreen(
     onRetryRewardedAd: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-    var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
-            onStartVoice()
-        }
-    }
-
-    fun handleVoiceClick() {
-        if (isListening) {
-            onStopVoice()
-            return
-        }
-        val permissionCheck = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
-        if (permissionCheck == PackageManager.PERMISSION_GRANTED) {
-            onStartVoice()
-        } else {
-            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        }
-    }
+    // Sprint 3-1 — approved design tokens (brand_colors.xml, single
+    // source of truth). The v1 palette (coral-dark primary, peach /
+    // lavender / butter tints) and the mascot are gone from this
+    // screen: teal is the primary, cream the only tint, coral only a
+    // small status dot (never text — see brand_colors.xml).
+    val teal = colorResource(R.color.nudgy_teal)
+    val cream = colorResource(R.color.nudgy_cream)
+    val ink = colorResource(R.color.nudgy_ink)
+    val muted = colorResource(R.color.nudgy_muted)
 
     val quickPrompts = listOf(
         "Plan my day",
@@ -190,14 +153,18 @@ fun ChatScreen(
         listState.scrollToItem(0)
     }
 
-    val currentMascotMood = when {
-        isSpeaking -> MascotMood.TALKING
-        isListening -> MascotMood.LISTENING
-        isThinking -> MascotMood.THINKING
-        else -> MascotMood.IDLE
-    }
+    // isSpeaking is intentionally unused: the chat never speaks
+    // (§4.4 — the reply is a short notification sound, never TTS), so
+    // there is no TALKING mood and no mascot anywhere on this screen.
+    // The parameter stays so the call sites (NavHost, smoke tests)
+    // keep compiling unchanged.
 
-    Box(modifier = modifier.fillMaxSize().imePadding()) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(colorResource(R.color.nudgy_background))
+            .imePadding()
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -222,12 +189,10 @@ fun ChatScreen(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            NudgyMascot(size = 28.dp, mood = MascotMood.THINKING)
-                            Spacer(modifier = Modifier.width(8.dp))
                             Surface(
                                 shape = RoundedCornerShape(18.dp),
-                                color = NudgyCard,
-                                border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
+                                color = Color.White,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, muted.copy(alpha = 0.25f))
                             ) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -252,7 +217,7 @@ fun ChatScreen(
                                             modifier = Modifier
                                                 .size(6.dp)
                                                 .alpha(dotAlpha)
-                                                .background(NudgyMuted, CircleShape)
+                                                .background(teal, CircleShape)
                                         )
                                         if (index < 2) Spacer(modifier = Modifier.width(4.dp))
                                     }
@@ -263,7 +228,7 @@ fun ChatScreen(
                                             fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
                                             fontSize = 13.sp
                                         ),
-                                        color = NudgyMuted
+                                        color = muted
                                     )
                                 }
                             }
@@ -280,7 +245,7 @@ fun ChatScreen(
                         ) {
                             Surface(
                                 shape = RoundedCornerShape(18.dp).copy(bottomEnd = androidx.compose.foundation.shape.CornerSize(4.dp)),
-                                color = NudgyPrimary
+                                color = teal
                             ) {
                                 Text(
                                     text = message.text,
@@ -296,21 +261,15 @@ fun ChatScreen(
                                 horizontalArrangement = Arrangement.Start,
                                 verticalAlignment = Alignment.Top
                             ) {
-                                NudgyMascot(
-                                    size = 32.dp,
-                                    mood = if (isSpeaking) MascotMood.TALKING else MascotMood.IDLE,
-                                    modifier = Modifier.padding(top = 4.dp)
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Surface(
                                         shape = RoundedCornerShape(18.dp).copy(bottomStart = androidx.compose.foundation.shape.CornerSize(4.dp)),
-                                        color = NudgyCard,
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
+                                        color = Color.White,
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, muted.copy(alpha = 0.25f))
                                     ) {
                                         Text(
                                             text = message.text,
-                                            style = MaterialTheme.typography.bodyLarge.copy(color = NudgyCharcoal),
+                                            style = MaterialTheme.typography.bodyLarge.copy(color = ink),
                                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
                                         )
                                     }
@@ -322,8 +281,8 @@ fun ChatScreen(
                                         Surface(
                                             modifier = Modifier.fillMaxWidth(),
                                             shape = RoundedCornerShape(16.dp),
-                                            color = NudgyPeach,
-                                            border = androidx.compose.foundation.BorderStroke(1.dp, NudgyPrimary.copy(alpha = 0.3f))
+                                            color = cream,
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, teal.copy(alpha = 0.3f))
                                         ) {
                                             Row(
                                                 modifier = Modifier.padding(14.dp),
@@ -335,7 +294,7 @@ fun ChatScreen(
                                                         Icon(
                                                             imageVector = Icons.Outlined.TaskAlt,
                                                             contentDescription = null,
-                                                            tint = NudgyPrimary,
+                                                            tint = teal,
                                                             modifier = Modifier.size(16.dp)
                                                         )
                                                         Spacer(modifier = Modifier.width(6.dp))
@@ -345,21 +304,21 @@ fun ChatScreen(
                                                                 fontWeight = FontWeight.Bold,
                                                                 fontSize = 15.sp
                                                             ),
-                                                            color = NudgyCharcoal
+                                                            color = ink
                                                         )
                                                     }
                                                     Spacer(modifier = Modifier.height(4.dp))
                                                     Text(
                                                         text = "Priority: ${task.priority.name.lowercase().replaceFirstChar { it.uppercase() }} • Due: ${timeFormat.format(task.dueDateEpochMillis)}",
                                                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
-                                                        color = NudgyMuted
+                                                        color = muted
                                                     )
                                                 }
 
                                                 Button(
                                                     onClick = { onTaskClick(task) },
                                                     shape = RoundedCornerShape(100.dp),
-                                                    colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary),
+                                                    colors = ButtonDefaults.buttonColors(containerColor = teal),
                                                     modifier = Modifier.padding(start = 8.dp)
                                                 ) {
                                                     Text("View Task", fontSize = 12.sp, color = Color.White)
@@ -375,8 +334,8 @@ fun ChatScreen(
                                         Surface(
                                             modifier = Modifier.fillMaxWidth(),
                                             shape = RoundedCornerShape(16.dp),
-                                            color = NudgyPeach,
-                                            border = androidx.compose.foundation.BorderStroke(1.dp, NudgyPrimary.copy(alpha = 0.3f))
+                                            color = cream,
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, teal.copy(alpha = 0.3f))
                                         ) {
                                             Row(
                                                 modifier = Modifier.padding(14.dp),
@@ -388,7 +347,7 @@ fun ChatScreen(
                                                         Icon(
                                                             imageVector = Icons.Default.Schedule,
                                                             contentDescription = null,
-                                                            tint = NudgyPrimary,
+                                                            tint = teal,
                                                             modifier = Modifier.size(16.dp)
                                                         )
                                                         Spacer(modifier = Modifier.width(6.dp))
@@ -398,20 +357,20 @@ fun ChatScreen(
                                                                 fontWeight = FontWeight.Bold,
                                                                 fontSize = 15.sp
                                                             ),
-                                                            color = NudgyCharcoal
+                                                            color = ink
                                                         )
                                                     }
                                                     Spacer(modifier = Modifier.height(4.dp))
                                                     Text(
                                                         text = "${timeFormat.format(event.startEpochMillis)} – ${timeFormat.format(event.endEpochMillis)} • ${event.locationOrLink ?: "Google Meet"}",
                                                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
-                                                        color = NudgyMuted
+                                                        color = muted
                                                     )
                                                 }
 
                                                 Surface(
                                                     shape = RoundedCornerShape(100.dp),
-                                                    color = Color(0xFFE8F5E9)
+                                                    color = Color.White
                                                 ) {
                                                     Row(
                                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -420,11 +379,11 @@ fun ChatScreen(
                                                         Icon(
                                                             imageVector = Icons.Default.Check,
                                                             contentDescription = null,
-                                                            tint = Color(0xFF2E7D32),
+                                                            tint = teal,
                                                             modifier = Modifier.size(14.dp)
                                                         )
                                                         Spacer(modifier = Modifier.width(4.dp))
-                                                        Text("Scheduled", color = Color(0xFF2E7D32), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                                        Text("Scheduled", color = teal, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                                                     }
                                                 }
                                             }
@@ -438,8 +397,8 @@ fun ChatScreen(
                                         Surface(
                                             modifier = Modifier.fillMaxWidth(),
                                             shape = RoundedCornerShape(16.dp),
-                                            color = NudgyLavender,
-                                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF7A68E6).copy(alpha = 0.3f))
+                                            color = Color.White,
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, teal.copy(alpha = 0.3f))
                                         ) {
                                             Row(
                                                 modifier = Modifier.padding(14.dp),
@@ -451,7 +410,7 @@ fun ChatScreen(
                                                         Icon(
                                                             imageVector = Icons.Default.Schedule,
                                                             contentDescription = null,
-                                                            tint = Color(0xFF5B45E0),
+                                                            tint = teal,
                                                             modifier = Modifier.size(16.dp)
                                                         )
                                                         Spacer(modifier = Modifier.width(6.dp))
@@ -461,21 +420,21 @@ fun ChatScreen(
                                                                 fontWeight = FontWeight.Bold,
                                                                 fontSize = 15.sp
                                                             ),
-                                                            color = NudgyCharcoal
+                                                            color = ink
                                                         )
                                                     }
                                                     Spacer(modifier = Modifier.height(4.dp))
                                                     Text(
                                                         text = "${timeFormat.format(message.focusStartMillis)} – ${timeFormat.format(message.focusEndMillis)}",
                                                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
-                                                        color = NudgyMuted
+                                                        color = muted
                                                     )
                                                 }
 
                                                 if (focusScheduled) {
                                                     Surface(
                                                         shape = RoundedCornerShape(100.dp),
-                                                        color = Color(0xFFE8F5E9)
+                                                        color = cream
                                                     ) {
                                                         Row(
                                                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -484,13 +443,13 @@ fun ChatScreen(
                                                             Icon(
                                                                 imageVector = Icons.Default.Check,
                                                                 contentDescription = null,
-                                                                tint = Color(0xFF2E7D32),
+                                                                tint = teal,
                                                                 modifier = Modifier.size(14.dp)
                                                             )
                                                             Spacer(modifier = Modifier.width(4.dp))
                                                             Text(
                                                                 text = "Scheduled",
-                                                                color = Color(0xFF2E7D32),
+                                                                color = teal,
                                                                 fontSize = 12.sp,
                                                                 fontWeight = FontWeight.SemiBold
                                                             )
@@ -503,7 +462,7 @@ fun ChatScreen(
                                                             onBlockFocusTime(message.focusStartMillis, message.focusEndMillis, "Focus Time", message.id)
                                                         },
                                                         shape = RoundedCornerShape(100.dp),
-                                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5B45E0)),
+                                                        colors = ButtonDefaults.buttonColors(containerColor = teal),
                                                         modifier = Modifier.padding(start = 8.dp)
                                                     ) {
                                                         Text("Block Time", fontSize = 12.sp, color = Color.White)
@@ -523,8 +482,8 @@ fun ChatScreen(
                                             message.quickSuggestions.forEach { suggestion ->
                                                 Surface(
                                                     shape = RoundedCornerShape(100.dp),
-                                                    color = NudgyCard,
-                                                    border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder),
+                                                    color = Color.White,
+                                                    border = androidx.compose.foundation.BorderStroke(1.dp, muted.copy(alpha = 0.25f)),
                                                     // C1: disabled while thinking (see
                                                     // quick-prompt pills above).
                                                     modifier = Modifier.clickable(enabled = !isThinking) { onSendMessage(suggestion) }
@@ -535,7 +494,7 @@ fun ChatScreen(
                                                             fontSize = 12.sp,
                                                             fontWeight = FontWeight.Medium
                                                         ),
-                                                        color = NudgyCharcoal,
+                                                        color = ink,
                                                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                                                     )
                                                 }
@@ -554,7 +513,7 @@ fun ChatScreen(
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(16.dp),
-                            color = NudgyButter
+                            color = cream
                         ) {
                             Row(
                                 modifier = Modifier.padding(14.dp),
@@ -562,21 +521,22 @@ fun ChatScreen(
                             ) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(18.dp),
-                                    color = NudgyPrimary,
+                                    color = teal,
                                     strokeWidth = 2.dp
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Text(
-                                    text = "🎙️ Listening... Speak now",
+                                    text = "Listening... Speak now",
                                     style = MaterialTheme.typography.titleMedium.copy(fontSize = 14.sp),
-                                    color = NudgyCharcoal
+                                    color = ink
                                 )
                             }
                         }
                     }
                 }
 
-                // Hero Mascot & Greeting
+                // Hero & Greeting — text only, no mascot (S3-1: the
+                // rebuild chat has no mascot anywhere).
                 item(key = "hero") {
                     Column(
                         modifier = Modifier
@@ -584,17 +544,10 @@ fun ChatScreen(
                             .padding(top = 16.dp, bottom = 8.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        NudgyMascot(
-                            size = 100.dp,
-                            mood = currentMascotMood
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
                         Text(
                             text = "YOUR PRODUCTIVITY PARTNER",
                             style = MaterialTheme.typography.labelSmall,
-                            color = NudgyAccent
+                            color = teal
                         )
 
                         Spacer(modifier = Modifier.height(6.dp))
@@ -606,7 +559,7 @@ fun ChatScreen(
                                 fontSize = 28.sp
                             ),
                             textAlign = TextAlign.Center,
-                            color = NudgyCharcoal
+                            color = ink
                         )
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -615,7 +568,7 @@ fun ChatScreen(
                             text = "I can manage tasks, schedule focus time, and keep your day moving in English or বাংলা.",
                             style = MaterialTheme.typography.bodyLarge,
                             textAlign = TextAlign.Center,
-                            color = NudgyMuted,
+                            color = muted,
                             modifier = Modifier.padding(horizontal = 20.dp)
                         )
 
@@ -630,13 +583,13 @@ fun ChatScreen(
                                 Surface(
                                     shape = RoundedCornerShape(100.dp),
                                     color = Color.Transparent,
-                                    border = androidx.compose.foundation.BorderStroke(1.2.dp, Color(0xFFE2DCD1)),
+                                    border = androidx.compose.foundation.BorderStroke(1.2.dp, muted.copy(alpha = 0.35f)),
                                     // C1: disabled while a reply is pending —
                                     // a second prompt must not start a second
-                                    // handleUserChat run (duplicate tasks /
-                                    // double-spent turns). The guard in
-                                    // MainActivity.handleUserChat is the
-                                    // backstop; this is the visible one.
+                                    // send run (duplicate tasks / double-spent
+                                    // turns). The guard in ChatViewModel
+                                    // .sendMessage is the backstop; this is
+                                    // the visible one.
                                     modifier = Modifier.clickable(enabled = !isThinking) { onSendMessage(prompt) }
                                 ) {
                                     Text(
@@ -645,7 +598,7 @@ fun ChatScreen(
                                             fontWeight = FontWeight.SemiBold,
                                             fontSize = 13.sp
                                         ),
-                                        color = NudgyCharcoal,
+                                        color = ink,
                                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
                                     )
                                 }
@@ -668,8 +621,8 @@ fun ChatScreen(
                         .fillMaxWidth()
                         .padding(bottom = 12.dp),
                     shape = RoundedCornerShape(16.dp),
-                    color = NudgyCard,
-                    border = androidx.compose.foundation.BorderStroke(1.2.dp, NudgyCardBorder),
+                    color = Color.White,
+                    border = androidx.compose.foundation.BorderStroke(1.2.dp, muted.copy(alpha = 0.25f)),
                     shadowElevation = 2.dp
                 ) {
                     Column(
@@ -680,7 +633,7 @@ fun ChatScreen(
                     ) {
                         Text(
                             text = "Want 1 more answer?",
-                            color = NudgyCharcoal,
+                            color = ink,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center
@@ -695,7 +648,7 @@ fun ChatScreen(
                                 "That's all ${chatCapState.maxRewardedTurnsPerDay} bonus answers for today — " +
                                     "fresh free answers tomorrow."
                             },
-                            color = NudgyMuted,
+                            color = muted,
                             fontSize = 13.sp,
                             textAlign = TextAlign.Center
                         )
@@ -705,9 +658,9 @@ fun ChatScreen(
                             enabled = chatCapState.canEarnMoreRewarded &&
                                 (rewardedAdReady || rewardedLoadError != null),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = NudgyAccent,
+                                containerColor = teal,
                                 contentColor = Color.White,
-                                disabledContainerColor = NudgyMuted,
+                                disabledContainerColor = muted,
                                 disabledContentColor = Color.White
                             ),
                             shape = RoundedCornerShape(100.dp)
@@ -726,101 +679,17 @@ fun ChatScreen(
                 }
             }
 
-            // Input Bar
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 12.dp),
-                shape = RoundedCornerShape(100.dp),
-                color = NudgyCard,
-                border = androidx.compose.foundation.BorderStroke(1.2.dp, NudgyCardBorder),
-                shadowElevation = 2.dp
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextField(
-                        value = inputText,
-                        onValueChange = { inputText = it },
-                        placeholder = {
-                            Text(
-                                text = if (isListening) "Listening to voice..." else "Ask Nudgy anything...",
-                                color = NudgyMuted,
-                                fontSize = 14.sp
-                            )
-                        },
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent
-                        ),
-                        modifier = Modifier.weight(1f),
-                        singleLine = true
-                    )
-
-                    IconButton(onClick = { handleVoiceClick() }) {
-                        Icon(
-                            imageVector = if (isListening) Icons.Outlined.Stop else Icons.Outlined.Mic,
-                            contentDescription = "Voice input",
-                            tint = if (isListening) NudgyPrimary else NudgyMuted,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .size(42.dp)
-                            .clip(CircleShape)
-                            .background(NudgyPrimary)
-                            .clickable {
-                                // C1: dead while a reply is pending.
-                                if (!isThinking && inputText.isNotBlank()) {
-                                    val textToSend = inputText.trim()
-                                    inputText = ""
-                                    onSendMessage(textToSend)
-                                }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (isThinking) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                color = Color.White,
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "Send",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Floating push-to-talk waveform button
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 20.dp, bottom = 74.dp)
-                .size(54.dp)
-                .clip(CircleShape)
-                .background(if (isListening) NudgyPrimary else MaterialTheme.colorScheme.inverseSurface)
-                .clickable { handleVoiceClick() },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.GraphicEq,
-                contentDescription = "Push to talk",
-                tint = if (isListening) Color.White else MaterialTheme.colorScheme.inverseOnSurface,
-                modifier = Modifier.size(26.dp)
+            // Input Bar — the shared ChatInputBar (the same bar the
+            // Quick Chat sheet uses). The floating push-to-talk button
+            // is gone (S3-1 restyle): the mic in the bar is the one
+            // voice entry point.
+            ChatInputBar(
+                isThinking = isThinking,
+                isListening = isListening,
+                onSendMessage = onSendMessage,
+                onStartVoice = onStartVoice,
+                onStopVoice = onStopVoice,
+                modifier = Modifier.padding(bottom = 12.dp)
             )
         }
     }

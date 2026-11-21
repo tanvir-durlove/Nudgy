@@ -163,4 +163,41 @@ class ChatScreenSmokeTest {
         }
         composeRule.onNodeWithText("remind you about", substring = true).assertIsDisplayed()
     }
+
+    @Test
+    fun `restyled chat renders message bubbles and input from a plain list`() {
+        // Sprint 3-1 — restyle render check: the screen renders from a
+        // plain message list (no ViewModel, no seed race), with the
+        // shared input bar. The hero is NOT asserted here: it sits at
+        // the far end of the reversed list and LazyColumn only
+        // composes near-viewport items (the S3-0 flake). Mascot
+        // absence is a static check (zero NudgyMascot references in
+        // ChatScreen.kt) — the mascot carries no semantics node to
+        // assert on.
+        val messages = listOf(
+            ChatMessage(id = "u1", senderIsUser = true, text = "Water the plants at 6pm"),
+            ChatMessage(id = "a1", senderIsUser = false, text = "Done — I will remind you about the plants.")
+        )
+        composeRule.setContent {
+            ChatScreen(
+                user = viewModel.user,
+                messages = messages,
+                isListening = false,
+                isSpeaking = false,
+                isThinking = false,
+                thinkingText = "Nudgy is thinking...",
+                onSendMessage = {},
+                onStartVoice = {},
+                onStopVoice = {},
+                onBlockFocusTime = { _, _, _, _ -> }
+            )
+        }
+        // Unique texts on purpose: "Plan my day" would also match the
+        // quick-prompt pill of the same words, and onNode throws on
+        // more than one match (that was the round-2 failure).
+        composeRule.onNodeWithText("Water the plants at 6pm").assertExists()
+        composeRule.onNodeWithText("Done — I will remind you about the plants.").assertExists()
+        composeRule.onNodeWithText("Ask Nudgy anything...").assertExists()
+        composeRule.onNodeWithContentDescription("Voice input").assertExists()
+    }
 }
