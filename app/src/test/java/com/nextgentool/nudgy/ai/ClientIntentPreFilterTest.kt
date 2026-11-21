@@ -294,12 +294,14 @@ class ClientIntentPreFilterTest {
         // This Bengali phrase scores 0.27 on a faithful replica of
         // IntentBankMatcher (TF-IDF cosine, same tokenize + nukta fold),
         // so the matcher abstains and the step-4 fallback fires. The
-        // "gym" keeps hasActionContext true; "বিকেল" resolves "৪টায়"
-        // to 16:00 (not a bare hour). Title keeps "আগামীকাল"/"বিকেল":
-        // step 4's \b-anchored Bengali strip does not match on the JVM
-        // (Robolectric) — pre-existing quirk, not fixed here.
+        // "gym" keeps hasActionContext true. "বিকেলে" (with ে) matters:
+        // bare "বিকেল" is NOT a bengaliDaypartHour key, so
+        // isBareHourToken treats "৪টায়" as a bare hour and step 4 asks
+        // instead of drafting — "বিকেলে" resolves it to 16:00. Title
+        // keeps "আগামীকাল": step 4's \b-anchored Bengali strip does not
+        // match on the JVM (Robolectric) — pre-existing quirk.
         val result = preFilter.tryHandle(
-            "test-user", "আগামীকাল বিকেল ৪টায় সাঁতার কাটতে যাব gym-এ বন্ধুর সাথে", emptyList(), emptyList()
+            "test-user", "আগামীকাল বিকেলে ৪টায় সাঁতার কাটতে যাব gym-এ বন্ধুর সাথে", emptyList(), emptyList()
         )
         assertTrue(result is PreFilterResult.PendingDraft)
         val draft = (result as PreFilterResult.PendingDraft).draft
