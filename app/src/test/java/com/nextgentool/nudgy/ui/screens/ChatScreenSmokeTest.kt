@@ -691,9 +691,12 @@ class ChatScreenSmokeTest {
                 .fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithTag("priority_apply_card").assertIsDisplayed()
-        composeRule.onNodeWithText("Overdue report").assertIsDisplayed()
-        composeRule.onNodeWithText("Morning email").assertIsDisplayed()
-        composeRule.onNodeWithText("Urgent fix").assertIsDisplayed()
+        // The titles live inside the numbered reply's single message
+        // text node, so the match must be a substring — an exact
+        // match can never find them.
+        composeRule.onNodeWithText("Overdue report", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Morning email", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Urgent fix", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("priority_apply_button").performClick()
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithTag("priority_apply_card")

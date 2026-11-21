@@ -1593,21 +1593,32 @@ class ChatViewModelTest {
 
     @Test
     fun `priority order demotes a task that conflicts with a meeting`() = runTest {
-        // Needs a future window today for the conflict check: after
-        // 22:00 the due time would land tomorrow, so the check cannot
-        // run — the pure DayPlannerTest covers the ranking itself.
-        org.junit.Assume.assumeTrue(Calendar.getInstance().get(Calendar.HOUR_OF_DAY) < 22)
+        // Needs room today for the meeting to end before midnight:
+        // after 21:00 the meeting window would cross into tomorrow,
+        // so the check cannot run — the pure DayPlannerTest covers
+        // the ranking itself.
+        org.junit.Assume.assumeTrue(Calendar.getInstance().get(Calendar.HOUR_OF_DAY) < 21)
         val testDispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(testDispatcher)
         try {
             val viewModel = newViewModel()
             val now = System.currentTimeMillis()
             val todayEnd = endOfDayMillis(now)
-            val soonDue = minOf(now + 2 * 60 * 60 * 1000L, todayEnd - 30 * 60 * 1000L)
+            val soonDue = minOf(now + 2 * 60 * 60 * 1000L, todayEnd - 60 * 60 * 1000L)
             val overdue = seedTask("Overdue report", at(-1, 18))
-            val free = seedTask("Free task", soonDue)
+            // Both tasks share the same due time and priority, so the
+            // conflict key alone decides their order. The meeting
+            // starts 20 minutes after the due time: the 15-minute
+            // "Free task" ends before it (genuinely free) while the
+            // default 30-minute "Clashing task" runs into it
+            // (genuinely conflicting). The old version seeded the
+            // meeting exactly on the due time, so BOTH tasks
+            // conflicted and the order proved nothing — and it
+            // asserted the English "conflicts with" wording on a
+            // Bengali reply, which can never match.
+            val free = seedTask("Free task", soonDue, estimatedMinutes = 15)
             val conflict = seedTask("Clashing task", soonDue)
-            seedMeeting("Team sync", soonDue, soonDue + 30 * 60 * 1000L)
+            seedMeeting("Team sync", soonDue + 20 * 60 * 1000L, soonDue + 50 * 60 * 1000L)
             viewModel.messages.first { it.size == 1 } // welcome seeded
             viewModel.sendMessage("দিনটা সাজিয়ে দাও")
             val messages = viewModel.messages.first { it.size == 3 }
@@ -1616,7 +1627,13 @@ class ChatViewModelTest {
                 listOf(overdue.id, free.id, conflict.id),
                 viewModel.pendingPriorityOrder.value
             )
-            assertTrue(messages[2].text.contains("conflicts with 'Team sync'"))
+            // The command is Bengali, so the reply is Bengali: the
+            // conflict reason is worded "…-এর সঙ্গে ধাক্কা খায়",
+            // and it appears on the clashing task's line only.
+            val replyText = messages[2].text
+            assertTrue(replyText.contains("\"Team sync\"-এর সঙ্গে ধাক্কা খায়"))
+            val freeLine = replyText.lines().first { it.contains("Free task") }
+            assertTrue(!freeLine.contains("ধাক্কা খায়"))
         } finally {
             Dispatchers.resetMain()
         }
