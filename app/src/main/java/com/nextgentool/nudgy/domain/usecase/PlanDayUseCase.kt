@@ -124,6 +124,36 @@ class PlanDayUseCase @Inject constructor() {
     }
 
     /**
+     * Sprint 3-6 — start times for a PRIORITY-ordered list (feature
+     * 22, Q5 = (a)). Unlike [assignStartTimes], a task's due time is
+     * NEVER kept: keeping it would re-sort the day by due time and
+     * destroy the priority order (My Day sorts by plannedStart).
+     * Every task gets the next sequential slot in priority order,
+     * from 09:00 today (or now, whichever is later, rounded up to
+     * the next 15 minutes), advancing by its estimate (30 min when
+     * it has none). The ORDER is the contract, not the clock time:
+     * applying late in the day may run slots past midnight — the
+     * My-Day order still follows the priority list. Pure +
+     * deterministic given `now`.
+     */
+    fun assignPriorityStartTimes(
+        priorityOrdered: List<TaskEntity>,
+        startOfToday: Long,
+        now: Long
+    ): Map<String, Long> {
+        var cursor = maxOf(
+            startOfToday + SLOT_START_HOUR * 60 * 60 * 1000L,
+            roundUpToQuarterHour(now)
+        )
+        val result = LinkedHashMap<String, Long>()
+        for (task in priorityOrdered) {
+            result[task.id] = cursor
+            cursor += (task.estimatedMinutes ?: DEFAULT_SLOT_MINUTES) * 60 * 1000L
+        }
+        return result
+    }
+
+    /**
      * True when the task has no time to plan around: no due date, or
      * due at local midnight (the "no time picked" default — the
      * quick-add stamps 00:00 when the user picks a day but no time).

@@ -324,6 +324,11 @@ fun NudgyNavHost(
             val brainDumpTranscript by viewModel.brainDumpTranscript.collectAsState()
             val pendingBrainDumpDrafts by viewModel.pendingBrainDumpDrafts.collectAsState()
             val pendingBrainDumpMessageId by viewModel.pendingBrainDumpMessageId.collectAsState()
+            // Sprint 3-6 — the day-plan card and the priority Apply
+            // card, same pattern as the brain-dump card above.
+            val pendingPlanDrafts by viewModel.pendingPlanDrafts.collectAsState()
+            val pendingPlanMessageId by viewModel.pendingPlanMessageId.collectAsState()
+            val pendingPriorityMessageId by viewModel.pendingPriorityMessageId.collectAsState()
             val chatCapState by viewModel.chatCapState.collectAsState()
             val rewardedAdReady by viewModel.rewardedAdReady.collectAsState()
             val rewardedLoadError by viewModel.rewardedLoadError.collectAsState()
@@ -355,6 +360,15 @@ fun NudgyNavHost(
                 onConfirmBrainDump = { viewModel.confirmBrainDump() },
                 onDiscardBrainDump = { viewModel.discardBrainDump() },
                 onRemoveBrainDumpDraft = { viewModel.removeBrainDumpDraft(it) },
+                // Sprint 3-6 — day-plan card + priority Apply card.
+                pendingPlanDrafts = pendingPlanDrafts,
+                pendingPlanMessageId = pendingPlanMessageId,
+                onConfirmPlan = { viewModel.confirmPlan() },
+                onDiscardPlan = { viewModel.discardPlan() },
+                onRemovePlanDraft = { viewModel.removePlanDraft(it) },
+                pendingPriorityMessageId = pendingPriorityMessageId,
+                onApplyPriorityOrder = { viewModel.applyPriorityOrder() },
+                onDismissPriorityOrder = { viewModel.dismissPriorityOrder() },
                 chatCapState = chatCapState,
                 rewardedAdReady = rewardedAdReady,
                 rewardedLoadError = rewardedLoadError,

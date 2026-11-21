@@ -12,6 +12,8 @@ import com.nextgentool.nudgy.ai.BrainDumpSplitter
 import com.nextgentool.nudgy.ai.ChatDraft
 import com.nextgentool.nudgy.ai.ClientIntentPreFilter
 import com.nextgentool.nudgy.ai.ChatGuardrails
+import com.nextgentool.nudgy.ai.DayPlanCommand
+import com.nextgentool.nudgy.ai.DayPlanCommandParser
 import com.nextgentool.nudgy.ai.DraftKind
 import com.nextgentool.nudgy.ai.LlmConfigProvider
 import com.nextgentool.nudgy.ai.LlmFallbackHandler
@@ -33,6 +35,9 @@ import com.nextgentool.nudgy.data.repository.MemoryRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.domain.endOfDayMillis
 import com.nextgentool.nudgy.domain.startOfDayMillis
+import com.nextgentool.nudgy.domain.todayDateString
+import com.nextgentool.nudgy.domain.usecase.DayPlanner
+import com.nextgentool.nudgy.domain.usecase.PlanDayUseCase
 import com.nextgentool.nudgy.ui.screens.ChatActionType
 import com.nextgentool.nudgy.ui.screens.ChatMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -143,6 +148,27 @@ import javax.inject.Inject
  * button calls [startSplit] with the open task's id and navigates
  * here; the split starts at once, no typing needed.
  *
+ * Sprint 3-6 (features 21 + 22) — plan the day, locally. A
+ * day-plan command ("plan my day" / "দিনটা সাজাও", or "what should
+ * I do first" / "দিনটা সাজিয়ে দাও") is detected LOCALLY by
+ * [DayPlanCommandParser] before the prefilter runs — the
+ * prefilter's old "Plan my day" summary (branch 8) is deleted in
+ * S3-6: the phrase now really plans the day. Auto-schedule
+ * proposes one focus slot per unplaced task (existing
+ * findSuggestedFocusSlot + checkConflict; all-day events never
+ * block; already-placed tasks are busy intervals, never moved)
+ * as FOCUS_EVENT drafts on one combined preview card — only
+ * [confirmPlan] writes, through [ClientIntentPreFilter.confirmDraft]
+ * → blockFocusTime per draft. Priority answers with a NUMBERED
+ * reply (overdue → due time → HIGH → conflict last, the scoring
+ * visible on every line) + an Apply button: [applyPriorityOrder]
+ * stamps the order through the Plan pick path (sequential
+ * plannedStart via [PlanDayUseCase.assignPriorityStartTimes] +
+ * updateTask, the same stamping PlanViewModel.startMyDay does) —
+ * My Day sorts by plannedStart, so its order follows the reply.
+ * Apply is not a creation, so it does not go through confirmDraft;
+ * List/Board due-first sort is untouched (S1 locked).
+ *
  * Sound (§4.4): every assistant reply plays the short notification
  * sound ([ReplySoundPlayer]). [speak] is NEVER called from the chat
  * path — [isSpeaking] is a constant false, so the mascot never shows
@@ -173,7 +199,12 @@ class ChatViewModel @Inject constructor(
     // [RewardedAdGateway] seam (fake in tests, NudgyAds in prod).
     @ApplicationContext private val context: Context,
     private val llmConfigProvider: LlmConfigProvider,
-    private val rewardedAdGateway: RewardedAdGateway
+    private val rewardedAdGateway: RewardedAdGateway,
+    // Sprint 3-6 — Apply stamps the priority order through the
+    // Plan pick path ([PlanDayUseCase.assignPriorityStartTimes]);
+    // Hilt provides it (it has an @Inject constructor), tests pass
+    // a plain instance.
+    private val planDayUseCase: PlanDayUseCase
 ) : ViewModel() {
 
     private val userId: String = taskRepository.currentUserId()
@@ -233,6 +264,30 @@ class ChatViewModel @Inject constructor(
      *  attached to (same pattern as [_pendingDraftMessageId]). */
     private val _pendingBrainDumpMessageId = MutableStateFlow<String?>(null)
     val pendingBrainDumpMessageId: StateFlow<String?> = _pendingBrainDumpMessageId.asStateFlow()
+
+    /** Sprint 3-6 — the pending day-plan drafts (feature 21, Q4 =
+     *  (a)): one FOCUS_EVENT draft per proposed slot, one combined
+     *  preview card, one Confirm-all (the brain-dump Q9 pattern).
+     *  Mutually exclusive with [_pendingDraft] and
+     *  [_pendingBrainDumpDrafts]: a new message clears all three. */
+    private val _pendingPlanDrafts = MutableStateFlow<List<ChatDraft>>(emptyList())
+    val pendingPlanDrafts: StateFlow<List<ChatDraft>> = _pendingPlanDrafts.asStateFlow()
+
+    /** The id of the assistant message the day-plan preview card is
+     *  attached to (same pattern as [_pendingBrainDumpMessageId]). */
+    private val _pendingPlanMessageId = MutableStateFlow<String?>(null)
+    val pendingPlanMessageId: StateFlow<String?> = _pendingPlanMessageId.asStateFlow()
+
+    /** Sprint 3-6 — the pending priority order (feature 22, Q5 =
+     *  (a)): task ids in priority order, waiting for the Apply
+     *  button on the DAILY_PLAN reply. Null = no order pending. */
+    private val _pendingPriorityOrder = MutableStateFlow<List<String>?>(null)
+    val pendingPriorityOrder: StateFlow<List<String>?> = _pendingPriorityOrder.asStateFlow()
+
+    /** The id of the assistant message the priority Apply card is
+     *  attached to. */
+    private val _pendingPriorityMessageId = MutableStateFlow<String?>(null)
+    val pendingPriorityMessageId: StateFlow<String?> = _pendingPriorityMessageId.asStateFlow()
 
     /** Sprint 3-4 — the live cap snapshot for the rewarded entry
      *  (spec §10.14). Null until the first [refreshCapState]; the
@@ -309,6 +364,11 @@ class ChatViewModel @Inject constructor(
         // S3-4: ... and any pending brain-dump card.
         _pendingBrainDumpDrafts.value = emptyList()
         _pendingBrainDumpMessageId.value = null
+        // S3-6: ... and any pending day-plan card / priority order.
+        _pendingPlanDrafts.value = emptyList()
+        _pendingPlanMessageId.value = null
+        _pendingPriorityOrder.value = null
+        _pendingPriorityMessageId.value = null
         viewModelScope.launch {
             _isThinking.value = true
             try {
@@ -339,7 +399,23 @@ class ChatViewModel @Inject constructor(
                         if (splitCommand != null) {
                             handleSplitCommand(splitCommand, trimmed, historyBefore)
                         } else {
-                            handlePrefilterMessage(trimmed, historyBefore)
+                            // Sprint 3-6 — a day-plan command is detected
+                            // locally and never reaches the prefilter (its
+                            // old "Plan my day" summary, branch 8, is
+                            // deleted in S3-6 — the phrase now really
+                            // plans the day). A pending clarification
+                            // wins over the day-plan check, like the
+                            // split check above.
+                            val dayPlanCommand =
+                                if (preFilter.hasPendingClarification()) null
+                                else DayPlanCommandParser.parse(trimmed)
+                            when (dayPlanCommand) {
+                                DayPlanCommand.AUTO_SCHEDULE ->
+                                    handleAutoScheduleCommand(trimmed)
+                                DayPlanCommand.PRIORITY ->
+                                    handlePriorityCommand(trimmed)
+                                null -> handlePrefilterMessage(trimmed, historyBefore)
+                            }
                         }
                     }
                 }
@@ -1084,6 +1160,416 @@ class ChatViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Sprint 3-6 — auto-schedule (feature 21, Q4 = (a)) + priority
+    // sort (feature 22, Q5 = (a)). Both are LOCAL and deterministic
+    // (no LLM, no cap): they share the day-planning computation in
+    // [DayPlanner] over today's unplaced work.
+    //
+    // Auto-schedule: one-shot "plan my day" → a FOCUS_EVENT draft
+    // per proposed slot (the existing focus path) → one combined
+    // preview card → Confirm-all saves each draft through
+    // [ClientIntentPreFilter.confirmDraft] (→ blockFocusTime), never
+    // a direct DB write. Already-placed tasks never move: they are
+    // busy intervals for the slot search, never re-proposed.
+    // All-day events never block (findSuggestedFocusSlot filters
+    // them, S2-1b) — and neither does this code: only timed events
+    // and placed tasks enter the busy timeline.
+    //
+    // Priority: one-shot "what should I do first" → a NUMBERED
+    // reply in priority order + an Apply button. Apply stamps the
+    // order through the Plan pick path
+    // ([PlanDayUseCase.assignPriorityStartTimes] + updateTask, the
+    // same stamping [PlanViewModel.startMyDay] does) — My Day sorts
+    // by plannedStart, so the My-Day order follows the reply. This
+    // is NOT a creation, so it does not go through confirmDraft;
+    // List/Board due-first sort is untouched (S1 locked).
+    // ------------------------------------------------------------------
+
+    /**
+     * Sprint 3-6 — the auto-schedule command. Nothing is written
+     * here — the proposals wait as pending drafts until Confirm-all.
+     */
+    private suspend fun handleAutoScheduleCommand(prompt: String) {
+        val isBengali = prompt.any { it in '\u0980'..'\u09FF' }
+        val now = System.currentTimeMillis()
+        val todayStart = startOfDayMillis(now)
+        val todayEnd = endOfDayMillis(now)
+        val allTasks = runCatching { taskRepository.getAllTasksOnce(userId) }
+            .getOrDefault(emptyList())
+        val unplaced = DayPlanner.unplacedTasks(allTasks, todayStart, todayEnd)
+        if (unplaced.isEmpty()) {
+            postAssistantMessage(
+                if (isBengali) "আজ সাজানোর মতো কোনো কাজ নেই — সব কাজেরই সময় ঠিক করা আছে, নয়তো আজকের কোনো কাজ নেই।"
+                else "Nothing to schedule — every task already has its time, or there's nothing due today."
+            )
+            return
+        }
+        // Busy timeline for the slot search: already-placed tasks
+        // (their planned start + estimate, 30 min default). Timed
+        // calendar events are read by findSuggestedFocusSlot itself;
+        // all-day events are labels, never blocks (S2-1b).
+        val busy = allTasks
+            .filter { !it.isCompleted && it.plannedStartEpochMillis != null &&
+                it.plannedStartEpochMillis in todayStart until todayEnd }
+            .map { task ->
+                val start = task.plannedStartEpochMillis!!
+                start to (start + (task.estimatedMinutes ?: 30) * 60 * 1000L)
+            }.toMutableList()
+        val drafts = mutableListOf<ChatDraft>()
+        val unscheduled = mutableListOf<Pair<TaskEntity, String?>>()
+        for (task in DayPlanner.scheduleOrder(unplaced)) {
+            val slot = runCatching {
+                calendarRepository.findSuggestedFocusSlot(userId, now, busy)
+            }.getOrNull()
+            if (slot == null || slot.endEpochMillis > todayEnd) {
+                // No free slot today (the fallback can land past
+                // midnight when the day is full — that is not a
+                // usable today-slot).
+                unscheduled += task to null
+                continue
+            }
+            val conflict = runCatching {
+                calendarRepository.checkConflict(userId, slot.startEpochMillis, slot.endEpochMillis)
+            }.getOrNull()
+            if (conflict?.hasConflict == true) {
+                // The suggestion came from the same busy timeline,
+                // so a conflict here means the calendar moved under
+                // us — try the conflict's own alternative slot when
+                // it is free of the busy intervals too.
+                val alt = conflict.suggestedAlternativeSlot
+                val altFree = alt != null && alt.endEpochMillis <= todayEnd &&
+                    busy.none { it.first < alt.endEpochMillis && it.second > alt.startEpochMillis } &&
+                    runCatching {
+                        calendarRepository.checkConflict(userId, alt.startEpochMillis, alt.endEpochMillis)
+                    }.getOrNull()?.hasConflict == false
+                if (altFree && alt != null) {
+                    drafts += focusDraft(task, alt.startEpochMillis, alt.endEpochMillis, alt.durationMinutes, isBengali)
+                    busy += alt.startEpochMillis to alt.endEpochMillis
+                } else {
+                    unscheduled += task to conflict.conflictingEvent?.title
+                }
+            } else {
+                drafts += focusDraft(task, slot.startEpochMillis, slot.endEpochMillis, slot.durationMinutes, isBengali)
+                busy += slot.startEpochMillis to slot.endEpochMillis
+            }
+        }
+        if (drafts.isEmpty()) {
+            postAssistantMessage(
+                if (isBengali) "আজ আর ফাঁকা সময় নেই — ক্যালেন্ডার ভরা। কোনো কাজের জন্য স্লট খুঁজে পাইনি।"
+                else "No free slot today — your calendar is full. I couldn't find a slot for any of the tasks."
+            )
+            return
+        }
+        _pendingDraft.value = null
+        _pendingDraftMessageId.value = null
+        _pendingBrainDumpDrafts.value = emptyList()
+        _pendingBrainDumpMessageId.value = null
+        _pendingPlanDrafts.value = drafts
+        val messageId = postAssistantMessage(
+            text = buildDayPlanPreviewText(drafts, unscheduled, isBengali),
+            actionType = ChatActionType.DRAFT_PREVIEW,
+            quickSuggestions = listOf("Show today's tasks", "Show schedule")
+        )
+        _pendingPlanMessageId.value = messageId
+    }
+
+    private fun focusDraft(
+        task: TaskEntity,
+        startMillis: Long,
+        endMillis: Long,
+        durationMinutes: Int,
+        isBengali: Boolean
+    ): ChatDraft = ChatDraft(
+        kind = DraftKind.FOCUS_EVENT,
+        title = task.title,
+        startEpochMillis = startMillis,
+        endEpochMillis = endMillis,
+        isBengali = isBengali,
+        focusDurationMinutes = durationMinutes
+    )
+
+    /** The day-plan preview's message text: the proposed slots, then
+     *  one line per task that could not be placed. The card itself
+     *  renders the drafts with remove buttons; the text is the
+     *  record in history. */
+    private fun buildDayPlanPreviewText(
+        drafts: List<ChatDraft>,
+        unscheduled: List<Pair<TaskEntity, String?>>,
+        isBengali: Boolean
+    ): String {
+        val timeFormat = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault())
+        val lines = StringBuilder()
+        if (isBengali) {
+            lines.append("দিনের প্ল্যান — ${drafts.size}টা ফোকাস ব্লক:\n")
+        } else {
+            lines.append("Here's your day plan — ${drafts.size} ${if (drafts.size == 1) "focus block" else "focus blocks"}:\n")
+        }
+        drafts.forEachIndexed { index, draft ->
+            val end = draft.endEpochMillis ?: (draft.startEpochMillis + draft.focusDurationMinutes * 60 * 1000L)
+            lines.append(
+                "${index + 1}. ${draft.title} — " +
+                    "${timeFormat.format(java.util.Date(draft.startEpochMillis))} – " +
+                    "${timeFormat.format(java.util.Date(end))}\n"
+            )
+        }
+        for ((task, conflictingTitle) in unscheduled) {
+            lines.append(
+                if (isBengali) {
+                    if (conflictingTitle != null) "• \"${task.title}\" বসাতে পারিনি — ওই সময়ে \"$conflictingTitle\" আছে।\n"
+                    else "• \"${task.title}\"-এর জন্য আজ ফাঁকা সময় নেই।\n"
+                } else {
+                    if (conflictingTitle != null) "• Couldn't place \"${task.title}\" — it clashes with '$conflictingTitle'.\n"
+                    else "• No free slot today for \"${task.title}\".\n"
+                }
+            )
+        }
+        lines.append(
+            if (isBengali) "সব ঠিক থাকলে Confirm করো — না হলে যেটা লাগবে না সেটা সরিয়ে দাও।"
+            else "Confirm all if this looks right — or remove any block first."
+        )
+        return lines.toString().trimEnd()
+    }
+
+    /**
+     * Sprint 3-6 — Confirm-all on the day-plan preview card: the
+     * ONLY path that saves plan drafts. The list is cleared FIRST
+     * (synchronously, so a double tap can never save twice), then
+     * each draft is confirmed in order through
+     * [ClientIntentPreFilter.confirmDraft] (→ blockFocusTime). ONE
+     * summary receipt is posted. A confirm with no pending plan is
+     * a no-op.
+     */
+    fun confirmPlan() {
+        val drafts = _pendingPlanDrafts.value
+        if (drafts.isEmpty()) return
+        _pendingPlanDrafts.value = emptyList()
+        _pendingPlanMessageId.value = null
+        viewModelScope.launch {
+            var created = 0
+            var failed = 0
+            val createdLines = mutableListOf<String>()
+            val timeFormat = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault())
+            for (draft in drafts) {
+                val result = runCatching { preFilter.confirmDraft(userId, draft) }.getOrNull()
+                if (result is PreFilterResult.Handled) {
+                    created++
+                    val end = draft.endEpochMillis
+                        ?: (draft.startEpochMillis + draft.focusDurationMinutes * 60 * 1000L)
+                    createdLines += "${draft.title} (${timeFormat.format(java.util.Date(draft.startEpochMillis))} – ${timeFormat.format(java.util.Date(end))})"
+                } else {
+                    failed++
+                }
+            }
+            val isBengali = drafts.first().isBengali
+            val summary = StringBuilder()
+            if (created > 0) {
+                summary.append(
+                    if (isBengali) "হয়ে গেছে — ${created}টা ফোকাস ব্লক বসিয়েছি:\n"
+                    else "Done — scheduled $created ${if (created == 1) "focus block" else "focus blocks"}:\n"
+                )
+                createdLines.forEach { summary.append("• $it\n") }
+            }
+            if (failed > 0) {
+                summary.append(
+                    if (isBengali) "${failed}টা বসানো যায়নি — আবার চেষ্টা করো।"
+                    else "$failed couldn't be scheduled — please try again."
+                )
+            }
+            postAssistantMessage(summary.toString().trimEnd())
+        }
+    }
+
+    /**
+     * Sprint 3-6 — Discard on the day-plan preview card: nothing
+     * is created. A discard with no pending plan is a no-op.
+     */
+    fun discardPlan() {
+        val drafts = _pendingPlanDrafts.value
+        if (drafts.isEmpty()) return
+        _pendingPlanDrafts.value = emptyList()
+        _pendingPlanMessageId.value = null
+        viewModelScope.launch {
+            postAssistantMessage(
+                if (drafts.first().isBengali) "ঠিক আছে, কিছু বসাইনি — প্ল্যানটা বাতিল করেছি।"
+                else "No problem — I didn't schedule anything, the plan is discarded."
+            )
+        }
+    }
+
+    /**
+     * Sprint 3-6 — per-item remove on the day-plan preview card:
+     * drops one block before Confirm. Removing the last item clears
+     * the card and posts the same note as Discard — nothing was
+     * created.
+     */
+    fun removePlanDraft(index: Int) {
+        val drafts = _pendingPlanDrafts.value
+        if (index !in drafts.indices) return
+        val remaining = drafts.toMutableList().also { it.removeAt(index) }
+        _pendingPlanDrafts.value = remaining
+        if (remaining.isEmpty()) {
+            _pendingPlanMessageId.value = null
+            viewModelScope.launch {
+                postAssistantMessage(
+                    if (drafts.first().isBengali) "ঠিক আছে, কিছু বসাইনি — প্ল্যানটা বাতিল করেছি।"
+                    else "No problem — I didn't schedule anything, the plan is discarded."
+                )
+            }
+        }
+    }
+
+    /**
+     * Sprint 3-6 — the priority command. Nothing is written here —
+     * the order waits as pending state until Apply. A conflict is
+     * checked per task only for a real due time today that is still
+     * ahead (an overdue task's window is in the past; a timeless
+     * task has no window) — the check is what demotes a task below
+     * a free one in [DayPlanner.priorityOrder].
+     */
+    private suspend fun handlePriorityCommand(prompt: String) {
+        val isBengali = prompt.any { it in '\u0980'..'\u09FF' }
+        val now = System.currentTimeMillis()
+        val todayStart = startOfDayMillis(now)
+        val todayEnd = endOfDayMillis(now)
+        val allTasks = runCatching { taskRepository.getAllTasksOnce(userId) }
+            .getOrDefault(emptyList())
+        val unplaced = DayPlanner.unplacedTasks(allTasks, todayStart, todayEnd)
+        if (unplaced.isEmpty()) {
+            postAssistantMessage(
+                if (isBengali) "আজ সাজানোর মতো কোনো কাজ নেই — সব কাজেরই সময় ঠিক করা আছে, নয়তো আজকের কোনো কাজ নেই।"
+                else "Nothing to order — every task already has its time, or there's nothing due today."
+            )
+            return
+        }
+        val conflicts = mutableMapOf<String, String?>()
+        for (task in unplaced) {
+            val due = task.dueDateEpochMillis
+            if (DayPlanner.hasRealTime(task) && due in now until todayEnd) {
+                val duration = (task.estimatedMinutes ?: 30) * 60 * 1000L
+                val conflict = runCatching {
+                    calendarRepository.checkConflict(userId, due, due + duration)
+                }.getOrNull()
+                if (conflict?.hasConflict == true) {
+                    conflicts[task.id] = conflict.conflictingEvent?.title
+                }
+            }
+        }
+        val ordered = DayPlanner.priorityOrder(unplaced, now) { conflicts.containsKey(it.id) }
+        _pendingPriorityOrder.value = ordered.map { it.id }
+        val messageId = postAssistantMessage(
+            text = buildPriorityReplyText(ordered, conflicts, now, isBengali),
+            actionType = ChatActionType.DAILY_PLAN,
+            quickSuggestions = listOf("Plan my day", "Show today's tasks")
+        )
+        _pendingPriorityMessageId.value = messageId
+    }
+
+    /** The priority reply's text: the numbered order, with the
+     *  scoring visible on every line (overdue / due time / HIGH /
+     *  conflict) so the user can see WHY this is the order. */
+    private fun buildPriorityReplyText(
+        ordered: List<TaskEntity>,
+        conflicts: Map<String, String?>,
+        now: Long,
+        isBengali: Boolean
+    ): String {
+        val timeFormat = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault())
+        val lines = StringBuilder()
+        lines.append(
+            if (isBengali) "আজ এভাবে করলে ভালো হবে:\n"
+            else "Here's the order I'd tackle today:\n"
+        )
+        ordered.forEachIndexed { index, task ->
+            val reason = buildString {
+                if (DayPlanner.isOverdue(task, now)) {
+                    append(
+                        if (isBengali) "সময় পেরিয়ে গেছে — ${timeFormat.format(java.util.Date(task.dueDateEpochMillis))} ছিল"
+                        else "overdue — due ${timeFormat.format(java.util.Date(task.dueDateEpochMillis))}"
+                    )
+                } else if (DayPlanner.hasRealTime(task)) {
+                    append(
+                        if (isBengali) timeFormat.format(java.util.Date(task.dueDateEpochMillis))
+                        else "due ${timeFormat.format(java.util.Date(task.dueDateEpochMillis))}"
+                    )
+                } else {
+                    append(if (isBengali) "যেকোনো সময়" else "anytime")
+                }
+                if (task.priority == com.nextgentool.nudgy.data.model.Priority.HIGH) {
+                    append(if (isBengali) " · বেশি জরুরি" else " · HIGH priority")
+                }
+                val conflictingTitle = conflicts[task.id]
+                if (conflictingTitle != null) {
+                    append(
+                        if (isBengali) " · \"$conflictingTitle\"-এর সঙ্গে ধাক্কা খায়"
+                        else " · conflicts with '$conflictingTitle'"
+                    )
+                }
+            }
+            lines.append("${index + 1}. ${task.title} — $reason\n")
+        }
+        lines.append(
+            if (isBengali) "Apply করলে My Day এই ক্রমে সাজবে।"
+            else "Tap Apply to make this your My Day order."
+        )
+        return lines.toString().trimEnd()
+    }
+
+    /**
+     * Sprint 3-6 — Apply on the priority reply: stamps the pending
+     * order through the Plan pick path — plannedDate = today +
+     * sequential plannedStart in priority order (via
+     * [PlanDayUseCase.assignPriorityStartTimes], the same stamping
+     * [PlanViewModel.startMyDay] does). My Day sorts by
+     * plannedStart, so the My-Day order follows the reply. Due,
+     * status and boardOrder are untouched; already-placed tasks
+     * keep their stamps. An Apply with no pending order is a no-op.
+     */
+    fun applyPriorityOrder() {
+        val orderIds = _pendingPriorityOrder.value ?: return
+        _pendingPriorityOrder.value = null
+        _pendingPriorityMessageId.value = null
+        viewModelScope.launch {
+            val allTasks = runCatching { taskRepository.getAllTasksOnce(userId) }
+                .getOrDefault(emptyList())
+            val byId = allTasks.associateBy { it.id }
+            val ordered = orderIds.mapNotNull { byId[it] }
+                .filter { !it.isCompleted && it.parentTaskId == null }
+            if (ordered.isEmpty()) {
+                postAssistantMessage("Nothing to apply — those tasks are gone.")
+                return@launch
+            }
+            val now = System.currentTimeMillis()
+            val starts = planDayUseCase.assignPriorityStartTimes(
+                priorityOrdered = ordered,
+                startOfToday = startOfDayMillis(now),
+                now = now
+            )
+            val todayString = todayDateString()
+            for (task in ordered) {
+                runCatching {
+                    taskRepository.updateTask(
+                        task.copy(
+                            plannedDate = todayString,
+                            plannedStartEpochMillis = starts[task.id]
+                        )
+                    )
+                }
+            }
+            val lines = StringBuilder("Done — your My Day now follows this order:\n")
+            ordered.forEachIndexed { index, task -> lines.append("${index + 1}. ${task.title}\n") }
+            postAssistantMessage(lines.toString().trimEnd())
+        }
+    }
+
+    /** Sprint 3-6 — dismiss the priority Apply card without
+     *  applying. The reply stays in history as plain text. */
+    fun dismissPriorityOrder() {
+        if (_pendingPriorityOrder.value == null) return
+        _pendingPriorityOrder.value = null
+        _pendingPriorityMessageId.value = null
     }
 
     /**

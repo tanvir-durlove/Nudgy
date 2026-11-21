@@ -1533,44 +1533,15 @@ class ClientIntentPreFilter(
             )
         }
 
-        // 8. English: "Plan my day" / "দিনের প্ল্যান"
-        if (lower == "plan my day" || lower.contains("plan my day") || cleaned.contains("প্ল্যান")) {
-            val pending = todayTasks.filter { !it.isCompleted }
-            val planLead = if (pending.isEmpty()) {
-                "You have no tasks scheduled yet today"
-            } else {
-                "Start with '${pending.first().title}'"
-            }
-            val meetingText = if (events.isNotEmpty()) {
-                val firstEvent = events.first()
-                "meeting '${firstEvent.title}' at ${formatTime(firstEvent.startEpochMillis)}"
-            } else {
-                "no conflicting meetings"
-            }
-
-            val suggestedSlot = calendarRepository.findSuggestedFocusSlot(userId, System.currentTimeMillis(), taskBusyIntervals)
-            val startFocus = suggestedSlot?.startEpochMillis ?: run {
-                val cal = Calendar.getInstance().apply {
-                    add(Calendar.HOUR_OF_DAY, 1)
-                    set(Calendar.MINUTE, 0)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }
-                cal.timeInMillis
-            }
-            val durationMinutes = suggestedSlot?.durationMinutes ?: 45
-            val endFocus = suggestedSlot?.endEpochMillis ?: (startFocus + (durationMinutes * 60 * 1000L))
-            val focusRangeText = "${formatTime(java.util.Date(startFocus))} – ${formatTime(java.util.Date(endFocus))}"
-
-            return PreFilterResult.Handled(
-                responseText = "Here is your plan today: $planLead. You have $meetingText, and an open $durationMinutes-minute focus window ($focusRangeText).",
-                actionType = ChatActionType.FOCUS_TIME_PROPOSAL,
-                focusStartMillis = startFocus,
-                focusEndMillis = endFocus,
-                focusDurationMinutes = durationMinutes,
-                quickSuggestions = listOf("Block ${durationMinutes}m focus", "Show today's tasks", "Clear completed tasks")
-            )
-        }
+        // 8. DELETED in Sprint 3-6 — "Plan my day" / "দিনের প্ল্যান"
+        // used to answer with a short summary here (first task +
+        // first meeting + one focus window). The phrase now really
+        // plans the day: ChatViewModel detects it locally via
+        // DayPlanCommandParser before the prefilter runs, and the
+        // auto-schedule preview (one focus slot per unplaced task)
+        // replaces this summary. Nothing here catches the phrase
+        // first — branch 2's Bengali "আজকের সব কাজ দেখাও" does not
+        // contain "প্ল্যান", and the matcher below never sees it.
 
         // 10. Memory command: "Remember that [fact]" / "Note that [fact]" / "মনে রাখো [fact]"
         // Explicitly guard against actionable tasks like "remember to buy milk" or "মনে করিয়ে দিও"
