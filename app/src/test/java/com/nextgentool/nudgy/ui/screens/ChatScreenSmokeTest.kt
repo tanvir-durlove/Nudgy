@@ -36,6 +36,7 @@ import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.data.repository.ChatRepository
 import com.nextgentool.nudgy.data.repository.MemoryRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.domain.usecase.PlanDayUseCase
 import com.nextgentool.nudgy.ui.viewmodel.ChatViewModel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -120,6 +121,7 @@ class ChatScreenSmokeTest {
     private lateinit var context: Context
     private lateinit var viewModel: ChatViewModel
     private lateinit var taskRepository: TaskRepository
+    private lateinit var calendarRepository: CalendarRepository
     private lateinit var recordingGemini: RecordingGeminiClient
 
     @Before
@@ -133,7 +135,7 @@ class ChatScreenSmokeTest {
             .allowMainThreadQueries()
             .build()
         taskRepository = TaskRepository(context, db)
-        val calendarRepository = CalendarRepository(context, db)
+        calendarRepository = CalendarRepository(context, db)
         val memoryRepository = MemoryRepository(context, db)
         val preFilter = ClientIntentPreFilter(
             taskRepository, calendarRepository, memoryRepository, context.assets
@@ -170,7 +172,8 @@ class ChatScreenSmokeTest {
                     modelVersion = "gemini-3.5-flash-lite"
                 )
             },
-            com.nextgentool.nudgy.ads.NudgyAdsRewardedGateway(context)
+            com.nextgentool.nudgy.ads.NudgyAdsRewardedGateway(context),
+            PlanDayUseCase()
         )
     }
 
@@ -193,6 +196,11 @@ class ChatScreenSmokeTest {
             // would be dead in the test.
             val pendingDraft by viewModel.pendingDraft.collectAsState()
             val pendingDraftMessageId by viewModel.pendingDraftMessageId.collectAsState()
+            // Sprint 3-6 — the day-plan card and the priority Apply
+            // card render from the ViewModel's pending plan / order.
+            val pendingPlanDrafts by viewModel.pendingPlanDrafts.collectAsState()
+            val pendingPlanMessageId by viewModel.pendingPlanMessageId.collectAsState()
+            val pendingPriorityMessageId by viewModel.pendingPriorityMessageId.collectAsState()
             ChatScreen(
                 user = viewModel.user,
                 messages = messages,
@@ -212,7 +220,15 @@ class ChatScreenSmokeTest {
                 onDiscardDraft = { viewModel.discardDraft() },
                 onDraftEdited = { viewModel.editDraft(it) },
                 // Sprint 3-5 — per-item remove on the split preview card.
-                onRemoveSplitSubtask = { viewModel.removeSplitSubtask(it) }
+                onRemoveSplitSubtask = { viewModel.removeSplitSubtask(it) },
+                pendingPlanDrafts = pendingPlanDrafts,
+                pendingPlanMessageId = pendingPlanMessageId,
+                onConfirmPlan = { viewModel.confirmPlan() },
+                onDiscardPlan = { viewModel.discardPlan() },
+                onRemovePlanDraft = { viewModel.removePlanDraft(it) },
+                pendingPriorityMessageId = pendingPriorityMessageId,
+                onApplyPriorityOrder = { viewModel.applyPriorityOrder() },
+                onDismissPriorityOrder = { viewModel.dismissPriorityOrder() }
             )
         }
     }
@@ -584,6 +600,118 @@ class ChatScreenSmokeTest {
         composeRule.onNodeWithTag("draft_preview_card").assertDoesNotExist()
         runBlocking {
             assertTrue(taskRepository.observeSubtasks(parent.id).first().isEmpty())
+        }
+    }
+
+    // ---- Sprint 3-6 — auto-schedule (feature 21) + priority (feature 22) ----
+
+    private fun at(dayOffset: Int, hour: Int): Long =
+        java.util.Calendar.getInstance().apply {
+            add(java.util.Calendar.DAY_OF_MONTH, dayOffset)
+            set(java.util.Calendar.HOUR_OF_DAY, hour)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+    private fun seedDayTask(title: String, dueEpochMillis: Long) = runBlocking {
+        taskRepository.createTask(
+            userId = "test-user-1",
+            title = title,
+            dueEpochMillis = dueEpochMillis
+        )
+    }
+
+    private fun waitForWelcome() {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Hi! What can I help you get done today?")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    private fun sendChat(text: String) {
+        composeRule.onNode(hasSetTextAction()).performTextInput(text)
+        composeRule.onNodeWithContentDescription("Send").performClick()
+    }
+
+    @Test
+    fun `auto-schedule flow renders the day-plan card and confirm creates focus blocks`() {
+        // Needs a future window today for a 45-minute block: after
+        // 22:00 the day has no room left, so the command legitimately
+        // answers "no free slot" instead of proposing one.
+        org.junit.Assume.assumeTrue(
+            java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY) < 22
+        )
+        seedDayTask("Morning report", at(0, 9))
+        seedDayTask("Afternoon review", at(0, 15))
+        setChatContent()
+        waitForWelcome()
+        sendChat("plan my day")
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("day_plan_preview_card")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("day_plan_preview_card").assertIsDisplayed()
+        composeRule.onNodeWithText("Morning report").assertIsDisplayed()
+        composeRule.onNodeWithText("Afternoon review").assertIsDisplayed()
+        runBlocking {
+            assertTrue(
+                calendarRepository.observeEventsForDay("test-user-1", System.currentTimeMillis())
+                    .first().isEmpty()
+            )
+        }
+        composeRule.onNodeWithTag("day_plan_confirm_button").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("day_plan_preview_card")
+                .fetchSemanticsNodes().isEmpty()
+        }
+        // The receipt arrives only after Confirm actually saved.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("scheduled 2 focus blocks", substring = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        runBlocking {
+            val events = calendarRepository.observeEventsForDay("test-user-1", System.currentTimeMillis())
+                .first().filter { it.eventType == "FOCUS_TIME" }
+            assertEquals(2, events.size)
+            assertEquals(setOf("Morning report", "Afternoon review"), events.map { it.title }.toSet())
+        }
+    }
+
+    @Test
+    fun `priority flow renders the Apply card and Apply stamps My Day order`() {
+        val overdue = seedDayTask("Overdue report", at(-1, 18))
+        val morning = seedDayTask("Morning email", at(0, 9))
+        val urgent = seedDayTask("Urgent fix", at(0, 15))
+        setChatContent()
+        waitForWelcome()
+        sendChat("what should I do first?")
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("priority_apply_card")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("priority_apply_card").assertIsDisplayed()
+        // The titles live inside the numbered reply's single message
+        // text node, so the match must be a substring — an exact
+        // match can never find them.
+        composeRule.onNodeWithText("Overdue report", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Morning email", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Urgent fix", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("priority_apply_button").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("priority_apply_card")
+                .fetchSemanticsNodes().isEmpty()
+        }
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("your My Day now follows this order", substring = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        runBlocking {
+            val stamped = taskRepository.getAllTasksOnce("test-user-1")
+                .filter { it.id in listOf(overdue.id, morning.id, urgent.id) }
+                .sortedBy { it.plannedStartEpochMillis }
+            assertTrue(stamped.all { it.plannedDate != null && it.plannedStartEpochMillis != null })
+            assertEquals(listOf(overdue.id, morning.id, urgent.id), stamped.map { it.id })
         }
     }
 }

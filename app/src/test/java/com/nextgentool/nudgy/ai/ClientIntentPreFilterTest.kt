@@ -159,18 +159,14 @@ class ClientIntentPreFilterTest {
     // clear / complete). The 6 original tests only covered the parser
     // bugs; these pin the branches the chat actually answers with.
 
-    @Test
-    fun `plan my day returns a plan with a focus proposal and creates nothing`() = runTest {
-        val result = preFilter.tryHandle("test-user", "plan my day", emptyList(), emptyList())
-        assertTrue(result is PreFilterResult.Handled)
-        val handled = result as PreFilterResult.Handled
-        assertNull(handled.createdTask)
-        assertNull(handled.createdEvent)
-        assertEquals(ChatActionType.FOCUS_TIME_PROPOSAL, handled.actionType)
-        assertNotNull(handled.focusStartMillis)
-        assertNotNull(handled.focusEndMillis)
-        assertTrue(handled.responseText.contains("plan", ignoreCase = true))
-    }
+    // Sprint 3-6 — the old "plan my day" summary branch (branch 8)
+    // is DELETED: the phrase now really plans the day, and the
+    // behaviour lives in ChatViewModel (DayPlanCommandParser +
+    // handleAutoScheduleCommand), tested in ChatViewModelTest
+    // ("plan my day previews focus slots and creates nothing yet").
+    // tryHandle("plan my day") no longer answers with a focus
+    // proposal — the ViewModel intercepts it first, so no prefilter
+    // test pins it here.
 
     @Test
     fun `find free time proposes a focus slot without creating an event`() = runTest {

@@ -30,6 +30,7 @@ import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.data.repository.ChatRepository
 import com.nextgentool.nudgy.data.repository.MemoryRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.domain.usecase.PlanDayUseCase
 import com.nextgentool.nudgy.ui.screens.ChatMessage
 import com.nextgentool.nudgy.ui.viewmodel.ChatViewModel
 import org.junit.After
@@ -121,7 +122,8 @@ class QuickChatSheetTest {
                     modelVersion = "gemini-3.5-flash-lite"
                 )
             },
-            com.nextgentool.nudgy.ads.NudgyAdsRewardedGateway(context)
+            com.nextgentool.nudgy.ads.NudgyAdsRewardedGateway(context),
+            PlanDayUseCase()
         )
     }
 

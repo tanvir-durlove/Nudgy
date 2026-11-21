@@ -21,11 +21,15 @@ import com.nextgentool.nudgy.ai.ReplySoundPlayer
 import com.nextgentool.nudgy.ai.VoiceInput
 import com.nextgentool.nudgy.ai.VoiceInputError
 import com.nextgentool.nudgy.data.local.NudgyDatabase
+import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
+import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.data.repository.ChatRepository
 import com.nextgentool.nudgy.data.repository.MemoryRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.domain.endOfDayMillis
 import com.nextgentool.nudgy.domain.startOfDayMillis
+import com.nextgentool.nudgy.domain.usecase.PlanDayUseCase
 import com.nextgentool.nudgy.ui.screens.ChatActionType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -262,7 +266,8 @@ class ChatViewModelTest {
         memoryRepository,
         context,
         LlmConfigProvider { config },
-        fakeRewarded
+        fakeRewarded,
+        PlanDayUseCase()
     )
 
     private fun setByokKey() {
@@ -1227,6 +1232,439 @@ class ChatViewModelTest {
             val subtasks = taskRepository.observeSubtasks(parent.id).first()
             assertEquals(listOf("ময়দা কেনা", "ময়দা মাখা"), subtasks.map { it.title })
             assertEquals(0 to 2, taskRepository.subtaskProgress(parent.id))
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    // ---- Sprint 3-6 — auto-schedule (feature 21) + priority (feature 22) ----
+
+    private fun at(dayOffset: Int, hour: Int, minute: Int = 0): Long =
+        Calendar.getInstance().apply {
+            add(Calendar.DAY_OF_MONTH, dayOffset)
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, minute)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+    private suspend fun seedTask(
+        title: String,
+        due: Long,
+        priority: Priority = Priority.MEDIUM,
+        estimatedMinutes: Int? = null
+    ) = taskRepository.createTask(
+        userId = userId,
+        title = title,
+        dueEpochMillis = due,
+        priority = priority,
+        estimatedMinutes = estimatedMinutes
+    )
+
+    private suspend fun seedMeeting(title: String, start: Long, end: Long) =
+        calendarRepository.addEvent(userId, title, start, end)
+
+    /** True after 22:00: a 45-minute focus block can no longer fit
+     *  in the day, so auto-schedule legitimately answers "no free
+     *  slot" instead of proposing one. Tests that propose slots
+     *  branch on this (both outcomes are correct behaviour). */
+    private fun isLateNight(): Boolean =
+        Calendar.getInstance().get(Calendar.HOUR_OF_DAY) >= 22
+
+    @Test
+    fun `plan my day previews focus slots and creates nothing yet`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            val morning = seedTask("Morning report", at(0, 9))
+            val anytime = seedTask("Buy printer paper", TaskRepository.NO_DUE_DATE)
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("plan my day")
+            val messages = viewModel.messages.first { it.size == 3 }
+            assertEquals(ChatActionType.DRAFT_PREVIEW, messages[2].actionType)
+            val drafts = viewModel.pendingPlanDrafts.value
+            if (drafts.isEmpty()) {
+                // Late night only: the day has no room left for a
+                // 45-minute block — the plain answer, not a preview.
+                assertTrue(isLateNight())
+                assertTrue(messages[2].text.contains("No free slot"))
+            } else {
+                assertEquals(2, drafts.size)
+                assertTrue(drafts.all { it.kind == DraftKind.FOCUS_EVENT })
+                assertEquals(
+                    setOf(morning.title, anytime.title),
+                    drafts.map { it.title }.toSet()
+                )
+                val now = System.currentTimeMillis()
+                val todayEnd = endOfDayMillis(now)
+                // Every proposed slot is in the future, inside today,
+                // and no two overlap.
+                assertTrue(drafts.all { it.startEpochMillis > now && it.endEpochMillis!! <= todayEnd })
+                val sorted = drafts.sortedBy { it.startEpochMillis }
+                for (i in 0 until sorted.size - 1) {
+                    assertTrue(sorted[i].endEpochMillis!! <= sorted[i + 1].startEpochMillis)
+                }
+                assertTrue(messages[2].text.contains("Here's your day plan"))
+            }
+            // Nothing is in the DB yet — the preview is only a question.
+            assertTrue(calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first().isEmpty())
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `plan my day never double-books a busy slot`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            seedMeeting("Team sync", at(0, 14), at(0, 15))
+            seedTask("Write proposal", at(0, 16))
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("schedule my day")
+            val messages = viewModel.messages.first { it.size == 3 }
+            val drafts = viewModel.pendingPlanDrafts.value
+            if (drafts.isEmpty()) {
+                assertTrue(isLateNight())
+                assertTrue(messages[2].text.contains("No free slot"))
+            } else {
+                assertEquals(1, drafts.size)
+                val draft = drafts.single()
+                // The proposed block must not touch 14:00–15:00.
+                assertFalse(draft.startEpochMillis < at(0, 15) && draft.endEpochMillis!! > at(0, 14))
+                assertTrue(draft.startEpochMillis > System.currentTimeMillis())
+            }
+            assertTrue(calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first().size == 1)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `plan my day leaves already-placed tasks alone`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            val placed = seedTask("Placed task", at(0, 10))
+            val todayString = com.nextgentool.nudgy.domain.todayDateString()
+            taskRepository.updateTask(
+                placed.copy(plannedDate = todayString, plannedStartEpochMillis = at(0, 10))
+            )
+            seedTask("Unplaced task", at(0, 12))
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("আমার দিনটা সাজাও")
+            viewModel.messages.first { it.size == 3 }
+            val drafts = viewModel.pendingPlanDrafts.value
+            if (drafts.isNotEmpty()) {
+                assertEquals(listOf("Unplaced task"), drafts.map { it.title })
+                viewModel.confirmPlan()
+                viewModel.messages.first { it.size == 4 }
+                // The placed task never moved; exactly one focus block
+                // was created, for the unplaced task.
+                val after = taskRepository.getAllTasksOnce(userId).first { it.id == placed.id }
+                assertEquals(at(0, 10), after.plannedStartEpochMillis)
+                val events = calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first()
+                assertEquals(1, events.filter { it.eventType == "FOCUS_TIME" }.size)
+                assertEquals("Unplaced task", events.single { it.eventType == "FOCUS_TIME" }.title)
+            } else {
+                // Late night only: nothing could be proposed, so
+                // Confirm-all has nothing to do and creates nothing.
+                assertTrue(isLateNight())
+                val after = taskRepository.getAllTasksOnce(userId).first { it.id == placed.id }
+                assertEquals(at(0, 10), after.plannedStartEpochMillis)
+            }
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `plan my day with an all-day holiday still proposes slots`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            val todayStart = startOfDayMillis(System.currentTimeMillis())
+            db.calendarDao().insertEvent(
+                CalendarEventEntity(
+                    userId = userId,
+                    title = "Victory Day",
+                    startEpochMillis = todayStart,
+                    endEpochMillis = todayStart + 24 * 60 * 60 * 1000L,
+                    isAllDay = true
+                )
+            )
+            seedTask("Write report", at(0, 11))
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("plan my day")
+            val messages = viewModel.messages.first { it.size == 3 }
+            val drafts = viewModel.pendingPlanDrafts.value
+            if (drafts.isEmpty()) {
+                // Late night only — the all-day label is not what
+                // blocked the plan; the day simply has no room left.
+                assertTrue(isLateNight())
+                assertTrue(messages[2].text.contains("No free slot"))
+            } else {
+                // The 00:00–24:00 label never counts as busy (S2-1b).
+                assertEquals(1, drafts.size)
+                assertEquals("Write report", drafts.single().title)
+            }
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `plan my day with a full calendar says no free slot`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            val todayStart = startOfDayMillis(System.currentTimeMillis())
+            seedMeeting("Morning block", todayStart, todayStart + 12 * 60 * 60 * 1000L)
+            seedMeeting("Afternoon block", todayStart + 12 * 60 * 60 * 1000L, todayStart + 24 * 60 * 60 * 1000L - 60 * 1000L)
+            seedTask("Write report", at(0, 11))
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("plan my day")
+            val messages = viewModel.messages.first { it.size == 3 }
+            // Deterministic at any hour: the fallback slot lands
+            // tomorrow, so nothing can be proposed today.
+            assertTrue(viewModel.pendingPlanDrafts.value.isEmpty())
+            assertTrue(messages[2].text.contains("No free slot"))
+            assertEquals(ChatActionType.NONE, messages[2].actionType)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `plan my day with nothing unplaced says so and creates nothing`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("plan my day")
+            val messages = viewModel.messages.first { it.size == 3 }
+            assertTrue(viewModel.pendingPlanDrafts.value.isEmpty())
+            assertTrue(messages[2].text.contains("Nothing to schedule"))
+            assertTrue(calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first().isEmpty())
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `plan my day confirm-all creates one focus block per draft`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            seedTask("Task one", at(0, 9))
+            seedTask("Task two", at(0, 15))
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("plan my day")
+            viewModel.messages.first { it.size == 3 }
+            val drafts = viewModel.pendingPlanDrafts.value
+            if (drafts.isEmpty()) {
+                // Late night only: nothing was proposed, so there is
+                // nothing to confirm.
+                assertTrue(isLateNight())
+                return@runTest
+            }
+            assertEquals(2, drafts.size)
+            viewModel.confirmPlan()
+            val afterConfirm = viewModel.messages.first { it.size == 4 }
+            assertTrue(afterConfirm[3].text.contains("scheduled 2 focus blocks"))
+            val events = calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first()
+                .filter { it.eventType == "FOCUS_TIME" }
+            assertEquals(2, events.size)
+            assertEquals(setOf("Task one", "Task two"), events.map { it.title }.toSet())
+            assertTrue(viewModel.pendingPlanDrafts.value.isEmpty())
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `plan my day remove one then confirm creates the rest`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            seedTask("Keep me", at(0, 9))
+            seedTask("Drop me", at(0, 15))
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("plan my day")
+            viewModel.messages.first { it.size == 3 }
+            val drafts = viewModel.pendingPlanDrafts.value
+            if (drafts.isEmpty()) {
+                assertTrue(isLateNight())
+                return@runTest
+            }
+            val dropIndex = drafts.indexOfFirst { it.title == "Drop me" }
+            assertTrue(dropIndex >= 0)
+            viewModel.removePlanDraft(dropIndex)
+            assertEquals(1, viewModel.pendingPlanDrafts.value.size)
+            viewModel.confirmPlan()
+            viewModel.messages.first { it.size == 4 }
+            val events = calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first()
+                .filter { it.eventType == "FOCUS_TIME" }
+            assertEquals(listOf("Keep me"), events.map { it.title })
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `plan my day discard creates nothing`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            seedTask("Task one", at(0, 9))
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("plan my day")
+            viewModel.messages.first { it.size == 3 }
+            viewModel.discardPlan()
+            val afterDiscard = viewModel.messages.first { it.size == 4 }
+            assertTrue(afterDiscard[3].text.contains("didn't schedule anything"))
+            assertTrue(calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first().isEmpty())
+            assertTrue(viewModel.pendingPlanDrafts.value.isEmpty())
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `priority order replies numbered with reasons and Apply stamps My Day order`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            val overdue = seedTask("Overdue report", at(-1, 18))
+            val morning = seedTask("Morning email", at(0, 9))
+            val high = seedTask("Urgent fix", at(0, 15), priority = Priority.HIGH)
+            val medium = seedTask("Routine review", at(0, 15))
+            val timeless = seedTask("Read article", TaskRepository.NO_DUE_DATE, priority = Priority.LOW)
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("what should I do first?")
+            val messages = viewModel.messages.first { it.size == 3 }
+            val reply = messages[2]
+            assertEquals(ChatActionType.DAILY_PLAN, reply.actionType)
+            // The order is wall-clock independent: overdue first, then
+            // due time, HIGH before MEDIUM at the same due, timeless last.
+            assertEquals(
+                listOf(overdue.id, morning.id, high.id, medium.id, timeless.id),
+                viewModel.pendingPriorityOrder.value
+            )
+            // The scoring is visible in the text: overdue is named,
+            // HIGH is named, and the numbers follow the order.
+            val text = reply.text
+            assertTrue(text.contains("overdue"))
+            assertTrue(text.contains("HIGH priority"))
+            val positions = listOf(overdue.title, morning.title, high.title, medium.title, timeless.title)
+                .map { text.indexOf(it) }
+            assertTrue(positions.all { it >= 0 })
+            assertEquals(positions.sorted(), positions)
+            assertTrue(text.startsWith("Here's the order I'd tackle today:"))
+            // Apply stamps plannedDate + sequential plannedStart in
+            // priority order — My Day sorts by plannedStart.
+            viewModel.applyPriorityOrder()
+            val afterApply = viewModel.messages.first { it.size == 4 }
+            assertTrue(afterApply[3].text.contains("Done — your My Day now follows this order:"))
+            val todayString = com.nextgentool.nudgy.domain.todayDateString()
+            val stamped = taskRepository.getAllTasksOnce(userId)
+                .filter { it.id in listOf(overdue.id, morning.id, high.id, medium.id, timeless.id) }
+                .sortedBy { it.plannedStartEpochMillis }
+            assertTrue(stamped.all { it.plannedDate == todayString && it.plannedStartEpochMillis != null })
+            assertEquals(
+                listOf(overdue.id, morning.id, high.id, medium.id, timeless.id),
+                stamped.map { it.id }
+            )
+            assertNull(viewModel.pendingPriorityOrder.value)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `priority order demotes a task that conflicts with a meeting`() = runTest {
+        // Needs room today for the meeting to end before midnight:
+        // after 21:00 the meeting window would cross into tomorrow,
+        // so the check cannot run — the pure DayPlannerTest covers
+        // the ranking itself.
+        org.junit.Assume.assumeTrue(Calendar.getInstance().get(Calendar.HOUR_OF_DAY) < 21)
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            val now = System.currentTimeMillis()
+            val todayEnd = endOfDayMillis(now)
+            val soonDue = minOf(now + 2 * 60 * 60 * 1000L, todayEnd - 60 * 60 * 1000L)
+            val overdue = seedTask("Overdue report", at(-1, 18))
+            // Both tasks share the same due time and priority, so the
+            // conflict key alone decides their order. The meeting
+            // starts 20 minutes after the due time: the 15-minute
+            // "Free task" ends before it (genuinely free) while the
+            // default 30-minute "Clashing task" runs into it
+            // (genuinely conflicting). The old version seeded the
+            // meeting exactly on the due time, so BOTH tasks
+            // conflicted and the order proved nothing — and it
+            // asserted the English "conflicts with" wording on a
+            // Bengali reply, which can never match.
+            val free = seedTask("Free task", soonDue, estimatedMinutes = 15)
+            val conflict = seedTask("Clashing task", soonDue)
+            seedMeeting("Team sync", soonDue + 20 * 60 * 1000L, soonDue + 50 * 60 * 1000L)
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("দিনটা সাজিয়ে দাও")
+            val messages = viewModel.messages.first { it.size == 3 }
+            assertEquals(ChatActionType.DAILY_PLAN, messages[2].actionType)
+            assertEquals(
+                listOf(overdue.id, free.id, conflict.id),
+                viewModel.pendingPriorityOrder.value
+            )
+            // The command is Bengali, so the reply is Bengali: the
+            // conflict reason is worded "…-এর সঙ্গে ধাক্কা খায়",
+            // and it appears on the clashing task's line only.
+            val replyText = messages[2].text
+            assertTrue(replyText.contains("\"Team sync\"-এর সঙ্গে ধাক্কা খায়"))
+            val freeLine = replyText.lines().first { it.contains("Free task") }
+            assertTrue(!freeLine.contains("ধাক্কা খায়"))
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `priority Apply with no pending order is a no-op`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.applyPriorityOrder()
+            assertEquals(1, viewModel.messages.value.size)
+            assertNull(viewModel.pendingPriorityOrder.value)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `priority with nothing unplaced says so`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("prioritize my day")
+            val messages = viewModel.messages.first { it.size == 3 }
+            assertNull(viewModel.pendingPriorityOrder.value)
+            assertTrue(messages[2].text.contains("Nothing to order"))
         } finally {
             Dispatchers.resetMain()
         }

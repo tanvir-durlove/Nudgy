@@ -115,4 +115,38 @@ class PlanDayUseCaseTest {
         val starts = useCase.assignStartTimes(picked, todayStart, now)
         assertEquals(todayStart + 9 * 60 * 60 * 1000L, starts["midnight"])
     }
+
+    // ---- Sprint 3-6 — priority start times (feature 22, Q5 = (a)) ----
+
+    @Test
+    fun `priority start times are sequential in priority order, never the due time`() {
+        val todayStart = startOfDayMillis(System.currentTimeMillis())
+        // "now" is 08:00 today, so the first slot is 09:00.
+        val now = todayStart + 8 * 60 * 60 * 1000L
+        // The first task is due 15:00 but ranked first — its due time
+        // must NOT be kept, or My Day would re-sort by due time and
+        // destroy the priority order.
+        val ordered = listOf(
+            task("first-due-15", at(0, 15)),
+            task("second-due-9", at(0, 9), estimatedMinutes = 60),
+            task("third-no-est", 0L, estimatedMinutes = null)
+        )
+        val starts = useCase.assignPriorityStartTimes(ordered, todayStart, now)
+        assertEquals(todayStart + 9 * 60 * 60 * 1000L, starts["first-due-15"])
+        // The 30-min default slot for the first task ends at 09:30;
+        // the 60-min second task runs 09:30–10:30.
+        assertEquals(todayStart + 9 * 60 * 60 * 1000L + 30 * 60 * 1000L, starts["second-due-9"])
+        assertEquals(todayStart + 10 * 60 * 60 * 1000L + 30 * 60 * 1000L, starts["third-no-est"])
+    }
+
+    @Test
+    fun `priority start times start from now when now is past 09_00`() {
+        val todayStart = startOfDayMillis(System.currentTimeMillis())
+        // "now" is 14:07 today — the first slot rounds up to 14:15.
+        val now = todayStart + 14 * 60 * 60 * 1000L + 7 * 60 * 1000L
+        val ordered = listOf(task("a", at(0, 10)), task("b", at(0, 11)))
+        val starts = useCase.assignPriorityStartTimes(ordered, todayStart, now)
+        assertEquals(todayStart + 14 * 60 * 60 * 1000L + 15 * 60 * 1000L, starts["a"])
+        assertEquals(todayStart + 14 * 60 * 60 * 1000L + 45 * 60 * 1000L, starts["b"])
+    }
 }

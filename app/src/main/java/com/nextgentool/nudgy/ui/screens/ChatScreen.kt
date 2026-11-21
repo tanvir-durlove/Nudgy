@@ -153,6 +153,23 @@ fun ChatScreen(
     onConfirmBrainDump: () -> Unit = {},
     onDiscardBrainDump: () -> Unit = {},
     onRemoveBrainDumpDraft: (Int) -> Unit = {},
+    // Sprint 3-6 — auto-schedule (feature 21, Q4 = (a)): the day-plan
+    // combined preview card — one FOCUS_EVENT draft per proposed
+    // slot, one Confirm-all, per-item remove. Same pattern as the
+    // brain-dump card; renders only on its own message while the
+    // ViewModel still holds the drafts.
+    pendingPlanDrafts: List<ChatDraft> = emptyList(),
+    pendingPlanMessageId: String? = null,
+    onConfirmPlan: () -> Unit = {},
+    onDiscardPlan: () -> Unit = {},
+    onRemovePlanDraft: (Int) -> Unit = {},
+    // Sprint 3-6 — priority sort (feature 22, Q5 = (a)): the Apply
+    // card on the DAILY_PLAN reply. Renders only on the message the
+    // pending order is attached to; Apply stamps the order into My
+    // Day, "Not now" dismisses it without applying.
+    pendingPriorityMessageId: String? = null,
+    onApplyPriorityOrder: () -> Unit = {},
+    onDismissPriorityOrder: () -> Unit = {},
     // Ads: rewarded entry — non-null only when the free daily chat cap is
     // hit. The button grants +1 AI turn only after a completed ad view.
     chatCapState: ChatCapState? = null,
@@ -704,6 +721,102 @@ fun ChatScreen(
                                         }
                                     }
 
+                                    // S3-6 — Action Card 1e: Day Plan
+                                    // combined preview (feature 21, Q4 =
+                                    // (a)). One card for ALL proposed
+                                    // focus blocks: each row shows task
+                                    // + slot range with its own remove
+                                    // button; Confirm-all schedules every
+                                    // remaining block, Discard drops them
+                                    // all. Same pattern as the brain-dump
+                                    // card (1d); renders only on the
+                                    // message the plan is attached to,
+                                    // and only while the ViewModel still
+                                    // holds the drafts.
+                                    if (message.actionType == ChatActionType.DRAFT_PREVIEW &&
+                                        message.id == pendingPlanMessageId && pendingPlanDrafts.isNotEmpty()
+                                    ) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Surface(
+                                            modifier = Modifier.fillMaxWidth().testTag("day_plan_preview_card"),
+                                            shape = RoundedCornerShape(16.dp),
+                                            color = cream,
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, teal.copy(alpha = 0.3f))
+                                        ) {
+                                            Column(modifier = Modifier.padding(14.dp)) {
+                                                Text(
+                                                    text = "Day plan — ${pendingPlanDrafts.size} ${if (pendingPlanDrafts.size == 1) "focus block" else "focus blocks"}",
+                                                    style = MaterialTheme.typography.titleMedium.copy(
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 15.sp
+                                                    ),
+                                                    color = ink
+                                                )
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                pendingPlanDrafts.forEachIndexed { index, item ->
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Schedule,
+                                                            contentDescription = null,
+                                                            tint = teal,
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Text(
+                                                                text = item.title,
+                                                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                                                                color = ink
+                                                            )
+                                                            val planEnd = item.endEpochMillis
+                                                                ?: (item.startEpochMillis + item.focusDurationMinutes * 60 * 1000L)
+                                                            Text(
+                                                                text = "${timeFormat.format(item.startEpochMillis)} – ${timeFormat.format(planEnd)}",
+                                                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 11.sp),
+                                                                color = muted
+                                                            )
+                                                        }
+                                                        IconButton(
+                                                            onClick = { onRemovePlanDraft(index) },
+                                                            modifier = Modifier.testTag("day_plan_remove_$index").size(28.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Close,
+                                                                contentDescription = "Remove ${item.title}",
+                                                                tint = muted,
+                                                                modifier = Modifier.size(16.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.height(10.dp))
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Button(
+                                                        onClick = onConfirmPlan,
+                                                        shape = RoundedCornerShape(100.dp),
+                                                        colors = ButtonDefaults.buttonColors(containerColor = teal),
+                                                        modifier = Modifier.testTag("day_plan_confirm_button")
+                                                    ) {
+                                                        Text("Confirm all", fontSize = 13.sp, color = Color.White)
+                                                    }
+                                                    TextButton(
+                                                        onClick = onDiscardPlan,
+                                                        modifier = Modifier.testTag("day_plan_discard_button")
+                                                    ) {
+                                                        Text("Discard", fontSize = 13.sp, color = muted)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
                                     // Action Card 2: Focus Time Proposal
                                     if (message.actionType == ChatActionType.FOCUS_TIME_PROPOSAL && message.focusStartMillis != null && message.focusEndMillis != null) {
                                         var focusScheduled by remember { mutableStateOf(message.focusActionCompleted) }
@@ -781,6 +894,60 @@ fun ChatScreen(
                                                     ) {
                                                         Text("Block Time", fontSize = 12.sp, color = Color.White)
                                                     }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // S3-6 — Action Card 3: Priority
+                                    // Apply (feature 22, Q5 = (a)). The
+                                    // DAILY_PLAN reply lists the day in
+                                    // priority order; this card applies
+                                    // that order to My Day (plannedStart
+                                    // stamping, the Plan pick path).
+                                    // Renders only on the message the
+                                    // pending order is attached to —
+                                    // once applied or dismissed, the
+                                    // ViewModel clears the pending id and
+                                    // the card disappears, leaving the
+                                    // numbered reply in history.
+                                    if (message.actionType == ChatActionType.DAILY_PLAN &&
+                                        message.id == pendingPriorityMessageId
+                                    ) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Surface(
+                                            modifier = Modifier.fillMaxWidth().testTag("priority_apply_card"),
+                                            shape = RoundedCornerShape(16.dp),
+                                            color = Color.White,
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, teal.copy(alpha = 0.3f))
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(14.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "Apply this order to My Day?",
+                                                    style = MaterialTheme.typography.titleMedium.copy(
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 14.sp
+                                                    ),
+                                                    color = ink,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Button(
+                                                    onClick = onApplyPriorityOrder,
+                                                    shape = RoundedCornerShape(100.dp),
+                                                    colors = ButtonDefaults.buttonColors(containerColor = teal),
+                                                    modifier = Modifier.testTag("priority_apply_button").padding(start = 8.dp)
+                                                ) {
+                                                    Text("Apply", fontSize = 12.sp, color = Color.White)
+                                                }
+                                                TextButton(
+                                                    onClick = onDismissPriorityOrder,
+                                                    modifier = Modifier.testTag("priority_dismiss_button")
+                                                ) {
+                                                    Text("Not now", fontSize = 12.sp, color = muted)
                                                 }
                                             }
                                         }
