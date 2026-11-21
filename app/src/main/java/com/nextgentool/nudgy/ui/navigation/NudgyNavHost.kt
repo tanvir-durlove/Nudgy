@@ -1,6 +1,7 @@
 package com.nextgentool.nudgy.ui.navigation
 
 import android.Manifest
+import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -32,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -137,10 +139,13 @@ fun NudgyApp() {
             val sheetMessages by chatViewModel.messages.collectAsState()
             val sheetThinking by chatViewModel.isThinking.collectAsState()
             val sheetListening by chatViewModel.isListening.collectAsState()
+            // Sprint 3-4 — the sheet's mic shows Stop while a dump
+            // session is open, even between utterances.
+            val sheetBrainDumpActive by chatViewModel.isBrainDumpActive.collectAsState()
             QuickChatSheet(
                 messages = sheetMessages,
                 isThinking = sheetThinking,
-                isListening = sheetListening,
+                isListening = sheetListening || sheetBrainDumpActive,
                 onSendMessage = { chatViewModel.sendMessage(it) },
                 onExpandToFullChat = {
                     quickChatOpen = false
@@ -302,6 +307,18 @@ fun NudgyNavHost(
             // card's actions back.
             val pendingDraft by viewModel.pendingDraft.collectAsState()
             val pendingDraftMessageId by viewModel.pendingDraftMessageId.collectAsState()
+            // Sprint 3-4 — the brain-dump card, the live transcript,
+            // and the rewarded entry. The rewarded show call needs an
+            // Activity: this route reads it from LocalContext (used
+            // for this call only, never stored in the ViewModel).
+            val isBrainDumpActive by viewModel.isBrainDumpActive.collectAsState()
+            val brainDumpTranscript by viewModel.brainDumpTranscript.collectAsState()
+            val pendingBrainDumpDrafts by viewModel.pendingBrainDumpDrafts.collectAsState()
+            val pendingBrainDumpMessageId by viewModel.pendingBrainDumpMessageId.collectAsState()
+            val chatCapState by viewModel.chatCapState.collectAsState()
+            val rewardedAdReady by viewModel.rewardedAdReady.collectAsState()
+            val rewardedLoadError by viewModel.rewardedLoadError.collectAsState()
+            val activity = LocalContext.current as? Activity
             ChatScreen(
                 user = viewModel.user,
                 messages = messages,
@@ -319,7 +336,19 @@ fun NudgyNavHost(
                 pendingDraftMessageId = pendingDraftMessageId,
                 onConfirmDraft = { viewModel.confirmDraft() },
                 onDiscardDraft = { viewModel.discardDraft() },
-                onDraftEdited = { viewModel.editDraft(it) }
+                onDraftEdited = { viewModel.editDraft(it) },
+                isBrainDumpActive = isBrainDumpActive,
+                brainDumpTranscript = brainDumpTranscript,
+                pendingBrainDumpDrafts = pendingBrainDumpDrafts,
+                pendingBrainDumpMessageId = pendingBrainDumpMessageId,
+                onConfirmBrainDump = { viewModel.confirmBrainDump() },
+                onDiscardBrainDump = { viewModel.discardBrainDump() },
+                onRemoveBrainDumpDraft = { viewModel.removeBrainDumpDraft(it) },
+                chatCapState = chatCapState,
+                rewardedAdReady = rewardedAdReady,
+                rewardedLoadError = rewardedLoadError,
+                onWatchRewardedAd = { activity?.let { viewModel.watchRewardedAd(it) } },
+                onRetryRewardedAd = { viewModel.retryRewardedAd() }
             )
         }
         composable(

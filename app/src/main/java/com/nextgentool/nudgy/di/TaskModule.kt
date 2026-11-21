@@ -118,6 +118,31 @@ object TaskModule {
     ): ReplySoundPlayer = voiceAssistantManager
 
     /**
+     * Sprint 3-4 — the voice-input seam: the ChatViewModel depends on
+     * [VoiceInput], not the concrete manager, so the brain-dump
+     * restart loop is testable with a fake. Same instance as the
+     * manager above (the single recognizer owner).
+     */
+    @Provides
+    @Singleton
+    fun provideVoiceInput(
+        voiceAssistantManager: VoiceAssistantManager
+    ): com.nextgentool.nudgy.ai.VoiceInput = voiceAssistantManager
+
+    /**
+     * Sprint 3-4 — the rewarded-ad seam for the Chat cap entry. The
+     * production gateway delegates to the NudgyAds singleton; tests
+     * substitute a fake. See RewardedAdGateway for the known ads-init
+     * gap (NudgyAds.initialize is never called in the rebuild yet).
+     */
+    @Provides
+    @Singleton
+    fun provideRewardedAdGateway(
+        @ApplicationContext context: Context
+    ): com.nextgentool.nudgy.ads.RewardedAdGateway =
+        com.nextgentool.nudgy.ads.NudgyAdsRewardedGateway(context)
+
+    /**
      * Sprint 3-0 — bound for S3-3, NOT called by the S3-0 pipeline.
      * The ChatViewModel takes no GeminiClient: there is no LLM in
      * S3-0, and the central-gate decision (Q1(a)) forbids wiring the

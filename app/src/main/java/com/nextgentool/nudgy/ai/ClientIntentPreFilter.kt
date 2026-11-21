@@ -167,6 +167,22 @@ class ClientIntentPreFilter(
     @Volatile
     private var pendingClarification: PendingClarification? = null
 
+    /**
+     * Sprint 3-4 — the brain dump processes several pieces in a row
+     * through [tryHandle]. A piece that asks a question (bare hour,
+     * schedule with no time) stores a pending clarification; the NEXT
+     * piece must not be eaten as its answer. The dump loop reads this
+     * after each piece, records the question, and clears it with
+     * [clearPendingClarification] before the next piece. The single
+     * -message send path never uses these: there, the clarification
+     * stays stored until the user's next message answers it.
+     */
+    fun hasPendingClarification(): Boolean = pendingClarification != null
+
+    fun clearPendingClarification() {
+        pendingClarification = null
+    }
+
     private fun formatTime(millis: Long): String =
         SimpleDateFormat("h:mm a", Locale.getDefault()).format(java.util.Date(millis))
 

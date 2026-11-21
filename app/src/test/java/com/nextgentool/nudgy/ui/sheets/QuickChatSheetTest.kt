@@ -111,7 +111,17 @@ class QuickChatSheetTest {
                 serverCounter = LlmServerCounter { _, _, _, _ -> LlmUsageCounter.CounterResult.ALLOWED },
                 connectivity = LlmConnectivity { true }
             ),
-            memoryRepository
+            memoryRepository,
+            context,
+            LlmConfigProvider {
+                LlmConfig(
+                    centralEnabled = false,
+                    freeTurnsPerDay = 5L,
+                    maxRewardedTurnsPerDay = 3L,
+                    modelVersion = "gemini-3.5-flash-lite"
+                )
+            },
+            com.nextgentool.nudgy.ads.NudgyAdsRewardedGateway(context)
         )
     }
 

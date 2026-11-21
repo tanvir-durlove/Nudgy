@@ -17,13 +17,20 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Locale
 
-class VoiceAssistantManager(private val context: Context) : TextToSpeech.OnInitListener, ReplySoundPlayer {
+/**
+ * Sprint 3-4 — implements [VoiceInput]: the chat's mic is a brain-dump
+ * session (continuous listening), and the restart loop must be testable
+ * without a real SpeechRecognizer. The recognizer error is reported as
+ * a [VoiceInputError] KIND (not a message string): the session
+ * restarts on silence (NO_MATCH) and ends on anything else.
+ */
+class VoiceAssistantManager(private val context: Context) : TextToSpeech.OnInitListener, ReplySoundPlayer, VoiceInput {
     private var tts: TextToSpeech? = null
     private var isTtsInitialized = false
     private var speechRecognizer: SpeechRecognizer? = null
 
     private val _isListening = MutableStateFlow(false)
-    val isListening: StateFlow<Boolean> = _isListening.asStateFlow()
+    override val isListening: StateFlow<Boolean> = _isListening.asStateFlow()
 
     private val _isSpeaking = MutableStateFlow(false)
     val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
@@ -60,12 +67,18 @@ class VoiceAssistantManager(private val context: Context) : TextToSpeech.OnInitL
     }
 
     /**
-     * Start Speech Recognition (English-only)
+     * Start Speech Recognition (English-only by default; the caller
+     * passes the language — "bn-BD" from the S3-7 toggle).
+     *
+     * One utterance per start: the recognizer stops after the result
+     * (or the error). The caller restarts it for continuous listening
+     * (the brain-dump session in ChatViewModel). Exactly one of
+     * [onResult] / [onError] fires per start.
      */
-    fun startListening(
-        languageCode: String = "en-US",
-        onResult: (String) -> Unit = {},
-        onError: (String) -> Unit = {}
+    override fun startListening(
+        languageCode: String,
+        onResult: (String) -> Unit,
+        onError: (VoiceInputError) -> Unit
     ) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
             Handler(Looper.getMainLooper()).post {
@@ -82,7 +95,7 @@ class VoiceAssistantManager(private val context: Context) : TextToSpeech.OnInitL
         }
 
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            onError("Speech recognition not available on this device.")
+            onError(VoiceInputError.OTHER)
             return
         }
 
@@ -102,13 +115,20 @@ class VoiceAssistantManager(private val context: Context) : TextToSpeech.OnInitL
 
                 override fun onError(error: Int) {
                     _isListening.value = false
-                    val errorMsg = when (error) {
-                        SpeechRecognizer.ERROR_NO_MATCH -> "No speech detected. Try again!"
-                        SpeechRecognizer.ERROR_NETWORK -> "Network error during speech recognition."
-                        else -> "Speech recognition error code: $error"
+                    // Sprint 3-4 — the kind, not the message: the
+                    // brain-dump loop restarts on silence and ends on
+                    // anything else. The user-facing wording lives in
+                    // the caller (ChatViewModel), in the dump's
+                    // language — never an English string matched here.
+                    val kind = when (error) {
+                        SpeechRecognizer.ERROR_NO_MATCH,
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> VoiceInputError.NO_MATCH
+                        SpeechRecognizer.ERROR_NETWORK,
+                        SpeechRecognizer.ERROR_SERVER -> VoiceInputError.NETWORK
+                        else -> VoiceInputError.OTHER
                     }
-                    Log.d(TAG, errorMsg)
-                    onError(errorMsg)
+                    Log.d(TAG, "Speech recognition error code: $error")
+                    onError(kind)
                 }
 
                 override fun onResults(results: Bundle?) {
@@ -136,11 +156,11 @@ class VoiceAssistantManager(private val context: Context) : TextToSpeech.OnInitL
             speechRecognizer?.startListening(intent)
         } catch (e: Exception) {
             _isListening.value = false
-            onError(e.localizedMessage ?: "Failed to start listening")
+            onError(VoiceInputError.OTHER)
         }
     }
 
-    fun stopListening() {
+    override fun stopListening() {
         if (Looper.myLooper() != Looper.getMainLooper()) {
             Handler(Looper.getMainLooper()).post {
                 stopListening()
