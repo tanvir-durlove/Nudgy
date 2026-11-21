@@ -7,6 +7,7 @@ import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.data.repository.MemoryRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.ui.screens.ChatActionType
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -47,6 +48,7 @@ class ClientIntentPreFilterTest {
 
     private lateinit var db: NudgyDatabase
     private lateinit var preFilter: ClientIntentPreFilter
+    private lateinit var tasks: TaskRepository
 
     @Before
     fun setUp() {
@@ -54,7 +56,7 @@ class ClientIntentPreFilterTest {
         db = Room.inMemoryDatabaseBuilder(context, NudgyDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        val tasks = TaskRepository(context, db)
+        tasks = TaskRepository(context, db)
         val calendar = CalendarRepository(context, db)
         val memories = MemoryRepository(context, db)
         preFilter = ClientIntentPreFilter(tasks, calendar, memories, context.assets)
@@ -129,5 +131,84 @@ class ClientIntentPreFilterTest {
         assertNull(handled.createdTask)
         assertNull(handled.createdEvent)
         assertTrue(handled.responseText.contains("What time"))
+    }
+
+    // Sprint 3-0 — branch coverage for the paths the ChatViewModel
+    // send pipeline now exercises (query / focus / plan / memory /
+    // clear / complete). The 6 original tests only covered the parser
+    // bugs; these pin the branches the chat actually answers with.
+
+    @Test
+    fun `plan my day returns a plan with a focus proposal and creates nothing`() = runTest {
+        val result = preFilter.tryHandle("test-user", "plan my day", emptyList(), emptyList())
+        assertTrue(result is PreFilterResult.Handled)
+        val handled = result as PreFilterResult.Handled
+        assertNull(handled.createdTask)
+        assertNull(handled.createdEvent)
+        assertEquals(ChatActionType.FOCUS_TIME_PROPOSAL, handled.actionType)
+        assertNotNull(handled.focusStartMillis)
+        assertNotNull(handled.focusEndMillis)
+        assertTrue(handled.responseText.contains("plan", ignoreCase = true))
+    }
+
+    @Test
+    fun `find free time proposes a focus slot without creating an event`() = runTest {
+        val result = preFilter.tryHandle("test-user", "find free time", emptyList(), emptyList())
+        assertTrue(result is PreFilterResult.Handled)
+        val handled = result as PreFilterResult.Handled
+        assertNull(handled.createdEvent)
+        assertEquals(ChatActionType.FOCUS_TIME_PROPOSAL, handled.actionType)
+        assertNotNull(handled.focusStartMillis)
+        assertNotNull(handled.focusEndMillis)
+        assertTrue(handled.responseText.contains("free focus time"))
+    }
+
+    @Test
+    fun `block focus time creates the focus event`() = runTest {
+        val result = preFilter.tryHandle("test-user", "block 45m focus", emptyList(), emptyList())
+        assertTrue(result is PreFilterResult.Handled)
+        val handled = result as PreFilterResult.Handled
+        assertNotNull(handled.createdEvent)
+        assertTrue(handled.createdEvent!!.title.contains("Focus"))
+    }
+
+    @Test
+    fun `remember that stores a memory and recall reads it back`() = runTest {
+        val saved = preFilter.tryHandle(
+            "test-user", "remember that I like morning workouts", emptyList(), emptyList()
+        )
+        assertTrue(saved is PreFilterResult.Handled)
+        assertTrue((saved as PreFilterResult.Handled).responseText.contains("saved"))
+        val recalled = preFilter.tryHandle(
+            "test-user", "what do you remember about me", emptyList(), emptyList()
+        )
+        assertTrue(recalled is PreFilterResult.Handled)
+        assertTrue((recalled as PreFilterResult.Handled).responseText.contains("morning workouts"))
+    }
+
+    @Test
+    fun `show todays tasks lists the created task`() = runTest {
+        val created = preFilter.tryHandle("test-user", "call tasnim at 5pm", emptyList(), emptyList())
+        assertTrue(created is PreFilterResult.Handled)
+        val todayTasks = tasks.getAllTasksOnce("test-user")
+        assertEquals(1, todayTasks.size)
+        val result = preFilter.tryHandle("test-user", "show today's tasks", todayTasks, emptyList())
+        assertTrue(result is PreFilterResult.Handled)
+        assertTrue((result as PreFilterResult.Handled).responseText.contains("tasnim", ignoreCase = true))
+    }
+
+    @Test
+    fun `complete then clear completed removes the task`() = runTest {
+        preFilter.tryHandle("test-user", "call tasnim at 5pm", emptyList(), emptyList())
+        val todayTasks = tasks.getAllTasksOnce("test-user")
+        assertEquals(1, todayTasks.size)
+        val completed = preFilter.tryHandle("test-user", "complete task tasnim", todayTasks, emptyList())
+        assertTrue(completed is PreFilterResult.Handled)
+        assertTrue((completed as PreFilterResult.Handled).responseText.contains("completed"))
+        assertTrue(tasks.getAllTasksOnce("test-user").single().isCompleted)
+        val cleared = preFilter.tryHandle("test-user", "clear completed tasks", emptyList(), emptyList())
+        assertTrue(cleared is PreFilterResult.Handled)
+        assertTrue((cleared as PreFilterResult.Handled).responseText.contains("cleared"))
+        assertTrue(tasks.getAllTasksOnce("test-user").isEmpty())
     }
 }

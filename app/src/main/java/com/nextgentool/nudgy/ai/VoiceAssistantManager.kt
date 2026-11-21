@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Locale
 
-class VoiceAssistantManager(private val context: Context) : TextToSpeech.OnInitListener {
+class VoiceAssistantManager(private val context: Context) : TextToSpeech.OnInitListener, ReplySoundPlayer {
     private var tts: TextToSpeech? = null
     private var isTtsInitialized = false
     private var speechRecognizer: SpeechRecognizer? = null
@@ -177,7 +177,7 @@ class VoiceAssistantManager(private val context: Context) : TextToSpeech.OnInitL
      * so silent / Do Not Disturb are respected, and a ~1-second ting can
      * never linger in the background the way TTS did. Never throws.
      */
-    fun playReplySound() {
+    override fun playReplySound() {
         try {
             val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
             RingtoneManager.getRingtone(context.applicationContext, uri)?.play()
