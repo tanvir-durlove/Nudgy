@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
@@ -77,6 +78,7 @@ import com.nextgentool.nudgy.ui.viewmodel.ShareIntentViewModel
  * Today is a nested graph ("today_graph"): TodayScreen + the Plan
  * route ("today/plan"). Back from Plan returns to Today.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun NudgyApp() {
     val navController = rememberNavController()
