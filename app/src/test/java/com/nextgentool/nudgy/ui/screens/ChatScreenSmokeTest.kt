@@ -116,13 +116,14 @@ class ChatScreenSmokeTest {
     }
 
     private lateinit var db: NudgyDatabase
+    private lateinit var context: Context
     private lateinit var viewModel: ChatViewModel
     private lateinit var taskRepository: TaskRepository
     private lateinit var recordingGemini: RecordingGeminiClient
 
     @Before
     fun setUp() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
+        context = ApplicationProvider.getApplicationContext<Context>()
         context.getSharedPreferences("nudgy_auth_prefs", Context.MODE_PRIVATE)
             .edit().putString("active_user_id", "test-user-1").apply()
         context.getSharedPreferences("nudgy_ads", Context.MODE_PRIVATE).edit().clear().apply()
