@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.nextgentool.nudgy.ai.ChatDraft
 import com.nextgentool.nudgy.ai.ClientIntentPreFilter
 import com.nextgentool.nudgy.ai.ChatGuardrails
+import com.nextgentool.nudgy.ai.LlmFallbackHandler
+import com.nextgentool.nudgy.ai.LlmFallbackResult
 import com.nextgentool.nudgy.ai.PreFilterResult
 import com.nextgentool.nudgy.ai.ReplySoundPlayer
 import com.nextgentool.nudgy.ai.VoiceAssistantManager
@@ -14,6 +16,7 @@ import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.data.repository.ChatRepository
+import com.nextgentool.nudgy.data.repository.MemoryRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.domain.endOfDayMillis
 import com.nextgentool.nudgy.domain.startOfDayMillis
@@ -45,14 +48,19 @@ import javax.inject.Inject
  *    pending-clarification state is in-memory (@Volatile): a process
  *    death loses it, the question stays in history, and the user can
  *    retype — documented in the spec, accepted.
- * 3. Unhandled → a LOCAL fallback answer. No LLM in S3-0: GeminiClient
- *    stays dormant, its wiring + cap chain + central gate is S3-3's
- *    job. The fallback never crashes and never spends a turn.
+ * 3. Unhandled → the LLM fallback ([LlmFallbackHandler], S3-3): the
+ *    cap chain (local cap → server counter → Gemini, central gate
+ *    OFF by default) and the structured-output contract. A validated
+ *    single task/event becomes a pending draft on the preview card —
+ *    the same draft-then-confirm flow as the prefilter (only
+ *    [confirmDraft] writes to the DB). Anything else is a plain-text
+ *    reply. Offline / no-LLM-available / Gemini failure → the local
+ *    fallback answer, and the local turn is refunded on failure.
+ *    The thinking bubble shows the phase ("Thinking…" / "ভাবছি…")
+ *    while the LLM call runs.
  *
- * Out of scope here, deliberately: the LLM fallback is S3-3 (GeminiClient
- * stays dormant, its wiring + cap chain + central gate is S3-3's job);
- * the voice brain dump (continuous listening) is S3-4 — [startVoice]
- * is the v1 single utterance only.
+ * Out of scope here, deliberately: the voice brain dump (continuous
+ * listening) is S3-4 — [startVoice] is the v1 single utterance only.
  *
  * Sprint 3-2 (Q2 = (a)) — draft-then-confirm: the prefilter never
  * saves directly. A creation returns [PreFilterResult.PendingDraft]
@@ -78,7 +86,15 @@ class ChatViewModel @Inject constructor(
     private val taskRepository: TaskRepository,
     private val calendarRepository: CalendarRepository,
     private val voiceAssistantManager: VoiceAssistantManager,
-    private val replySoundPlayer: ReplySoundPlayer
+    private val replySoundPlayer: ReplySoundPlayer,
+    // Sprint 3-3 — the LLM fallback (cap chain + central gate +
+    // structured output). Constructor-injected; tests pass a handler
+    // built on fakes.
+    private val llmFallbackHandler: LlmFallbackHandler,
+    // Sprint 3-3 — user memories for the Gemini system prompt (v1
+    // passed them too). Read once per LLM call; a read failure means
+    // no memories, never a failed send.
+    private val memoryRepository: MemoryRepository
 ) : ViewModel() {
 
     private val userId: String = taskRepository.currentUserId()
@@ -161,6 +177,13 @@ class ChatViewModel @Inject constructor(
                         postAssistantMessage(guard.replyText)
                     }
                     ChatGuardrails.GuardResult.Allowed -> {
+                        // The history BEFORE this message: the LLM must
+                        // not see its own prompt twice (once as history,
+                        // once as the current message). Read BEFORE the
+                        // add — the Room flow updates asynchronously, so
+                        // reading after would race.
+                        val historyBefore = messages.value.takeLast(6)
+                            .map { it.text to it.senderIsUser }
                         addMessage(senderIsUser = true, text = trimmed)
                         val result = runCatching {
                             val today = startOfDayMillis(System.currentTimeMillis())
@@ -193,10 +216,17 @@ class ChatViewModel @Inject constructor(
                                 quickSuggestions = result.quickSuggestions
                             )
                             // Unhandled (small talk, questions, anything
-                            // the local rules cannot parse) — and any
-                            // prefilter failure: a local fallback answer.
-                            // No LLM call, no crash, no turn spent.
-                            else -> postAssistantMessage(localFallbackReply(trimmed))
+                            // the local rules cannot parse) → the LLM
+                            // fallback (S3-3): cap chain → Gemini →
+                            // validated draft or plain-text reply.
+                            is PreFilterResult.Unhandled ->
+                                handleLlmFallback(trimmed, historyBefore)
+                            // The prefilter itself failed: the old
+                            // behaviour — a local fallback answer, no
+                            // LLM call, no turn spent.
+                            null -> postAssistantMessage(
+                                llmFallbackHandler.localFallbackReply(trimmed)
+                            )
                         }
                     }
                 }
@@ -206,6 +236,40 @@ class ChatViewModel @Inject constructor(
                 runCatching { postAssistantMessage("Something went wrong — please try again.") }
             } finally {
                 _isThinking.value = false
+                // Back to the default phase text: the LLM phase
+                // ("Thinking…" / "ভাবছি…") applies to that send only.
+                _thinkingText.value = "Nudgy is thinking..."
+            }
+        }
+    }
+
+    /**
+     * Sprint 3-3 — the Unhandled branch: the LLM fallback. The thinking
+     * bubble shows the phase while the cap chain / Gemini call runs.
+     * A validated draft becomes the SAME pending draft the prefilter
+     * produces (preview card → Confirm / Edit / Discard); a reply or a
+     * capped answer is posted as a plain assistant message. The DB is
+     * never touched here — only [confirmDraft] writes.
+     */
+    private suspend fun handleLlmFallback(
+        prompt: String,
+        historyBefore: List<Pair<String, Boolean>>
+    ) {
+        val isBengali = prompt.any { it in '\u0980'..'\u09FF' }
+        _thinkingText.value = if (isBengali) "ভাবছি…" else "Thinking…"
+        val memories = runCatching {
+            memoryRepository.getMemories(userId).map { it.content }
+        }.getOrDefault(emptyList())
+        when (val llm = llmFallbackHandler.handleUnhandled(userId, prompt, historyBefore, memories)) {
+            is LlmFallbackResult.Reply -> postAssistantMessage(llm.text)
+            is LlmFallbackResult.Capped -> postAssistantMessage(llm.text)
+            is LlmFallbackResult.Draft -> {
+                _pendingDraft.value = llm.draft
+                val messageId = postAssistantMessage(
+                    text = llm.previewText,
+                    actionType = ChatActionType.DRAFT_PREVIEW
+                )
+                _pendingDraftMessageId.value = messageId
             }
         }
     }
@@ -344,14 +408,4 @@ class ChatViewModel @Inject constructor(
         replySoundPlayer.playReplySound()
         return messageId
     }
-
-    /** Local fallback for Unhandled input — in the input's language,
-     *  pointing at what the chat can actually do. Never a guess, never
-     *  a creation, never an LLM call. */
-    private fun localFallbackReply(prompt: String): String =
-        if (prompt.any { it in '\u0980'..'\u09FF' }) {
-            "এটা ঠিক বুঝতে পারিনি — আমাকে একটা কাজ বানাতে বলো, কিছু শিডিউল করতে বলো, বা দিনের প্ল্যান চাও।"
-        } else {
-            "I didn't quite catch that — try asking me to create a task, schedule something, or plan your day."
-        }
 }

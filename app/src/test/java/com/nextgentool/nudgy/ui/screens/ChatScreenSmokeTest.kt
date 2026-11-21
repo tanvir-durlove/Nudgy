@@ -16,6 +16,13 @@ import androidx.compose.ui.test.performTextInput
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.ai.ClientIntentPreFilter
+import com.nextgentool.nudgy.ai.GeminiClient
+import com.nextgentool.nudgy.ai.LlmConfig
+import com.nextgentool.nudgy.ai.LlmConfigProvider
+import com.nextgentool.nudgy.ai.LlmConnectivity
+import com.nextgentool.nudgy.ai.LlmFallbackHandler
+import com.nextgentool.nudgy.ai.LlmServerCounter
+import com.nextgentool.nudgy.ai.LlmUsageCounter
 import com.nextgentool.nudgy.ai.ReplySoundPlayer
 import com.nextgentool.nudgy.ai.VoiceAssistantManager
 import com.nextgentool.nudgy.data.local.NudgyDatabase
@@ -49,6 +56,12 @@ import org.robolectric.annotation.Config
  * ChatViewModelTest, duplicated — test sources share no fakes file);
  * voice input is never started here, so the real
  * VoiceAssistantManager is construction-only.
+ *
+ * Sprint 3-3 — the LLM-fallback path renders end to end here: an
+ * Unhandled message shows the local fallback answer, and with a BYOK
+ * key a structured reply shows the preview card and Confirm creates
+ * the task. The Gemini transport is a recording fake (no network);
+ * the cap starts empty and the gate is closed by default.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -64,36 +77,91 @@ class ChatScreenSmokeTest {
         }
     }
 
+    // Sprint 3-3 — records which Gemini transport ran and answers
+    // with a canned structured response (or null = the call failed).
+    private class RecordingGeminiClient(context: Context) : GeminiClient(context) {
+        var restCalls = 0
+        var aiLogicCalls = 0
+        var restResponse: String? = null
+        var aiLogicResponse: String? = null
+
+        override suspend fun generateViaRest(
+            userMessage: String,
+            recentHistory: List<Pair<String, Boolean>>,
+            sanitizedModel: String,
+            apiKey: String,
+            systemInstruction: String,
+            maxOutputTokens: Int
+        ): String? {
+            restCalls++
+            return restResponse
+        }
+
+        override suspend fun generateViaAiLogic(
+            userMessage: String,
+            recentHistory: List<Pair<String, Boolean>>,
+            modelId: String,
+            systemInstruction: String,
+            maxOutputTokens: Int
+        ): String? {
+            aiLogicCalls++
+            return aiLogicResponse
+        }
+    }
+
     private lateinit var db: NudgyDatabase
     private lateinit var viewModel: ChatViewModel
     private lateinit var taskRepository: TaskRepository
+    private lateinit var recordingGemini: RecordingGeminiClient
 
     @Before
     fun setUp() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.getSharedPreferences("nudgy_auth_prefs", Context.MODE_PRIVATE)
             .edit().putString("active_user_id", "test-user-1").apply()
+        context.getSharedPreferences("nudgy_ads", Context.MODE_PRIVATE).edit().clear().apply()
+        context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE).edit().clear().apply()
         db = Room.inMemoryDatabaseBuilder(context, NudgyDatabase::class.java)
             .allowMainThreadQueries()
             .build()
         taskRepository = TaskRepository(context, db)
         val calendarRepository = CalendarRepository(context, db)
+        val memoryRepository = MemoryRepository(context, db)
         val preFilter = ClientIntentPreFilter(
-            taskRepository, calendarRepository, MemoryRepository(context, db), context.assets
+            taskRepository, calendarRepository, memoryRepository, context.assets
         )
+        recordingGemini = RecordingGeminiClient(context)
         viewModel = ChatViewModel(
             ChatRepository(context, db),
             preFilter,
             taskRepository,
             calendarRepository,
             VoiceAssistantManager(context),
-            FakeReplySoundPlayer()
+            FakeReplySoundPlayer(),
+            LlmFallbackHandler(
+                geminiClient = recordingGemini,
+                context = context,
+                configProvider = LlmConfigProvider {
+                    LlmConfig(
+                        centralEnabled = false,
+                        freeTurnsPerDay = 5L,
+                        maxRewardedTurnsPerDay = 3L,
+                        modelVersion = "gemini-3.5-flash-lite"
+                    )
+                },
+                serverCounter = LlmServerCounter { _, _, _, _ -> LlmUsageCounter.CounterResult.ALLOWED },
+                connectivity = LlmConnectivity { true }
+            ),
+            memoryRepository
         )
     }
 
     @After
     fun tearDown() {
         db.close()
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("nudgy_ads", Context.MODE_PRIVATE).edit().clear().apply()
+        context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE).edit().clear().apply()
     }
 
     private fun setChatContent() {
@@ -214,6 +282,64 @@ class ChatScreenSmokeTest {
         }
         runBlocking {
             assertTrue(taskRepository.getAllTasksOnce("test-user-1").isEmpty())
+        }
+    }
+
+    // Sprint 3-3 — the LLM-fallback path end to end: an Unhandled
+    // message with no BYOK key and the gate closed shows the local
+    // fallback answer (no LLM call, no turn spent).
+    @Test
+    fun `unhandled message shows the local fallback answer`() {
+        setChatContent()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Hi! What can I help you get done today?")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNode(hasSetTextAction()).performTextInput("what is the meaning of life?")
+        composeRule.onNodeWithContentDescription("Send").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("didn't quite catch", substring = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("didn't quite catch", substring = true).assertIsDisplayed()
+    }
+
+    // Sprint 3-3 — with a BYOK key, the same Unhandled message gets a
+    // structured reply: the preview card renders, and Confirm creates
+    // the validated task (the full draft → preview → confirm flow,
+    // rendered on the real screen).
+    @Test
+    fun `BYOK structured reply shows the preview card and confirm creates the task`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE)
+            .edit().putString("custom_gemini_api_key", "test-byok-key").apply()
+        recordingGemini.restResponse =
+            """{"action": "create_tasks", "tasks": [{"title": "Buy milk", "due": "2026-11-22T09:00:00", "priority": "HIGH"}], "events": [], "subtasks": [], "reply": "Got it, I'll add it."}"""
+        setChatContent()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Hi! What can I help you get done today?")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNode(hasSetTextAction()).performTextInput("what is the meaning of life?")
+        composeRule.onNodeWithContentDescription("Send").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("draft_preview_card")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("draft_preview_card").assertIsDisplayed()
+        runBlocking {
+            assertTrue(taskRepository.getAllTasksOnce("test-user-1").isEmpty())
+        }
+        composeRule.onNodeWithTag("draft_confirm_button").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("View Task")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("View Task").assertIsDisplayed()
+        runBlocking {
+            val tasks = taskRepository.getAllTasksOnce("test-user-1")
+            assertEquals(1, tasks.size)
+            assertTrue(tasks.single().title.contains("milk", ignoreCase = true))
         }
     }
 

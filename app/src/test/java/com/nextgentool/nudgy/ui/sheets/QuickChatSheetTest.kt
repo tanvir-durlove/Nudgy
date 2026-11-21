@@ -16,6 +16,13 @@ import androidx.compose.ui.test.performTextInput
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.ai.ClientIntentPreFilter
+import com.nextgentool.nudgy.ai.GeminiClient
+import com.nextgentool.nudgy.ai.LlmConfig
+import com.nextgentool.nudgy.ai.LlmConfigProvider
+import com.nextgentool.nudgy.ai.LlmConnectivity
+import com.nextgentool.nudgy.ai.LlmFallbackHandler
+import com.nextgentool.nudgy.ai.LlmServerCounter
+import com.nextgentool.nudgy.ai.LlmUsageCounter
 import com.nextgentool.nudgy.ai.ReplySoundPlayer
 import com.nextgentool.nudgy.ai.VoiceAssistantManager
 import com.nextgentool.nudgy.data.local.NudgyDatabase
@@ -74,16 +81,37 @@ class QuickChatSheetTest {
             .build()
         val taskRepository = TaskRepository(context, db)
         val calendarRepository = CalendarRepository(context, db)
+        val memoryRepository = MemoryRepository(context, db)
         val preFilter = ClientIntentPreFilter(
-            taskRepository, calendarRepository, MemoryRepository(context, db), context.assets
+            taskRepository, calendarRepository, memoryRepository, context.assets
         )
+        // Sprint 3-3 — the ViewModel takes the LLM fallback handler
+        // and the memory repository now. The sheet never sends through
+        // the LLM path in these tests (sends are captured lambdas),
+        // so the handler runs on the real client with the gate closed
+        // and no BYOK key: it can only answer locally.
         viewModel = ChatViewModel(
             ChatRepository(context, db),
             preFilter,
             taskRepository,
             calendarRepository,
             VoiceAssistantManager(context),
-            FakeReplySoundPlayer()
+            FakeReplySoundPlayer(),
+            LlmFallbackHandler(
+                geminiClient = GeminiClient(context),
+                context = context,
+                configProvider = LlmConfigProvider {
+                    LlmConfig(
+                        centralEnabled = false,
+                        freeTurnsPerDay = 5L,
+                        maxRewardedTurnsPerDay = 3L,
+                        modelVersion = "gemini-3.5-flash-lite"
+                    )
+                },
+                serverCounter = LlmServerCounter { _, _, _, _ -> LlmUsageCounter.CounterResult.ALLOWED },
+                connectivity = LlmConnectivity { true }
+            ),
+            memoryRepository
         )
     }
 
