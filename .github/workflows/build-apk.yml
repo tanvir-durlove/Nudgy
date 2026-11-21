@@ -181,7 +181,7 @@ jobs:
             build-artifacts/nudgy-release.apk \
             build-artifacts/nudgy-release.aab \
             build-artifacts/mapping.txt \
-            --title "CI build #${{ github.run_number }} – ${{ github.ref_name }} @ $SHORT_SHA" \            
+            --title "CI build #${{ github.run_number }} – ${{ github.ref_name }} @ $SHORT_SHA" \
             --notes "Automated CI build from push to ${{ github.ref_name }}." \
             --prerelease
 
