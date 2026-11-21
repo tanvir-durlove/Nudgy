@@ -315,13 +315,13 @@ class ChatScreenSmokeTest {
                 .fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText("EN").assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("Voice language: English").performClick()
+        composeRule.onNodeWithContentDescription("Voice language: EN. Tap to switch language.").performClick()
         composeRule.onNodeWithText("বাংলা").assertIsDisplayed()
         assertEquals(
             com.nextgentool.nudgy.ui.viewmodel.ChatVoiceLanguage.BENGALI,
             viewModel.voiceLanguage.value
         )
-        composeRule.onNodeWithContentDescription("ভয়েসের ভাষা: বাংলা").performClick()
+        composeRule.onNodeWithContentDescription("Voice language: বাংলা. Tap to switch language.").performClick()
         composeRule.onNodeWithText("EN").assertIsDisplayed()
         assertEquals(
             com.nextgentool.nudgy.ui.viewmodel.ChatVoiceLanguage.ENGLISH,

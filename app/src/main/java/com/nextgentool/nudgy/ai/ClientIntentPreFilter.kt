@@ -1695,7 +1695,15 @@ class ClientIntentPreFilter(
         // (2) Query branches, verbatim. Shared builders below so the
         // parseIntent QUERY kinds reuse the exact same replies.
         // 2. Bengali: "আজকের সব কাজ দেখাও"
-        if (cleaned.contains("আজকের") && (cleaned.contains("কাজ") || cleaned.contains("দেখাও"))) {
+        // Sprint 3-7 — "সাজাও"/"সাজিয়ে" is an arrange/order verb,
+        // never a show-tasks query: "আজকের দিনের সব কাজ সাজাও" is a
+        // plan-my-day command (and "আজকের কাজগুলো সাজিয়ে দাও" a
+        // priority command). Without this exclusion the query branch
+        // answers with today's task list and the command never reaches
+        // parseIntent's parser-first check / bank match.
+        if (cleaned.contains("আজকের") && (cleaned.contains("কাজ") || cleaned.contains("দেখাও")) &&
+            !cleaned.contains("সাজাও") && !cleaned.contains("সাজিয়ে")
+        ) {
             return PreFilterResult.Handled(
                 responseText = buildTodayTasksBengaliReply(todayTasks),
                 quickSuggestions = listOf("দিনের প্ল্যান", "ফাঁকা সময়", "নতুন কাজ")

@@ -1710,7 +1710,11 @@ class ChatViewModelTest {
             viewModel.startVoice(viewModel.voiceLanguage.value.code)
             assertEquals("bn-BD", fakeVoice.lastLanguageCode)
             fakeVoice.deliverResult("কাল সকাল ৯টায় বাজার করতে হবে")
-            fakeVoice.deliverResult("কাল বিকেল ৪টায় মাকে কল করো")
+            // "বিকেলে" (with ে) is a daypart key — it resolves to
+            // 16:00 and drafts. Bare "বিকেল" is deliberately NOT a
+            // key (pinned §11 behaviour: it asks AM/PM instead), so
+            // the dump uses the suffixed form here.
+            fakeVoice.deliverResult("কাল বিকেলে ৪টায় মাকে কল করো")
             viewModel.stopVoice()
             val messages = viewModel.messages.first { it.size == 3 }
             val drafts = viewModel.pendingBrainDumpDrafts.value
@@ -1886,6 +1890,10 @@ class ChatViewModelTest {
                 calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first().isEmpty()
             )
             viewModel.confirmBrainDump()
+            // confirmBrainDump saves asynchronously — wait for the
+            // receipt before reading the DB (the existing dump tests
+            // do the same; reading straight away races the save).
+            viewModel.messages.first { it.size == 4 }
             val created = taskRepository.getAllTasksOnce(userId)
             assertEquals(1, created.size)
             assertTrue(created.single().title.contains("বাজার"))
