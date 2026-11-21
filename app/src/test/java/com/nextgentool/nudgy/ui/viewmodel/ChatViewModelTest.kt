@@ -771,7 +771,13 @@ class ChatViewModelTest {
             val viewModel = newViewModel()
             viewModel.messages.first { it.size == 1 } // welcome seeded
             viewModel.startVoice()
-            fakeVoice.deliverResult("um yeah hmm")
+            // A QUESTION, not a statement: the prefilter catch-all
+            // deliberately captures any short non-question statement
+            // as a to-do ("um yeah hmm" becomes a draft titled
+            // "Um yeah hmm"), so only a question reaches Unhandled
+            // here — then the no-key local Reply counts as unparsed
+            // and the dump asks one clarifying question.
+            fakeVoice.deliverResult("why is the sky blue?")
             viewModel.stopVoice()
             val messages = viewModel.messages.first { it.size == 3 }
             assertTrue(messages[2].text.contains("couldn't split"))
