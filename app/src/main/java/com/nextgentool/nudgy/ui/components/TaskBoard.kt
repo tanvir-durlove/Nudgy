@@ -58,6 +58,9 @@ import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskStatus
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.ui.theme.NudgyAccent
+import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
+import com.nextgentool.nudgy.ui.theme.NudgyMuted
 import com.nextgentool.nudgy.ui.theme.NudgyTokens
 import com.nextgentool.nudgy.ui.viewmodel.TaskListItem
 import kotlinx.coroutines.delay
@@ -512,7 +515,7 @@ fun TaskBoard(
                 Text(
                     text = draggedTask.title,
                     style = MaterialTheme.typography.titleMedium,
-                    color = colorResource(R.color.nudgy_ink),
+                    color = NudgyCharcoal,
                     maxLines = 2,
                     modifier = Modifier.padding(12.dp)
                 )
@@ -572,13 +575,13 @@ private fun BoardColumn(
                         TaskStatus.DONE -> "Done"
                     },
                     style = MaterialTheme.typography.titleMedium,
-                    color = colorResource(R.color.nudgy_ink),
+                    color = NudgyCharcoal,
                     modifier = Modifier.weight(1f)
                 )
                 Text(
                     text = "${items.size}",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = colorResource(R.color.nudgy_muted)
+                    color = NudgyMuted
                 )
             }
             Spacer(modifier = Modifier.height(12.dp))
@@ -598,7 +601,7 @@ private fun BoardColumn(
                     Text(
                         text = "No tasks here",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = colorResource(R.color.nudgy_muted),
+                        color = NudgyMuted,
                         modifier = Modifier.padding(vertical = 8.dp)
                     )
                 } else {
@@ -795,9 +798,9 @@ private fun BoardTaskCard(
                         }
                     ),
                     color = if (task.isCompleted) {
-                        colorResource(R.color.nudgy_muted)
+                        NudgyMuted
                     } else {
-                        colorResource(R.color.nudgy_ink)
+                        NudgyCharcoal
                     },
                     maxLines = 2
                 )
@@ -805,13 +808,13 @@ private fun BoardTaskCard(
                     Text(
                         text = boardDueLabel(task),
                         style = MaterialTheme.typography.bodySmall,
-                        color = colorResource(R.color.nudgy_muted)
+                        color = NudgyMuted
                     )
                     if (item.subtaskTotal > 0) {
                         Text(
                             text = "· ${item.subtaskDone}/${item.subtaskTotal}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = colorResource(R.color.nudgy_muted)
+                            color = NudgyMuted
                         )
                     }
                 }
@@ -828,7 +831,7 @@ private fun BoardTaskCard(
                         Text(
                             text = "Group",
                             style = MaterialTheme.typography.bodySmall,
-                            color = colorResource(R.color.nudgy_teal)
+                            color = NudgyAccent
                         )
                     }
                 }

@@ -41,6 +41,10 @@ import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.domain.usecase.Recurrence
 import com.nextgentool.nudgy.reminders.ReminderManager
+import com.nextgentool.nudgy.ui.theme.NudgyAccent
+import com.nextgentool.nudgy.ui.theme.NudgyCard
+import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
+import com.nextgentool.nudgy.ui.theme.NudgyMuted
 import com.nextgentool.nudgy.ui.theme.NudgyTokens
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -108,13 +112,13 @@ fun ReminderSection(
         Text(
             text = "Reminder",
             style = MaterialTheme.typography.labelLarge,
-            color = colorResource(R.color.nudgy_ink)
+            color = NudgyCharcoal
         )
         if (task.dueDateEpochMillis == TaskRepository.NO_DUE_DATE) {
             Text(
                 text = "Set a due date to add a reminder.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = colorResource(R.color.nudgy_muted)
+                color = NudgyMuted
             )
             return@Column
         }
@@ -146,7 +150,11 @@ fun ReminderSection(
                     label = { Text(label) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = colorResource(R.color.nudgy_teal),
-                        selectedLabelColor = colorResource(R.color.nudgy_cream)
+selectedLabelColor = colorResource(R.color.nudgy_cream),
+                        // Unselected: explicit theme-aware colors (same
+                        // M3-defaults trap as the task-list chips).
+                        containerColor = NudgyCard,
+                        labelColor = NudgyCharcoal
                     )
                 )
             }
@@ -155,7 +163,7 @@ fun ReminderSection(
             Text(
                 text = "That time has passed — pick a future time.",
                 style = MaterialTheme.typography.bodySmall,
-                color = colorResource(R.color.nudgy_coral)
+                color = NudgyAccent
             )
         }
 
@@ -164,7 +172,7 @@ fun ReminderSection(
             Text(
                 text = "Repeat reminder",
                 style = MaterialTheme.typography.labelMedium,
-                color = colorResource(R.color.nudgy_ink)
+                color = NudgyCharcoal
             )
             val repeatOptions = listOf(
                 null to "Off",
@@ -183,7 +191,11 @@ fun ReminderSection(
                         label = { Text(label) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = colorResource(R.color.nudgy_teal),
-                            selectedLabelColor = colorResource(R.color.nudgy_cream)
+selectedLabelColor = colorResource(R.color.nudgy_cream),
+                            // Unselected: explicit theme-aware colors (same
+                            // M3-defaults trap as the task-list chips).
+                            containerColor = NudgyCard,
+                            labelColor = NudgyCharcoal
                         )
                     )
                 }
@@ -213,17 +225,17 @@ fun ReminderSection(
                     Text(
                         text = "Reminder missed",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = colorResource(R.color.nudgy_ink)
+                        color = NudgyCharcoal
                     )
                     Text(
                         text = "Exact alarms are off, so this reminder could not fire on time.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = colorResource(R.color.nudgy_muted)
+                        color = NudgyMuted
                     )
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     TextButton(onClick = { openExactAlarmSettings(context) }) {
-                        Text("Turn on", color = colorResource(R.color.nudgy_teal))
+                        Text("Turn on", color = NudgyAccent)
                     }
                 }
             }
@@ -232,12 +244,12 @@ fun ReminderSection(
                 Text(
                     text = "Exact alarms are off — reminders may be delayed.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = colorResource(R.color.nudgy_muted),
+                    color = NudgyMuted,
                     modifier = Modifier.weight(1f)
                 )
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     TextButton(onClick = { openExactAlarmSettings(context) }) {
-                        Text("Turn on", color = colorResource(R.color.nudgy_teal))
+                        Text("Turn on", color = NudgyAccent)
                     }
                 }
             }
@@ -353,13 +365,13 @@ fun RecurrenceSection(
         Text(
             text = "Repeat task",
             style = MaterialTheme.typography.labelLarge,
-            color = colorResource(R.color.nudgy_ink)
+            color = NudgyCharcoal
         )
         if (due == TaskRepository.NO_DUE_DATE) {
             Text(
                 text = "Set a due date to repeat this task.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = colorResource(R.color.nudgy_muted)
+                color = NudgyMuted
             )
             return@Column
         }
@@ -385,7 +397,11 @@ fun RecurrenceSection(
                     label = { Text(repeatType.label) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = colorResource(R.color.nudgy_teal),
-                        selectedLabelColor = colorResource(R.color.nudgy_cream)
+selectedLabelColor = colorResource(R.color.nudgy_cream),
+                        // Unselected: explicit theme-aware colors (same
+                        // M3-defaults trap as the task-list chips).
+                        containerColor = NudgyCard,
+                        labelColor = NudgyCharcoal
                     )
                 )
             }
@@ -412,7 +428,11 @@ fun RecurrenceSection(
                         label = { Text(label) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = colorResource(R.color.nudgy_teal),
-                            selectedLabelColor = colorResource(R.color.nudgy_cream)
+selectedLabelColor = colorResource(R.color.nudgy_cream),
+                            // Unselected: explicit theme-aware colors (same
+                            // M3-defaults trap as the task-list chips).
+                            containerColor = NudgyCard,
+                            labelColor = NudgyCharcoal
                         )
                     )
                 }
@@ -457,7 +477,7 @@ fun RecurrenceSection(
                 Text(
                     text = "Next: " + SimpleDateFormat("EEE, MMM d · h:mm a", Locale.getDefault()).format(next),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = colorResource(R.color.nudgy_muted)
+                    color = NudgyMuted
                 )
             }
         }

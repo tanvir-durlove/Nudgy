@@ -18,7 +18,11 @@ package com.nextgentool.nudgy.ai
  * - Bengali: "এই টাস্কটা ভেঙে দাও" → null title; "পার্টির আয়োজনটা
  *   ভেঙে দাও" → the title before the verb; "ভেঙে দাও পার্টির
  *   আয়োজনটা" → the title after it. "ভাগ করে দাও" / "ভাগ করো" and
- *   "ছোট ছোট করে দাও" work the same way.
+ *   "ছোট ছোট করে দাও" work the same way. The ংগ spelling ("ভেংগে
+ *   দাও", "ভেঙ্গে দাও", "ভাংগে দাও", "ভাঙ্গে দাও") is the same verb
+ *   — Bengali keyboards commonly produce the anusvara+গ form, and
+ *   the device test (2026-11-21) typed exactly that; all variants
+ *   are accepted.
  *
  * Deliberately NOT a split command:
  * - "give me a breakdown of my day" ("breakdown" is one word — no
@@ -43,7 +47,10 @@ object SplitCommandParser {
         """\s+into\s+(subtasks?|sub-tasks?|steps?|smaller tasks?|smaller steps?)\s*[.!?।]?\s*$""",
         RegexOption.IGNORE_CASE
     )
-    private val BN_VERBS = listOf("ভেঙে দাও", "ভাগ করে দাও", "ভাগ করো", "ছোট ছোট করে দাও")
+    private val BN_VERBS = listOf(
+        "ভেঙে দাও", "ভেংগে দাও", "ভেঙ্গে দাও", "ভাংগে দাও", "ভাঙ্গে দাও",
+        "ভাগ করে দাও", "ভাগ করো", "ছোট ছোট করে দাও"
+    )
 
     fun parse(prompt: String): SplitCommand? {
         val trimmed = prompt.trim()

@@ -41,6 +41,10 @@ import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.domain.dayLabel
 import com.nextgentool.nudgy.domain.formatMinutes
 import com.nextgentool.nudgy.domain.timeLabel
+import com.nextgentool.nudgy.ui.theme.NudgyAccent
+import com.nextgentool.nudgy.ui.theme.NudgyCanvas
+import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
+import com.nextgentool.nudgy.ui.theme.NudgyMuted
 import com.nextgentool.nudgy.ui.theme.NudgyTokens
 import com.nextgentool.nudgy.ui.viewmodel.PlanRow
 import com.nextgentool.nudgy.ui.viewmodel.PlanViewModel
@@ -75,7 +79,7 @@ fun PlanScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorResource(R.color.nudgy_background))
+            .background(NudgyCanvas)
             .verticalScroll(scrollState)
             .padding(NudgyTokens.screenPadding)
     ) {
@@ -84,19 +88,19 @@ fun PlanScreen(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Back",
-                    tint = colorResource(R.color.nudgy_ink)
+                    tint = NudgyCharcoal
                 )
             }
             Column {
                 Text(
                     text = "Plan my day",
                     style = MaterialTheme.typography.titleLarge,
-                    color = colorResource(R.color.nudgy_ink)
+                    color = NudgyCharcoal
                 )
                 Text(
                     text = dayLabel(startOfTodayMillis()),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = colorResource(R.color.nudgy_muted)
+                    color = NudgyMuted
                 )
             }
         }
@@ -107,20 +111,20 @@ fun PlanScreen(
             Text(
                 text = "${formatMinutes(uiState.totalEstimatedMinutes)} of 8h planned",
                 style = MaterialTheme.typography.bodyMedium,
-                color = colorResource(R.color.nudgy_muted)
+                color = NudgyMuted
             )
             Spacer(modifier = Modifier.height(16.dp))
             Text(
                 text = "Today's plan",
                 style = MaterialTheme.typography.titleMedium,
-                color = colorResource(R.color.nudgy_ink)
+                color = NudgyCharcoal
             )
             Spacer(modifier = Modifier.height(12.dp))
             if (uiState.pickedRows.isEmpty()) {
                 Text(
                     text = "Nothing picked yet — pick tasks below",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = colorResource(R.color.nudgy_muted),
+                    color = NudgyMuted,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
             } else {
@@ -143,7 +147,7 @@ fun PlanScreen(
                 Text(
                     text = "Not planned",
                     style = MaterialTheme.typography.titleMedium,
-                    color = colorResource(R.color.nudgy_ink)
+                    color = NudgyCharcoal
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -211,19 +215,19 @@ private fun PlanPickedRow(
                 Text(
                     text = task.title,
                     style = MaterialTheme.typography.titleMedium,
-                    color = colorResource(R.color.nudgy_ink)
+                    color = NudgyCharcoal
                 )
                 Text(
                     text = planRowDetail(task, startMillis),
                     style = MaterialTheme.typography.bodySmall,
-                    color = colorResource(R.color.nudgy_muted)
+                    color = NudgyMuted
                 )
                 if (row.isCarryOver) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "Carried over",
                         style = MaterialTheme.typography.bodySmall,
-                        color = colorResource(R.color.nudgy_teal)
+                        color = NudgyAccent
                     )
                 }
             }
@@ -233,9 +237,9 @@ private fun PlanPickedRow(
                         imageVector = Icons.Filled.KeyboardArrowUp,
                         contentDescription = "Move ${task.title} up",
                         tint = if (canMoveUp) {
-                            colorResource(R.color.nudgy_ink)
+                            NudgyCharcoal
                         } else {
-                            colorResource(R.color.nudgy_muted)
+                            NudgyMuted
                         }
                     )
                 }
@@ -244,9 +248,9 @@ private fun PlanPickedRow(
                         imageVector = Icons.Filled.KeyboardArrowDown,
                         contentDescription = "Move ${task.title} down",
                         tint = if (canMoveDown) {
-                            colorResource(R.color.nudgy_ink)
+                            NudgyCharcoal
                         } else {
-                            colorResource(R.color.nudgy_muted)
+                            NudgyMuted
                         }
                     )
                 }
@@ -288,19 +292,19 @@ private fun PlanUnpickedRow(
                 Text(
                     text = task.title,
                     style = MaterialTheme.typography.titleMedium,
-                    color = colorResource(R.color.nudgy_ink)
+                    color = NudgyCharcoal
                 )
                 Text(
                     text = planRowDetail(task, null),
                     style = MaterialTheme.typography.bodySmall,
-                    color = colorResource(R.color.nudgy_muted)
+                    color = NudgyMuted
                 )
                 if (row.isCarryOver) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "Carried over",
                         style = MaterialTheme.typography.bodySmall,
-                        color = colorResource(R.color.nudgy_teal)
+                        color = NudgyAccent
                     )
                 }
             }
