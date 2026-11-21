@@ -361,10 +361,14 @@ class Migration8To9Test {
     }
 
     private fun openMigratedDatabase(): NudgyDatabase {
-        // Opening with the v9 entities + MIGRATION_8_9 runs the migration
-        // and validates the whole schema. Any mismatch throws here.
+        // Opening with the CURRENT entities + both migrations runs the
+        // chain 8 -> 9 -> 10 and validates the whole schema. (S4-0:
+        // the entities are v10 now — MIGRATION_8_9 alone leaves no
+        // path 9 -> 10, and Room throws. The 9 -> 10 step only adds
+        // three empty tables and does not touch the v8 assertions below.)
+        // Any mismatch throws here.
         return Room.databaseBuilder(context, NudgyDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_8_9)
+            .addMigrations(MIGRATION_8_9, MIGRATION_9_10)
             .allowMainThreadQueries()
             .build()
     }
