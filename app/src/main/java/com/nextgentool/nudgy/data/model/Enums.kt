@@ -23,3 +23,13 @@ enum class TaskCategory {
     HABIT,
     STUDY
 }
+
+/**
+ * Sprint 4-0 — a Pomodoro session's kind (spec §3). Stored as TEXT in
+ * Room (see Converters). FOCUS minutes count toward focus stats;
+ * BREAK minutes never do (spec §4).
+ */
+enum class FocusSessionKind {
+    FOCUS,
+    BREAK
+}
