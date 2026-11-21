@@ -34,7 +34,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [36])
 class LlmFallbackHandlerTest {
 
-    private class RecordingGeminiClient(context: Context) : GeminiClient(context) {
+    private open class RecordingGeminiClient(context: Context) : GeminiClient(context) {
         var restCalls = 0
         var aiLogicCalls = 0
         var restResponse: String? = null
