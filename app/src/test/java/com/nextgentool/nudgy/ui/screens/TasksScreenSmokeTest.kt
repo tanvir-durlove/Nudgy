@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
@@ -50,6 +51,9 @@ class TasksScreenSmokeTest {
 
     private lateinit var db: NudgyDatabase
     private lateinit var viewModel: TasksViewModel
+    // Owns the ViewModels so tearDown can cancel their scopes before
+    // the DB closes (same leak as DarkThemeTest, 2026-11-21).
+    private val viewModelStore = ViewModelStore()
 
     @Before
     fun setUp() {
@@ -67,10 +71,15 @@ class TasksScreenSmokeTest {
             addSubtask = AddSubtaskUseCase(repository),
             saveView = SaveViewUseCase(repository)
         )
+        viewModelStore.put("tasks", viewModel)
     }
 
     @After
     fun tearDown() {
+        // Order matters: cancel the ViewModel scopes FIRST so no
+        // viewModelScope coroutine can run Room work against the
+        // DB once it is closed (same leak as DarkThemeTest).
+        viewModelStore.clear()
         db.close()
     }
 
