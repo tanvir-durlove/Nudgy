@@ -300,6 +300,20 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
     }
 }
 
+val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Sprint 5-0 (spec §3): NO schema change. The spec assumed
+        // TaskEntity still needed a groupId column, but it already exists
+        // — MIGRATION_4_5 added `groupId` to `tasks` and
+        // `calendar_events` in v1, and the rebuild carried it over.
+        // The version bump to 11 marks the Sprint 5 baseline (same
+        // precedent as MIGRATION_6_7 for the rebuild baseline): every
+        // tester install moves 10 -> 11 with their data intact, and
+        // later Sprint 5 migrations build on v11. Never edit this
+        // migration after a v11 build ships.
+    }
+}
+
 @Database(
     entities = [
         TaskEntity::class,
@@ -319,7 +333,7 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
         HabitEntity::class,
         HabitCheckInEntity::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -351,7 +365,7 @@ abstract class NudgyDatabase : RoomDatabase() {
                     NudgyDatabase::class.java,
                     "nudgy_local_db"
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                     // Public-launch policy (revisited from the pre-launch
                     // note): destructive fallback is RETIRED from v5.
                     // Every distributed install is v4 (1.0.2 was the first

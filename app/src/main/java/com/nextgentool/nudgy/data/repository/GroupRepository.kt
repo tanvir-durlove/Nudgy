@@ -14,42 +14,45 @@ import com.nextgentool.nudgy.data.model.TaskCategory
 import com.nextgentool.nudgy.data.model.TaskStatus
 import com.nextgentool.nudgy.reminders.ReminderManager
 import com.nextgentool.nudgy.work.GroupPollWorker
-import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.DocumentReference
-import com.google.firebase.firestore.ListenerRegistration
-import com.google.firebase.firestore.SetOptions
-import com.google.firebase.Timestamp
-import java.util.Date
+import java.security.SecureRandom
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
-import java.security.SecureRandom
-import java.util.UUID
 
 /**
- * Group repository (Phase 1 group core + Phase 3 delete/leave/member list).
+ * Group repository (Phase 1 group core + Phase 3 delete/leave/member list + Sprint 5-0 foundation).
  *
  * Firestore layout (shared docs, NOT per-member copies):
  *   groups/{gid}                         — name, code, creatorUid, creatorName, timestamps
  *   groups/{gid}/members/{uid}           — membership + display name
  *   groups/{gid}/items/{itemId}          — kind TASK | SCHEDULE + item payload
+ *                                          + completedBy [uid] + completedCount (S5-0)
+ *   groups/{gid}/notices/{noticeId}      — authorUid, authorName, text, createdAt (S5-0, text-only)
  *   groupCodes/{CODE}                    — doc id IS the code (atomic uniqueness via existence)
  *   users/{uid}/groupMemberships/{gid}   — per-user mirror for fast group listing
  *
  * Locally, group items live in the SAME Room tables as personal items, distinguished
  * by TaskEntity.groupId / CalendarEventEntity.groupId (non-null = group row).
- * Completion stays Room-local: a member's isCompleted is never written to Firestore,
- * and the listener preserves it on every upsert.
+ *
+ * Completion is SHARED since Sprint 5-0 (feature 31): a member's completion
+ * is written to the item doc as completedBy + completedCount (see
+ * [setGroupTaskCompleted] — one member counted once, toggle removes).
+ * The LOCAL isCompleted flag is still the member's own state and is
+ * preserved on every listener/poll upsert.
  *
  * Group arrivals are the deliberate exception to the personal-path M4 gap: when a
  * group task arrives (listener or poll), its exact alarm is scheduled immediately.
+ *
+ * Firestore access goes ONLY through [GroupRemoteGateway] (Sprint 5-0 seam):
+ * production uses [FirestoreGroupRemoteGateway]; tests inject a fake, so no
+ * FirebaseApp is ever touched by a unit test. The listener and poll paths
+ * go through the seam too (the gateway converts snapshots to [GroupItemDoc]).
  */
 sealed class GroupResult<out T> {
     data class Ok<T>(val value: T) : GroupResult<T>()
@@ -61,7 +64,8 @@ data class GroupMember(val uid: String, val displayName: String)
 
 class GroupRepository(
     private val context: Context,
-    database: NudgyDatabase = NudgyDatabase.getInstance(context)
+    database: NudgyDatabase = NudgyDatabase.getInstance(context),
+    remoteGateway: GroupRemoteGateway? = null
 ) {
     private val groupDao = database.groupDao()
     private val groupMemberDao = database.groupMemberDao()
@@ -69,22 +73,19 @@ class GroupRepository(
     private val calendarDao = database.calendarDao()
     private val reminderManager = ReminderManager(context)
     private val dbId = context.getString(R.string.firestore_database_id)
+    private val remote: GroupRemoteGateway =
+        remoteGateway ?: FirestoreGroupRemoteGateway(dbId)
     private val repoScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val groupListeners = mutableMapOf<String, ListenerRegistration>()
-    private val groupDocListeners = mutableMapOf<String, ListenerRegistration>()
+    private val groupListeners = mutableMapOf<String, () -> Unit>()
+    private val groupDocListeners = mutableMapOf<String, () -> Unit>()
 
     companion object {
         private const val TAG = "GroupRepository"
         private const val CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
         private const val CODE_LENGTH = 6
         private const val MAX_CODE_ATTEMPTS = 5
-        /** Poll overlap window (plan §3.5): batch writes share timestamps. */
-        private const val POLL_OVERLAP_MS = 60_000L
-        private const val POLL_QUERY_LIMIT = 50L
         private const val RECONCILE_LIMIT = 500L
     }
-
-    private fun firestore(): FirebaseFirestore = FirebaseFirestore.getInstance(dbId)
 
     fun observeGroups(): Flow<List<GroupEntity>> = groupDao.getGroupsFlow()
 
@@ -119,61 +120,22 @@ class GroupRepository(
             if (trimmed.isEmpty()) {
                 return@withContext GroupResult.Err("Enter a group name.")
             }
-            val fs = firestore()
             var lastError: Exception? = null
             repeat(MAX_CODE_ATTEMPTS) {
                 val code = generateCode()
                 try {
-                    if (fs.collection("groupCodes").document(code).get().await().exists()) {
+                    if (remote.getCodeGroupId(code) != null) {
                         return@repeat // collision: regenerate
                     }
                     val groupId = UUID.randomUUID().toString()
-                    fs.collection("groups").document(groupId).set(
-                        mapOf(
-                            "name" to trimmed,
-                            "code" to code,
-                            "creatorUid" to userId,
-                            "creatorName" to displayName,
-                            "createdAt" to FieldValue.serverTimestamp(),
-                            "lastUpdatedAt" to FieldValue.serverTimestamp(),
-                            // Minimization: reconcile gate signal. Set at
-                            // creation so the field exists from birth; the
-                            // poll worker treats a missing field as "unknown"
-                            // and falls back to the old daily reconcile.
-                            "lastDeleteAt" to FieldValue.serverTimestamp()
-                        )
-                    ).await()
-                    fs.collection("groupCodes").document(code).set(
-                        mapOf(
-                            "groupId" to groupId,
-                            "createdAt" to FieldValue.serverTimestamp()
-                        )
-                    ).await()
-                    val batch = fs.batch()
-                    batch.set(
-                        fs.collection("groups").document(groupId)
-                            .collection("members").document(userId),
-                        mapOf(
-                            "uid" to userId,
-                            "displayName" to displayName,
-                            // B3: code proof for the member-create rule —
-                            // the creator's first member write must carry
-                            // the join code, like every join.
-                            "code" to code,
-                            "joinedAt" to FieldValue.serverTimestamp()
-                        )
+                    remote.createGroupDocs(
+                        groupId = groupId,
+                        groupFields = groupCreateFields(trimmed, code, userId, displayName),
+                        code = code,
+                        codeFields = codeDocFields(groupId),
+                        memberFields = memberCreateFields(userId, displayName, code),
+                        mirrorFields = mirrorFields(groupId, trimmed, code)
                     )
-                    batch.set(
-                        fs.collection("users").document(userId)
-                            .collection("groupMemberships").document(groupId),
-                        mapOf(
-                            "groupId" to groupId,
-                            "groupName" to trimmed,
-                            "code" to code,
-                            "joinedAt" to FieldValue.serverTimestamp()
-                        )
-                    )
-                    batch.commit().await()
                     val entity = GroupEntity(
                         groupId = groupId,
                         name = trimmed,
@@ -205,9 +167,7 @@ class GroupRepository(
                 return@withContext GroupResult.Err("Enter a join code.")
             }
             try {
-                val fs = firestore()
-                val codeDoc = fs.collection("groupCodes").document(code).get().await()
-                val groupId = codeDoc.getString("groupId")
+                val groupId = remote.getCodeGroupId(code)
                     ?: return@withContext GroupResult.Err(
                         "That code doesn't match any group. Check the code and try again."
                     )
@@ -215,35 +175,16 @@ class GroupRepository(
                 if (existing != null) {
                     return@withContext GroupResult.Ok(existing) // re-join = no-op success
                 }
-                val groupDoc = fs.collection("groups").document(groupId).get().await()
-                val name = groupDoc.getString("name")
+                val groupFields = remote.getGroupFields(groupId)
+                val name = groupFields?.get("name") as? String
                     ?: return@withContext GroupResult.Err("That group is no longer available.")
-                val creatorUid = groupDoc.getString("creatorUid") ?: ""
-                val batch = fs.batch()
-                batch.set(
-                    fs.collection("groups").document(groupId)
-                        .collection("members").document(userId),
-                    mapOf(
-                        "uid" to userId,
-                        "displayName" to displayName,
-                        // B3: code proof for the member-create rule — the
-                        // write must carry the join code the user entered,
-                        // verified against the groupCodes doc.
-                        "code" to code,
-                        "joinedAt" to FieldValue.serverTimestamp()
-                    )
+                val creatorUid = groupFields["creatorUid"] as? String ?: ""
+                remote.joinMemberDocs(
+                    groupId = groupId,
+                    userId = userId,
+                    memberFields = memberCreateFields(userId, displayName, code),
+                    mirrorFields = mirrorFields(groupId, name, code)
                 )
-                batch.set(
-                    fs.collection("users").document(userId)
-                        .collection("groupMemberships").document(groupId),
-                    mapOf(
-                        "groupId" to groupId,
-                        "groupName" to name,
-                        "code" to code,
-                        "joinedAt" to FieldValue.serverTimestamp()
-                    )
-                )
-                batch.commit().await()
                 val entity = GroupEntity(
                     groupId = groupId,
                     name = name,
@@ -263,31 +204,11 @@ class GroupRepository(
     // ---------------------------------------------------------------- creator writes
 
     private suspend fun writeGroupItem(groupId: String, itemId: String, payload: Map<String, Any>) {
-        val fs = firestore()
-        val batch = fs.batch()
-        batch.set(
-            fs.collection("groups").document(groupId).collection("items").document(itemId),
-            payload
-        )
-        batch.update(
-            fs.collection("groups").document(groupId),
-            "lastUpdatedAt", FieldValue.serverTimestamp()
-        )
-        batch.commit().await()
+        remote.writeGroupItem(groupId, itemId, payload, merge = false)
     }
 
     private suspend fun updateGroupItem(groupId: String, itemId: String, payload: Map<String, Any>) {
-        val fs = firestore()
-        val batch = fs.batch()
-        batch.set(
-            fs.collection("groups").document(groupId).collection("items").document(itemId),
-            payload, SetOptions.merge()
-        )
-        batch.update(
-            fs.collection("groups").document(groupId),
-            "lastUpdatedAt", FieldValue.serverTimestamp()
-        )
-        batch.commit().await()
+        remote.writeGroupItem(groupId, itemId, payload, merge = true)
     }
 
     suspend fun createGroupTask(
@@ -413,16 +334,7 @@ class GroupRepository(
 
     suspend fun deleteGroupItem(groupId: String, userId: String, itemId: String, isTask: Boolean) {
         withContext(Dispatchers.IO) {
-            val fs = firestore()
-            val groupRef = fs.collection("groups").document(groupId)
-            // Minimization: the item delete and the lastDeleteAt bump MUST
-            // share one batch (atomic). The poll worker gates its full
-            // reconcile on this bump; a separate write could lose the
-            // signal and leave orphaned local rows behind.
-            val batch = fs.batch()
-            batch.delete(groupRef.collection("items").document(itemId))
-            batch.update(groupRef, "lastDeleteAt", FieldValue.serverTimestamp())
-            batch.commit().await()
+            remote.deleteGroupItem(groupId, itemId)
             if (isTask) {
                 taskDao.deleteTaskByIdForUser(userId, itemId)
                 reminderManager.cancelReminder(itemId)
@@ -431,6 +343,114 @@ class GroupRepository(
             }
         }
     }
+
+    // ---------------------------------------------------------------- Sprint 5-0: shared completion + notices
+
+    /**
+     * Toggles one member's completion on a group task (feature 31, spec §5).
+     *
+     * The shared state lives on the item doc (completedBy + completedCount,
+     * updated atomically in a transaction — one member counted once, a
+     * second tap changes nothing). The member's LOCAL isCompleted flag is
+     * updated in the same call, so the local list and the shared count
+     * never disagree on this device.
+     */
+    suspend fun setGroupTaskCompleted(
+        groupId: String,
+        itemId: String,
+        userId: String,
+        completed: Boolean
+    ): GroupResult<GroupCompletion> =
+        withContext(Dispatchers.IO) {
+            if (userId == AuthManager.GUEST_USER_ID) {
+                return@withContext GroupResult.Err("Sign in to update a group task.")
+            }
+            try {
+                val updated = remote.runCompletionToggle(groupId, itemId, userId, completed)
+                    ?: return@withContext GroupResult.Err("That task is no longer available.")
+                val now = System.currentTimeMillis()
+                val local = taskDao.getTaskById(itemId)
+                if (local != null && local.groupId == groupId) {
+                    val merged = local.copy(
+                        isCompleted = completed,
+                        completedAtEpochMillis = if (completed) now else null,
+                        // DONE ⇔ isCompleted; an IN_PROGRESS row that is
+                        // un-completed keeps IN_PROGRESS, it never drops
+                        // to TODO through a completion toggle.
+                        status = if (completed) TaskStatus.DONE
+                        else if (local.status == TaskStatus.DONE) TaskStatus.TODO
+                        else local.status,
+                        updatedAtEpochMillis = now
+                    )
+                    taskDao.insertTask(merged)
+                    scheduleGroupTaskAlarm(merged)
+                }
+                GroupResult.Ok(updated)
+            } catch (e: Exception) {
+                Log.w(TAG, "setGroupTaskCompleted failed: ${e.message}")
+                GroupResult.Err("Could not update the task. Check your connection and try again.")
+            }
+        }
+
+    /**
+     * Sends a text-only admin notice (feature 32, spec §6). Creator-only:
+     * the local group row is the check (the rules enforce it remotely too).
+     */
+    suspend fun createGroupNotice(
+        groupId: String,
+        authorUid: String,
+        authorName: String,
+        rawText: String
+    ): GroupResult<GroupNotice> =
+        withContext(Dispatchers.IO) {
+            if (authorUid == AuthManager.GUEST_USER_ID) {
+                return@withContext GroupResult.Err("Sign in to send a notice.")
+            }
+            val text = rawText.trim()
+            if (text.isEmpty()) {
+                return@withContext GroupResult.Err("Write the notice first.")
+            }
+            if (text.length > MAX_NOTICE_TEXT_LENGTH) {
+                return@withContext GroupResult.Err("The notice is too long.")
+            }
+            val local = groupDao.getGroupById(groupId)
+                ?: return@withContext GroupResult.Err("Group not found.")
+            if (local.creatorUid != authorUid) {
+                return@withContext GroupResult.Err("Only the creator can send a notice.")
+            }
+            try {
+                val id = remote.createNotice(
+                    groupId,
+                    noticeToFields(authorUid, authorName, text)
+                )
+                GroupResult.Ok(
+                    GroupNotice(
+                        id = id,
+                        groupId = groupId,
+                        authorUid = authorUid,
+                        authorName = authorName,
+                        text = text,
+                        createdAtEpochMillis = System.currentTimeMillis()
+                    )
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "createGroupNotice failed: ${e.message}")
+                GroupResult.Err("Could not send the notice. Check your connection and try again.")
+            }
+        }
+
+    /** Notices of a group, newest first. A failed read returns empty — never throws. */
+    suspend fun getGroupNotices(groupId: String): List<GroupNotice> =
+        withContext(Dispatchers.IO) {
+            try {
+                remote.getNotices(groupId).mapNotNull { (id, fields) ->
+                    noticeFromDoc(id, groupId, fields)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "getGroupNotices failed: ${e.message}")
+                emptyList()
+            }
+        }
 
     // ---------------------------------------------------------------- Phase 3: members / leave / delete
 
@@ -459,14 +479,9 @@ class GroupRepository(
     suspend fun refreshGroupMembers(groupId: String): List<GroupMember> =
         withContext(Dispatchers.IO) {
             try {
-                val fresh = firestore().collection("groups").document(groupId)
-                    .collection("members")
-                    .get().await().documents.map { doc ->
-                        GroupMember(
-                            uid = doc.getString("uid") ?: doc.id,
-                            displayName = doc.getString("displayName") ?: "Member"
-                        )
-                    }.sortedBy { it.displayName.lowercase() }
+                val fresh = remote.getMemberFields(groupId).map { (docId, fields) ->
+                    memberFromDoc(fields["uid"] as? String ?: docId, fields)
+                }.sortedBy { it.displayName.lowercase() }
                 groupMemberDao.replaceMembers(
                     groupId,
                     fresh.map {
@@ -493,17 +508,7 @@ class GroupRepository(
      * purge on a failed read.
      */
     suspend fun getGroupDeleteSignal(groupId: String): Pair<Boolean, Long> =
-        withContext(Dispatchers.IO) {
-            try {
-                val doc = firestore().collection("groups").document(groupId).get().await()
-                if (!doc.exists()) return@withContext false to -1L
-                val signal = doc.getTimestamp("lastDeleteAt")?.toDate()?.time ?: -1L
-                true to signal
-            } catch (e: Exception) {
-                Log.w(TAG, "getGroupDeleteSignal failed: ${e.message}")
-                true to -1L // never purge on a transient read failure
-            }
-        }
+        withContext(Dispatchers.IO) { remote.getGroupDeleteSignal(groupId) }
 
     /**
      * Local purge for one group: cancel its alarms, delete its local
@@ -540,17 +545,7 @@ class GroupRepository(
                 )
             }
             try {
-                val fs = firestore()
-                val batch = fs.batch()
-                batch.delete(
-                    fs.collection("groups").document(groupId)
-                        .collection("members").document(userId)
-                )
-                batch.delete(
-                    fs.collection("users").document(userId)
-                        .collection("groupMemberships").document(groupId)
-                )
-                batch.commit().await()
+                remote.deleteMemberDocs(groupId, userId)
                 purgeLocalGroup(userId, groupId)
                 GroupResult.Ok(Unit)
             } catch (e: Exception) {
@@ -576,27 +571,8 @@ class GroupRepository(
                 return@withContext GroupResult.Err("Only the creator can delete this group.")
             }
             try {
-                val fs = firestore()
-                val groupRef = fs.collection("groups").document(groupId)
-                val groupDoc = groupRef.get().await()
-                val code = groupDoc.getString("code")
-                val memberIds = groupRef.collection("members")
-                    .limit(500).get().await().documents.map { it.id }
-                val itemIds = groupRef.collection("items")
-                    .limit(500).get().await().documents.map { it.id }
-                val itemRefs = itemIds.map { groupRef.collection("items").document(it) }
-                val memberRefs = memberIds.map { groupRef.collection("members").document(it) }
-                val mirrorRefs = memberIds.map { uid ->
-                    fs.collection("users").document(uid)
-                        .collection("groupMemberships").document(groupId)
-                }
-                deleteRefsInBatches(fs, itemRefs)
-                deleteRefsInBatches(fs, memberRefs)
-                deleteRefsInBatches(fs, mirrorRefs)
-                if (code != null) {
-                    fs.collection("groupCodes").document(code).delete().await()
-                }
-                groupRef.delete().await()
+                val code = remote.getGroupFields(groupId)?.get("code") as? String
+                remote.deleteGroupDocs(groupId, code)
                 purgeLocalGroup(userId, groupId)
                 GroupResult.Ok(Unit)
             } catch (e: Exception) {
@@ -604,15 +580,6 @@ class GroupRepository(
                 GroupResult.Err("Could not delete the group. Check your connection and try again.")
             }
         }
-
-    /** Chunked batch deletes (Firestore caps a batch at 500 writes). */
-    private suspend fun deleteRefsInBatches(fs: FirebaseFirestore, refs: List<DocumentReference>) {
-        for (chunk in refs.chunked(400)) {
-            val batch = fs.batch()
-            for (ref in chunk) batch.delete(ref)
-            batch.commit().await()
-        }
-    }
 
     /**
      * Restores groups from the membership mirror after a fresh install or a
@@ -634,9 +601,7 @@ class GroupRepository(
         if (userId == AuthManager.GUEST_USER_ID) return
         try {
             withContext(Dispatchers.IO) {
-                val fs = firestore()
-                val mirrors = fs.collection("users").document(userId)
-                    .collection("groupMemberships").get().await().documents
+                val mirrors = remote.getMembershipMirrors(userId)
                 // C12: the mirror is deleted atomically with membership —
                 // leaveGroup and deleteGroup remove the member doc and the
                 // mirror in one batch — so a local group with no mirror
@@ -646,7 +611,7 @@ class GroupRepository(
                 // reads (the mirror list is already fetched). A failed
                 // mirror read throws before this point, so a transient
                 // failure can never purge a healthy group.
-                val mirrorIds = mirrors.map { it.getString("groupId") ?: it.id }.toSet()
+                val mirrorIds = mirrors.map { it["groupId"] as? String ?: "" }.toSet()
                 for (localId in groupDao.getGroupIdsOnce()) {
                     if (localId !in mirrorIds) {
                         Log.w(TAG, "restoreGroupsFromMirror: purging stale local group $localId (no mirror entry — left on another device)")
@@ -654,24 +619,24 @@ class GroupRepository(
                     }
                 }
                 for (mirror in mirrors) {
-                    val groupId = mirror.getString("groupId") ?: continue
+                    val groupId = mirror["groupId"] as? String ?: continue
                     if (groupDao.getGroupById(groupId) != null) continue
-                    val groupDoc = fs.collection("groups").document(groupId).get().await()
-                    if (!groupDoc.exists()) {
+                    val groupFields = remote.getGroupFields(groupId)
+                    if (groupFields == null) {
                         // Stale mirror: the group is gone, so drop the mirror too.
-                        mirror.reference.delete().await()
+                        remote.deleteMembershipMirror(userId, groupId)
                         continue
                     }
-                    val name = mirror.getString("groupName")
-                        ?: groupDoc.getString("name") ?: continue
-                    val code = mirror.getString("code")
-                        ?: groupDoc.getString("code") ?: ""
+                    val name = mirror["groupName"] as? String
+                        ?: groupFields["name"] as? String ?: continue
+                    val code = mirror["code"] as? String
+                        ?: groupFields["code"] as? String ?: ""
                     groupDao.insertGroup(
                         GroupEntity(
                             groupId = groupId,
                             name = name,
                             code = code,
-                            creatorUid = groupDoc.getString("creatorUid") ?: "",
+                            creatorUid = groupFields["creatorUid"] as? String ?: "",
                             joinedAtEpochMillis = System.currentTimeMillis()
                         )
                     )
@@ -697,16 +662,16 @@ class GroupRepository(
     }
 
     fun stopGroupSync() {
-        groupListeners.values.forEach { it.remove() }
+        groupListeners.values.forEach { it() }
         groupListeners.clear()
-        groupDocListeners.values.forEach { it.remove() }
+        groupDocListeners.values.forEach { it() }
         groupDocListeners.clear()
     }
 
     /** Drops both listeners for one group (leave/delete/purge path). */
     private fun stopGroupListener(groupId: String) {
-        groupListeners.remove(groupId)?.remove()
-        groupDocListeners.remove(groupId)?.remove()
+        groupListeners.remove(groupId)?.invoke()
+        groupDocListeners.remove(groupId)?.invoke()
     }
 
     /**
@@ -718,14 +683,10 @@ class GroupRepository(
      */
     private fun attachGroupDocListener(userId: String, groupId: String) {
         try {
-            val registration = firestore().collection("groups").document(groupId)
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null || snapshot == null) return@addSnapshotListener
-                    if (!snapshot.exists()) {
-                        repoScope.launch { purgeLocalGroup(userId, groupId) }
-                    }
-                }
-            groupDocListeners[groupId] = registration
+            val remove = remote.addGroupDocListener(groupId) {
+                repoScope.launch { purgeLocalGroup(userId, groupId) }
+            }
+            groupDocListeners[groupId] = remove
         } catch (e: Exception) {
             Log.w(TAG, "Failed to attach group-doc listener for $groupId: ${e.message}")
         }
@@ -735,53 +696,41 @@ class GroupRepository(
 
     private fun attachGroupListener(userId: String, groupId: String) {
         try {
-            val registration = firestore().collection("groups").document(groupId)
-                .collection("items")
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        Log.w(TAG, "Group listener error for $groupId: ${error.message}")
-                        return@addSnapshotListener
-                    }
-                    if (snapshot == null) return@addSnapshotListener
-                    repoScope.launch {
-                        for (change in snapshot.documentChanges) {
-                            when (change.type) {
-                                com.google.firebase.firestore.DocumentChange.Type.ADDED,
-                                com.google.firebase.firestore.DocumentChange.Type.MODIFIED -> {
-                                    when (change.document.getString("kind")) {
-                                        "TASK" -> applyGroupTaskDoc(userId, groupId, change.document)
-                                        "SCHEDULE" -> applyGroupScheduleDoc(userId, groupId, change.document)
-                                    }
-                                }
-                                com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
-                                    val id = change.document.id
-                                    if (taskDao.getTaskById(id) != null) {
-                                        taskDao.deleteTaskById(id)
-                                        reminderManager.cancelReminder(id)
-                                    } else if (calendarDao.getEventById(id) != null) {
-                                        calendarDao.deleteEventById(id)
-                                    }
+            val remove = remote.addItemsListener(groupId) { changes ->
+                repoScope.launch {
+                    for (change in changes) {
+                        when (change) {
+                            is GroupItemChange.Upsert -> when (change.doc.kind) {
+                                "TASK" -> applyGroupTaskDoc(userId, groupId, change.doc)
+                                "SCHEDULE" -> applyGroupScheduleDoc(userId, groupId, change.doc)
+                            }
+                            is GroupItemChange.Removed -> {
+                                val id = change.id
+                                if (taskDao.getTaskById(id) != null) {
+                                    taskDao.deleteTaskById(id)
+                                    reminderManager.cancelReminder(id)
+                                } else if (calendarDao.getEventById(id) != null) {
+                                    calendarDao.deleteEventById(id)
                                 }
                             }
                         }
                     }
                 }
-            groupListeners[groupId] = registration
+            }
+            groupListeners[groupId] = remove
         } catch (e: Exception) {
             Log.w(TAG, "Failed to attach listener for $groupId: ${e.message}")
         }
     }
 
-    private suspend fun applyGroupTaskDoc(userId: String, groupId: String, doc: DocumentSnapshot) {
-        val title = doc.getString("title") ?: return
-        val due = doc.getLong("dueDateEpochMillis") ?: System.currentTimeMillis()
+    private suspend fun applyGroupTaskDoc(userId: String, groupId: String, doc: GroupItemDoc) {
         val priority = try {
-            Priority.valueOf(doc.getString("priority") ?: "MEDIUM")
+            Priority.valueOf(doc.priority ?: "MEDIUM")
         } catch (e: Exception) {
             Priority.MEDIUM
         }
         val category = try {
-            TaskCategory.valueOf(doc.getString("category") ?: "WORK")
+            TaskCategory.valueOf(doc.category ?: "WORK")
         } catch (e: Exception) {
             TaskCategory.WORK
         }
@@ -789,15 +738,15 @@ class GroupRepository(
         val task = TaskEntity(
             id = doc.id,
             userId = userId,
-            title = title,
-            description = doc.getString("description"),
-            dueDateEpochMillis = due,
+            title = doc.title,
+            description = doc.description,
+            dueDateEpochMillis = doc.dueDateEpochMillis ?: System.currentTimeMillis(),
             priority = priority,
             category = category,
             isCompleted = existing?.isCompleted ?: false,
             completedAtEpochMillis = existing?.completedAtEpochMillis,
-            reminderSet = doc.getBoolean("reminderSet") ?: false,
-            reminderEpochMillis = doc.getLong("reminderEpochMillis"),
+            reminderSet = doc.reminderSet,
+            reminderEpochMillis = doc.reminderEpochMillis,
             recurrenceRule = null,
             isSyncedToCloud = true,
             createdAtEpochMillis = existing?.createdAtEpochMillis ?: System.currentTimeMillis(),
@@ -817,17 +766,16 @@ class GroupRepository(
         scheduleGroupTaskAlarm(task)
     }
 
-    private suspend fun applyGroupScheduleDoc(userId: String, groupId: String, doc: DocumentSnapshot) {
-        val title = doc.getString("title") ?: return
+    private suspend fun applyGroupScheduleDoc(userId: String, groupId: String, doc: GroupItemDoc) {
         val event = CalendarEventEntity(
             id = doc.id,
             userId = userId,
-            title = title,
-            startEpochMillis = doc.getLong("startEpochMillis") ?: System.currentTimeMillis(),
-            endEpochMillis = doc.getLong("endEpochMillis")
+            title = doc.title,
+            startEpochMillis = doc.startEpochMillis ?: System.currentTimeMillis(),
+            endEpochMillis = doc.endEpochMillis
                 ?: (System.currentTimeMillis() + 3_600_000L),
-            locationOrLink = doc.getString("locationOrLink"),
-            eventType = doc.getString("eventType") ?: "EVENT",
+            locationOrLink = doc.locationOrLink,
+            eventType = doc.eventType ?: "EVENT",
             isAllDay = false,
             googleCalendarEventId = null,
             isFromGoogleCalendar = false,
@@ -858,28 +806,16 @@ class GroupRepository(
 
     /**
      * Items changed since [lastSeenMs], with the 60s overlap window
-     * applied here (never in the caller) so every poll tick shares it.
+     * applied in the gateway (never in the caller) so every poll tick shares it.
      * Single-field range on updatedAt — automatic index, no composite
      * index needed.
      */
-    suspend fun queryGroupItemsSince(groupId: String, lastSeenMs: Long): List<DocumentSnapshot> =
-        withContext(Dispatchers.IO) {
-            firestore().collection("groups").document(groupId).collection("items")
-                .whereGreaterThan(
-                    "updatedAt",
-                    Timestamp(Date(lastSeenMs - POLL_OVERLAP_MS))
-                )
-                .limit(POLL_QUERY_LIMIT)
-                .get().await().documents
-        }
+    suspend fun queryGroupItemsSince(groupId: String, lastSeenMs: Long): List<GroupItemDoc> =
+        withContext(Dispatchers.IO) { remote.queryItemsSince(groupId, lastSeenMs) }
 
     /** All item ids of a group, bounded (reconciliation input). */
     suspend fun queryGroupItemIds(groupId: String): List<String> =
-        withContext(Dispatchers.IO) {
-            firestore().collection("groups").document(groupId).collection("items")
-                .limit(RECONCILE_LIMIT)
-                .get().await().documents.map { it.id }
-        }
+        withContext(Dispatchers.IO) { remote.getGroupItemIds(groupId, RECONCILE_LIMIT) }
 
     /**
      * Applies polled docs through the same upsert path as the listeners
@@ -890,11 +826,11 @@ class GroupRepository(
     suspend fun applyPolledDocs(
         userId: String,
         groupId: String,
-        docs: List<DocumentSnapshot>
+        docs: List<GroupItemDoc>
     ): Int = withContext(Dispatchers.IO) {
         var newCount = 0
         for (doc in docs) {
-            when (doc.getString("kind")) {
+            when (doc.kind) {
                 "TASK" -> {
                     if (taskDao.getTaskById(doc.id) == null) newCount++
                     applyGroupTaskDoc(userId, groupId, doc)
