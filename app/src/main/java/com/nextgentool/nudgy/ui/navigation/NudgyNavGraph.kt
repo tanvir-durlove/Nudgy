@@ -1,5 +1,7 @@
 package com.nextgentool.nudgy.ui.navigation
 
+import androidx.navigation.navDeepLink
+
 /**
  * Sprint 0 — navigation routes for the scratch rebuild (v2).
  * Wired into MainActivity in Sprint 1-0 (NudgyApp() is the root).
@@ -64,6 +66,19 @@ sealed class NudgyRoute(val route: String) {
 
 /** App Links deep link for group join (manifest already declares it). */
 const val GROUP_JOIN_DEEP_LINK = "https://tanvir-durlove.github.io/nudgy/join"
+
+/**
+ * Sprint 5-1 — the Groups destination's deep links. The code pattern
+ * comes FIRST: navigation tries patterns in order, and the plain
+ * pattern also matches a URI carrying a query, so the code would never
+ * be extracted if the plain pattern came first. A bare /nudgy/join
+ * link (no code) falls through to the plain pattern and opens Groups
+ * with no prefill.
+ */
+val GROUP_JOIN_DEEP_LINKS = listOf(
+    navDeepLink { uriPattern = "$GROUP_JOIN_DEEP_LINK?code={code}" },
+    navDeepLink { uriPattern = GROUP_JOIN_DEEP_LINK }
+)
 
 /** Route of the nested Today graph (Today + Plan). The NavHost starts here. */
 const val TODAY_GRAPH_ROUTE = "today_graph"

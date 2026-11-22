@@ -104,12 +104,6 @@ fun CalendarShell() = ShellScaffold(
 )
 
 @Composable
-fun GroupsShell() = ShellScaffold(
-    title = "Groups",
-    note = "Sprint 5 fills this in: join code, member list, group tasks with badge, completion count, admin notice."
-)
-
-@Composable
 fun SettingsShell(
     // Sprint 4-4 — the Settings entry to the weekly review screen
     // (spec §7, Q9=(a)): the same screen the Today progress ring
