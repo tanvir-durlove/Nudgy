@@ -21,7 +21,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -78,6 +80,21 @@ class GroupRepository(
     private val repoScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val groupListeners = mutableMapOf<String, () -> Unit>()
     private val groupDocListeners = mutableMapOf<String, () -> Unit>()
+    /**
+     * Sprint 5-2 (feature 31): the shared completion per item doc,
+     * as the listeners and the poll last reported it (keyed by item
+     * id). In-memory only — no new Room table: the listeners re-fire
+     * the full snapshot on every attach, so the counts repopulate on
+     * restart, and the poll upsert path feeds the same map. The UI
+     * filters it through [effectiveCompletion] (current members only).
+     * [MutableStateFlow] is thread-safe: writers are the listener
+     * scope, the poll path and [setGroupTaskCompleted].
+     */
+    private val completionFlow =
+        MutableStateFlow<Map<String, GroupCompletion>>(emptyMap())
+
+    /** The shared completion map (raw — the UI filters it to current members). */
+    fun observeCompletions(): Flow<Map<String, GroupCompletion>> = completionFlow
 
     companion object {
         private const val TAG = "GroupRepository"
@@ -203,6 +220,24 @@ class GroupRepository(
 
     // ---------------------------------------------------------------- creator writes
 
+    /**
+     * Sprint 5-2 (Q3=(b)): only the group's creator may write items.
+     * Members can neither create nor edit — they only complete (the
+     * completion-only update rule enforces it remotely too). The local
+     * group row is the check; a missing row means "not a member here".
+     */
+    private suspend fun requireCreator(groupId: String, uid: String): GroupResult<Unit> {
+        if (uid == AuthManager.GUEST_USER_ID) {
+            return GroupResult.Err("Sign in to change group tasks.")
+        }
+        val local = groupDao.getGroupById(groupId)
+            ?: return GroupResult.Err("Group not found.")
+        if (local.creatorUid != uid) {
+            return GroupResult.Err("Only the creator can change group tasks.")
+        }
+        return GroupResult.Ok(Unit)
+    }
+
     private suspend fun writeGroupItem(groupId: String, itemId: String, payload: Map<String, Any>) {
         remote.writeGroupItem(groupId, itemId, payload, merge = false)
     }
@@ -211,6 +246,11 @@ class GroupRepository(
         remote.writeGroupItem(groupId, itemId, payload, merge = true)
     }
 
+    /**
+     * Creator-only (Q3=(b)): creates a group task — the shared item doc
+     * plus the creator's own local row. Members see it arrive through
+     * the listener/poll path, with a group badge, in their own list.
+     */
     suspend fun createGroupTask(
         groupId: String,
         creatorUid: String,
@@ -220,7 +260,12 @@ class GroupRepository(
         priority: Priority,
         category: TaskCategory,
         reminderSet: Boolean
-    ): TaskEntity = withContext(Dispatchers.IO) {
+    ): GroupResult<TaskEntity> = withContext(Dispatchers.IO) {
+        val creatorCheck = requireCreator(groupId, creatorUid)
+        if (creatorCheck is GroupResult.Err) return@withContext creatorCheck
+        if (title.trim().isEmpty()) {
+            return@withContext GroupResult.Err("Enter a task title.")
+        }
         val itemId = UUID.randomUUID().toString()
         val payload = mutableMapOf<String, Any>(
             "kind" to "TASK",
@@ -235,7 +280,14 @@ class GroupRepository(
         )
         if (!description.isNullOrBlank()) payload["description"] = description
         if (reminderSet) payload["reminderEpochMillis"] = ReminderManager.dueReminderTriggerMillis(null, dueDateEpochMillis)
-        writeGroupItem(groupId, itemId, payload)
+        try {
+            writeGroupItem(groupId, itemId, payload)
+        } catch (e: Exception) {
+            Log.w(TAG, "createGroupTask failed: ${e.message}")
+            return@withContext GroupResult.Err(
+                "Could not post the task. Check your connection and try again."
+            )
+        }
         val now = System.currentTimeMillis()
         // S1-4g: a new group row appends at the END of its column (TODO)
         // — a default boardOrder of 0 would collide with the column's
@@ -260,9 +312,10 @@ class GroupRepository(
         )
         taskDao.insertTask(task)
         scheduleGroupTaskAlarm(task)
-        task
+        GroupResult.Ok(task)
     }
 
+    /** Creator-only (Q3=(b)): creates a group schedule item (no completion count — Q4=(a)). */
     suspend fun createGroupSchedule(
         groupId: String,
         creatorUid: String,
@@ -271,7 +324,12 @@ class GroupRepository(
         endEpochMillis: Long,
         locationOrLink: String?,
         eventType: String
-    ): CalendarEventEntity = withContext(Dispatchers.IO) {
+    ): GroupResult<CalendarEventEntity> = withContext(Dispatchers.IO) {
+        val creatorCheck = requireCreator(groupId, creatorUid)
+        if (creatorCheck is GroupResult.Err) return@withContext creatorCheck
+        if (title.trim().isEmpty()) {
+            return@withContext GroupResult.Err("Enter a schedule title.")
+        }
         val itemId = UUID.randomUUID().toString()
         val payload = mutableMapOf<String, Any>(
             "kind" to "SCHEDULE",
@@ -284,7 +342,14 @@ class GroupRepository(
             "updatedAt" to FieldValue.serverTimestamp()
         )
         if (!locationOrLink.isNullOrBlank()) payload["locationOrLink"] = locationOrLink
-        writeGroupItem(groupId, itemId, payload)
+        try {
+            writeGroupItem(groupId, itemId, payload)
+        } catch (e: Exception) {
+            Log.w(TAG, "createGroupSchedule failed: ${e.message}")
+            return@withContext GroupResult.Err(
+                "Could not post the schedule. Check your connection and try again."
+            )
+        }
         val event = CalendarEventEntity(
             id = itemId,
             userId = creatorUid,
@@ -299,13 +364,29 @@ class GroupRepository(
             groupId = groupId
         )
         calendarDao.insertEvent(event)
-        event
+        GroupResult.Ok(event)
     }
 
-    /** Creator edits a group task. The member-local completion flag is preserved. */
-    suspend fun updateGroupTask(groupId: String, task: TaskEntity) {
-        withContext(Dispatchers.IO) {
-            if (task.groupId != groupId) return@withContext
+    /**
+     * Creator-only (Q3=(b)): edits a group task. The member-local
+     * completion flag is preserved. [actorUid] is the signed-in user
+     * making the edit (the local row's userId is the row owner, not
+     * necessarily the actor — never use it for the creator check).
+     */
+    suspend fun updateGroupTask(
+        groupId: String,
+        actorUid: String,
+        task: TaskEntity
+    ): GroupResult<Unit> {
+        return withContext(Dispatchers.IO) {
+            if (task.groupId != groupId) {
+                return@withContext GroupResult.Err("That task doesn't belong to this group.")
+            }
+            val creatorCheck = requireCreator(groupId, actorUid)
+            if (creatorCheck is GroupResult.Err) return@withContext creatorCheck
+            if (task.title.trim().isEmpty()) {
+                return@withContext GroupResult.Err("Enter a task title.")
+            }
             val payload = mutableMapOf<String, Any>(
                 "kind" to "TASK",
                 "title" to task.title,
@@ -319,7 +400,14 @@ class GroupRepository(
             else payload["description"] = FieldValue.delete()
             if (task.reminderSet) payload["reminderEpochMillis"] = ReminderManager.dueReminderTriggerMillis(task.reminderEpochMillis, task.dueDateEpochMillis)
             else payload["reminderEpochMillis"] = FieldValue.delete()
-            updateGroupItem(groupId, task.id, payload)
+            try {
+                updateGroupItem(groupId, task.id, payload)
+            } catch (e: Exception) {
+                Log.w(TAG, "updateGroupTask failed: ${e.message}")
+                return@withContext GroupResult.Err(
+                    "Could not save the task. Check your connection and try again."
+                )
+            }
             val existing = taskDao.getTaskById(task.id)
             val merged = task.copy(
                 isCompleted = existing?.isCompleted ?: task.isCompleted,
@@ -329,18 +417,35 @@ class GroupRepository(
             )
             taskDao.insertTask(merged)
             scheduleGroupTaskAlarm(merged)
+            GroupResult.Ok(Unit)
         }
     }
 
-    suspend fun deleteGroupItem(groupId: String, userId: String, itemId: String, isTask: Boolean) {
-        withContext(Dispatchers.IO) {
-            remote.deleteGroupItem(groupId, itemId)
+    /** Creator-only (Q3=(b)): deletes one group item, locally and remotely. */
+    suspend fun deleteGroupItem(
+        groupId: String,
+        userId: String,
+        itemId: String,
+        isTask: Boolean
+    ): GroupResult<Unit> {
+        return withContext(Dispatchers.IO) {
+            val creatorCheck = requireCreator(groupId, userId)
+            if (creatorCheck is GroupResult.Err) return@withContext creatorCheck
+            try {
+                remote.deleteGroupItem(groupId, itemId)
+            } catch (e: Exception) {
+                Log.w(TAG, "deleteGroupItem failed: ${e.message}")
+                return@withContext GroupResult.Err(
+                    "Could not delete the item. Check your connection and try again."
+                )
+            }
             if (isTask) {
                 taskDao.deleteTaskByIdForUser(userId, itemId)
                 reminderManager.cancelReminder(itemId)
             } else {
                 calendarDao.deleteEventByIdForUser(userId, itemId)
             }
+            GroupResult.Ok(Unit)
         }
     }
 
@@ -368,6 +473,11 @@ class GroupRepository(
             try {
                 val updated = remote.runCompletionToggle(groupId, itemId, userId, completed)
                     ?: return@withContext GroupResult.Err("That task is no longer available.")
+                // S5-2: the shared count updates here too, so the
+                // detail shows the new count without waiting for the
+                // listener round-trip (the listener re-fires the same
+                // values, so this is idempotent).
+                completionFlow.update { it + (itemId to updated) }
                 val now = System.currentTimeMillis()
                 val local = taskDao.getTaskById(itemId)
                 if (local != null && local.groupId == groupId) {
@@ -519,6 +629,11 @@ class GroupRepository(
      */
     suspend fun purgeLocalGroup(userId: String, groupId: String) {
         withContext(Dispatchers.IO) {
+            // S5-2: drop this group's shared completions from the flow
+            // before the rows go (a later rejoin re-fires the listener
+            // snapshot and repopulates them — never a stale count).
+            val taskIds = taskDao.getTaskIdsByGroupId(userId, groupId)
+            completionFlow.update { current -> current - taskIds.toSet() }
             try {
                 reconcileGroupItems(userId, groupId, emptySet())
             } catch (e: Exception) {
@@ -546,6 +661,17 @@ class GroupRepository(
             }
             try {
                 remote.deleteMemberDocs(groupId, userId)
+                // S5-2 (Q6=(a)): leaving removes the member from the
+                // shared counts — best-effort sweep, never fails the
+                // leave itself (the display filters to current members
+                // too, so a partial sweep can never show a stale count;
+                // a rejoin is fresh because the UID is gone from the
+                // arrays). Bounded by the poll query limit (50 docs).
+                try {
+                    sweepLeaverCompletions(groupId, userId)
+                } catch (e: Exception) {
+                    Log.w(TAG, "leaveGroup completion sweep failed: ${e.message}")
+                }
                 purgeLocalGroup(userId, groupId)
                 GroupResult.Ok(Unit)
             } catch (e: Exception) {
@@ -553,6 +679,23 @@ class GroupRepository(
                 GroupResult.Err("Could not leave the group. Check your connection and try again.")
             }
         }
+
+    /**
+     * Removes [uid] from the completedBy array of every item doc they
+     * had completed. Reads the current docs first (only completed
+     * items need a toggle — the array ops in runCompletionToggle are
+     * idempotent, but a blind toggle would also move the count).
+     * queryItemsSince(0) returns every item doc (60s overlap window
+     * is irrelevant at epoch 0), capped at the poll query limit.
+     */
+    private suspend fun sweepLeaverCompletions(groupId: String, uid: String) {
+        val docs = remote.queryItemsSince(groupId, 0L)
+        for (doc in docs) {
+            if (uid in doc.completedBy) {
+                remote.runCompletionToggle(groupId, doc.id, uid, false)
+            }
+        }
+    }
 
     /**
      * Creator delete cascade. Order matters: the code-doc and mirror
@@ -733,6 +876,11 @@ class GroupRepository(
             TaskCategory.valueOf(doc.category ?: "WORK")
         } catch (e: Exception) {
             TaskCategory.WORK
+        }
+        // S5-2: the shared completion rides on the doc — feed the flow
+        // so the detail count updates on every listener/poll upsert.
+        completionFlow.update {
+            it + (doc.id to GroupCompletion(doc.completedBy, doc.completedCount))
         }
         val existing = taskDao.getTaskById(doc.id)
         val task = TaskEntity(

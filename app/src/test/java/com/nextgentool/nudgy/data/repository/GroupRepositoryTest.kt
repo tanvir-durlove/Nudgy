@@ -7,8 +7,11 @@ import com.nextgentool.nudgy.auth.AuthManager
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
+import com.nextgentool.nudgy.data.model.Priority
+import com.nextgentool.nudgy.data.model.TaskCategory
 import com.nextgentool.nudgy.data.model.TaskStatus
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -278,6 +281,180 @@ class GroupRepositoryTest {
         assertTrue(fake.members[group.groupId].isNullOrEmpty())
         assertNull(fake.mirrors["user-2"]?.get(group.groupId))
         assertNull(db.groupDao().getGroupById(group.groupId))
+    }
+
+    // ---------------------------------------------------------------- S5-2: creator-only writes (Q3=(b))
+
+    @Test
+    fun `createGroupTask is creator-only and writes the shared doc plus the local row`() = runTest {
+        val group = createTestGroup()
+        val memberResult = repo.createGroupTask(
+            group.groupId, "user-2", "Homework", null,
+            5000L, Priority.MEDIUM, TaskCategory.WORK, false
+        )
+        assertTrue(memberResult is GroupResult.Err)
+        assertEquals(
+            "Only the creator can change group tasks.",
+            (memberResult as GroupResult.Err).message
+        )
+        assertTrue(fake.items[group.groupId].isNullOrEmpty())
+
+        val blankResult = repo.createGroupTask(
+            group.groupId, "user-1", "   ", null,
+            5000L, Priority.MEDIUM, TaskCategory.WORK, false
+        )
+        assertTrue(blankResult is GroupResult.Err)
+
+        val created = repo.createGroupTask(
+            group.groupId, "user-1", "Homework", "Chapter 3",
+            5000L, Priority.HIGH, TaskCategory.WORK, true
+        )
+        val task = (created as GroupResult.Ok).value
+        assertEquals("Homework", task.title)
+        assertEquals(group.groupId, task.groupId)
+        assertEquals("TASK", fake.items[group.groupId]?.get(task.id)?.get("kind"))
+        assertEquals("Homework", fake.items[group.groupId]?.get(task.id)?.get("title"))
+        checkNotNull(db.taskDao().getTaskById(task.id))
+    }
+
+    @Test
+    fun `createGroupSchedule is creator-only`() = runTest {
+        val group = createTestGroup()
+        val memberResult = repo.createGroupSchedule(
+            group.groupId, "user-2", "Class", 5000L, 6000L, null, "EVENT"
+        )
+        assertTrue(memberResult is GroupResult.Err)
+        assertTrue(fake.items[group.groupId].isNullOrEmpty())
+
+        val created = repo.createGroupSchedule(
+            group.groupId, "user-1", "Class", 5000L, 6000L, null, "EVENT"
+        )
+        val event = (created as GroupResult.Ok).value
+        assertEquals("Class", event.title)
+        assertEquals(group.groupId, event.groupId)
+        assertEquals("SCHEDULE", fake.items[group.groupId]?.get(event.id)?.get("kind"))
+    }
+
+    @Test
+    fun `updateGroupTask is creator-only and preserves local completion`() = runTest {
+        val group = createTestGroup()
+        val created = repo.createGroupTask(
+            group.groupId, "user-1", "Homework", null,
+            5000L, Priority.MEDIUM, TaskCategory.WORK, false
+        )
+        val task = (created as GroupResult.Ok).value
+        // Complete it locally first (as the member would see it).
+        db.taskDao().insertTask(task.copy(isCompleted = true, status = TaskStatus.DONE))
+
+        val memberResult = repo.updateGroupTask(
+            group.groupId, "user-2", task.copy(title = "Hijacked")
+        )
+        assertTrue(memberResult is GroupResult.Err)
+        assertEquals("Homework", fake.items[group.groupId]?.get(task.id)?.get("title"))
+
+        val updated = repo.updateGroupTask(
+            group.groupId, "user-1", task.copy(title = "Homework (revised)")
+        )
+        assertTrue(updated is GroupResult.Ok)
+        assertEquals(
+            "Homework (revised)",
+            fake.items[group.groupId]?.get(task.id)?.get("title")
+        )
+        val local = db.taskDao().getTaskById(task.id)
+        checkNotNull(local)
+        assertTrue(local.isCompleted)
+        assertEquals(TaskStatus.DONE, local.status)
+    }
+
+    @Test
+    fun `deleteGroupItem is creator-only`() = runTest {
+        val group = createTestGroup()
+        val created = repo.createGroupTask(
+            group.groupId, "user-1", "Homework", null,
+            5000L, Priority.MEDIUM, TaskCategory.WORK, false
+        )
+        val task = (created as GroupResult.Ok).value
+
+        val memberResult = repo.deleteGroupItem(group.groupId, "user-2", task.id, true)
+        assertTrue(memberResult is GroupResult.Err)
+        checkNotNull(fake.items[group.groupId]?.get(task.id))
+
+        val deleted = repo.deleteGroupItem(group.groupId, "user-1", task.id, true)
+        assertTrue(deleted is GroupResult.Ok)
+        assertNull(fake.items[group.groupId]?.get(task.id))
+        assertNull(db.taskDao().getTaskById(task.id))
+    }
+
+    // ---------------------------------------------------------------- S5-2: completion flow + leave sweep (Q6)
+
+    @Test
+    fun `listener upsert feeds the shared completion flow`() = runTest {
+        val group = createTestGroup()
+        fake.emitItemChanges(
+            group.groupId,
+            listOf(
+                GroupItemChange.Upsert(
+                    GroupItemDoc(
+                        id = "i-1", kind = "TASK", title = "Homework",
+                        dueDateEpochMillis = 5000L,
+                        completedBy = listOf("user-1", "user-2"), completedCount = 2
+                    )
+                )
+            )
+        )
+        val map = repo.observeCompletions().first { it["i-1"]?.completedCount == 2 }
+        assertEquals(listOf("user-1", "user-2"), map["i-1"]?.completedBy)
+        // The task row landed locally too (same upsert path).
+        checkNotNull(db.taskDao().getTaskById("i-1"))
+    }
+
+    @Test
+    fun `setGroupTaskCompleted updates the shared completion flow`() = runTest {
+        val group = createTestGroup()
+        db.taskDao().insertTask(
+            TaskEntity(id = "i-1", userId = "user-1", title = "Homework", groupId = group.groupId)
+        )
+        fake.seedItem(
+            group.groupId, "i-1",
+            mapOf(
+                "kind" to "TASK", "title" to "Homework",
+                "dueDateEpochMillis" to 2000L, "priority" to "MEDIUM",
+                "category" to "WORK", "reminderSet" to false
+            )
+        )
+        val result = repo.setGroupTaskCompleted(group.groupId, "i-1", "user-1", true)
+        assertTrue(result is GroupResult.Ok)
+        val map = repo.observeCompletions().first { it["i-1"]?.completedCount == 1 }
+        assertEquals(listOf("user-1"), map["i-1"]?.completedBy)
+    }
+
+    @Test
+    fun `leaveGroup sweeps the leaver out of the shared counts`() = runTest {
+        val group = createTestGroup()
+        repo.joinGroup("user-2", "Bob", group.code)
+        fake.seedItem(
+            group.groupId, "i-1",
+            mapOf(
+                "kind" to "TASK", "title" to "Homework",
+                "completedBy" to listOf("user-1", "user-2"), "completedCount" to 2,
+                "updatedAt" to System.currentTimeMillis()
+            )
+        )
+        fake.seedItem(
+            group.groupId, "i-2",
+            mapOf(
+                "kind" to "TASK", "title" to "Reading",
+                "completedBy" to listOf("user-1"), "completedCount" to 1,
+                "updatedAt" to System.currentTimeMillis()
+            )
+        )
+        val left = repo.leaveGroup("user-2", group.groupId)
+        assertTrue(left is GroupResult.Ok)
+        // Only the item user-2 had completed changes; the other is untouched.
+        assertEquals(listOf("user-1"), fake.items[group.groupId]?.get("i-1")?.get("completedBy"))
+        assertEquals(1, fake.items[group.groupId]?.get("i-1")?.get("completedCount"))
+        assertEquals(listOf("user-1"), fake.items[group.groupId]?.get("i-2")?.get("completedBy"))
+        assertEquals(1, fake.items[group.groupId]?.get("i-2")?.get("completedCount"))
     }
 
     // ---------------------------------------------------------------- listeners + poll

@@ -197,3 +197,51 @@ working (read as empty completion).
     ALLOWED. Member sending a notice → DENIED. Notice with empty text
     or >2000 chars → DENIED. Member editing a notice → DENIED.
 17. All v1 checklist items 1–12 still pass (no regression).
+
+---
+
+# Sprint 5-2 additions (2026-11-22, spec §5 Q3=(b) — NOT deployed yet)
+
+## What changed and why
+
+1. **Item create is creator-only again (Q3=(b) REVERT).** The S5-0
+   widening (any member could create an item) is reverted: the create
+   rule now requires the caller's UID to equal the group doc's
+   `creatorUid` (plus the kind/title validation). The repository
+   enforces the same check locally (`requireCreator`) before writing.
+   The S5-0 checklist item 13 (member create → ALLOWED) is now
+   SUPERSEDED: a member creating an item → DENIED.
+2. **Completion toggle bumps `updatedAt` (Q7=(a) offline toggle).** The
+   toggle write changed from a transaction to arrayUnion/arrayRemove +
+   increment, which resolves against the local cache while offline and
+   syncs on reconnect. The write also bumps the item doc's `updatedAt`
+   (server timestamp) so the poll query sees the change.
+   `isCompletionOnlyUpdate` now allows exactly one extra key:
+   `updatedAt`, and requires it to be a timestamp. A member changing
+   any other field is still denied. (A toggle that does not bump
+   `updatedAt` still passes — the field already exists as a timestamp
+   on every item doc.)
+3. **Member lastUpdatedAt-only group update: kept, now unused.** No
+   current member write touches the group doc (the toggle bumps only
+   the item doc's `updatedAt`). The branch stays as a narrow,
+   harmless allowance; the S5-0 comment in the rules is corrected.
+
+## Backward compatibility with the 1.0.5 production app
+
+The 1.0.5 app never writes `completedBy`/`completedCount`, so the
+`updatedAt` allowance does not affect it. The create narrowing
+restores the v1 rule the 1.0.5 app already lived under — its
+behaviour does not change. Members of 1.0.5-era groups lose nothing:
+the 1.0.5 UI never exposed member item creation.
+
+## S5-2 rules test checklist (emulator — run before deploying)
+
+18. Non-creator member creates an item → DENIED (S5-0 item 13 is
+    superseded). Creator creates an item → ALLOWED.
+19. Member toggles own completion (completedBy +[uid],
+    completedCount +1, updatedAt bumped) → ALLOWED. Same toggle
+    WITHOUT the updatedAt bump → ALLOWED (field already a timestamp).
+    Toggle with updatedAt set to a non-timestamp → DENIED. Member
+    toggling ANOTHER member's UID → DENIED. Member writing
+    completedCount != completedBy.size() → DENIED.
+20. All S5-0 checklist items 14–17 still pass (no regression).

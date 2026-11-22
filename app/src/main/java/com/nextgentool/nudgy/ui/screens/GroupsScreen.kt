@@ -74,8 +74,11 @@ import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
+import com.nextgentool.nudgy.data.repository.GroupCompletion
 import com.nextgentool.nudgy.data.repository.GroupMember
 import com.nextgentool.nudgy.data.repository.GroupResult
+import com.nextgentool.nudgy.data.repository.effectiveCompletion
+import com.nextgentool.nudgy.data.repository.formatCompletionCount
 import com.nextgentool.nudgy.ui.components.NudgyCheckbox
 import com.nextgentool.nudgy.ui.sheets.CreateGroupSheet
 import com.nextgentool.nudgy.ui.sheets.CreateTaskSheet
@@ -124,6 +127,11 @@ import kotlinx.coroutines.flow.flowOf
  * - Sprint 5-1: the group-work sections (tasks, schedules, delete/leave)
  *   are gated behind groupWorkEnabled and land in S5-2/S5-4; until then
  *   the detail shows members + a placeholder.
+ * - Sprint 5-2: the task/schedule sections moved behind groupTasksEnabled
+ *   (split from groupWorkEnabled, which still gates delete/leave for
+ *   S5-4). Each group task row shows the shared completion count
+ *   ("৩/৫ করেছে", denominator = current members); tapping the count
+ *   lists who completed it. The count is tasks-only (Q4=(a)).
  */
 @Composable
 fun GroupsScreen(
@@ -155,9 +163,15 @@ fun GroupsScreen(
     onObserveMembers: (groupId: String) -> Flow<List<GroupMember>>,
     onRefreshMembers: suspend (groupId: String) -> List<GroupMember>,
     onToggleTask: (TaskEntity) -> Unit = {},
-    // Sprint 5-1 — group-work sections (tasks, schedules, delete/leave)
-    // land in S5-2/S5-4. Until then the detail shows members + a
-    // placeholder, and the S5-2/S5-4 controls are not rendered at all.
+    // Sprint 5-2 — the shared completion per item doc (raw map from the
+    // ViewModel; the detail filters each row to current members with
+    // effectiveCompletion, Q6=(a)). Tasks only — schedules carry no count.
+    completions: Map<String, GroupCompletion> = emptyMap(),
+    // Sprint 5-2 — task/schedule sections. Split from groupWorkEnabled
+    // (S5-4: delete/leave) so the task UI lands without dead buttons.
+    groupTasksEnabled: Boolean = false,
+    // Sprint 5-1 — group delete/leave lands in S5-4. Until then the
+    // buttons are not rendered at all.
     groupWorkEnabled: Boolean = false,
     prefillJoinCode: String? = null,
     onPrefillJoinCodeConsumed: () -> Unit = {},
@@ -197,6 +211,8 @@ fun GroupsScreen(
     var showCreateSchedule by remember { mutableStateOf(false) }
     var editTask by remember { mutableStateOf<TaskEntity?>(null) }
     var detailTask by remember { mutableStateOf<TaskEntity?>(null) }
+    // Sprint 5-2 — the task whose "who completed" list is open.
+    var whoCompletedTask by remember { mutableStateOf<TaskEntity?>(null) }
     var schedulePendingDelete by remember { mutableStateOf<CalendarEventEntity?>(null) }
     var taskPendingDelete by remember { mutableStateOf<TaskEntity?>(null) }
     var deleteGroupTarget by remember { mutableStateOf<GroupEntity?>(null) }
@@ -677,7 +693,7 @@ fun GroupsScreen(
                     }
                 }
             }
-            if (groupWorkEnabled && groupTasks.isNotEmpty()) {
+            if (groupTasksEnabled && groupTasks.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(20.dp))
                 Surface(
                     shape = RoundedCornerShape(20.dp),
@@ -725,7 +741,7 @@ fun GroupsScreen(
                     }
                 }
             }
-            if (groupWorkEnabled && isCreator) {
+            if (groupTasksEnabled && isCreator) {
                 Spacer(modifier = Modifier.height(20.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
@@ -821,10 +837,11 @@ fun GroupsScreen(
                     }
                 }
             }
-            // Sprint 5-1 — the Tasks card lands in S5-2; until then the
-            // placeholder below takes its place (same for the Schedule
-            // card and the Delete/Leave buttons).
-            if (groupWorkEnabled) {
+            // Sprint 5-2 — the Tasks card (groupTasksEnabled). The
+            // placeholder below takes its place until then (same for the
+            // Schedule card); delete/leave stay behind groupWorkEnabled
+            // for S5-4.
+            if (groupTasksEnabled) {
             Spacer(modifier = Modifier.height(20.dp))
             // Tasks section card: header inside the card, rows below a rule.
             Surface(
@@ -900,6 +917,31 @@ fun GroupsScreen(
                                             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
                                             color = NudgyMuted
                                         )
+                                        // Sprint 5-2 (feature 31): the shared
+                                        // completion count — "৩/৫ করেছে",
+                                        // denominator = current members.
+                                        // Hidden while the member list is
+                                        // still loading (no denominator yet).
+                                        // Tapping it lists who completed.
+                                        val memberList = members
+                                        if (memberList != null && memberList.isNotEmpty()) {
+                                            val completion = effectiveCompletion(
+                                                completions[task.id] ?: GroupCompletion(),
+                                                memberList.map { it.uid }.toSet()
+                                            )
+                                            Text(
+                                                text = formatCompletionCount(
+                                                    completion.completedCount, memberList.size
+                                                ),
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontSize = 12.sp, fontWeight = FontWeight.SemiBold
+                                                ),
+                                                color = NudgyGreen,
+                                                modifier = Modifier.clickable {
+                                                    whoCompletedTask = task
+                                                }
+                                            )
+                                        }
                                     }
                                     if (isCreator) {
                                         IconButton(
@@ -955,7 +997,7 @@ fun GroupsScreen(
                 }
             }
             }
-            if (groupWorkEnabled) {
+            if (groupTasksEnabled) {
             Spacer(modifier = Modifier.height(20.dp))
             // Schedule section card: header inside the card, rows below a rule.
             Surface(
@@ -1096,10 +1138,11 @@ fun GroupsScreen(
         )
     }
     val activeGroup = selectedGroup
-    // Sprint 5-1 — the task/schedule/edit/detail sheets and the
-    // delete/leave dialogs land in S5-2/S5-4; unreachable until then
-    // (their buttons are gated above), but composed only when enabled.
-    if (groupWorkEnabled) {
+    // Sprint 5-2 — the task/schedule/edit/detail sheets and the
+    // item-delete dialogs live behind groupTasksEnabled (their buttons
+    // are gated above); the group delete/leave dialogs stay behind
+    // groupWorkEnabled for S5-4.
+    if (groupTasksEnabled) {
     if (showCreateTask && activeGroup != null) {
         CreateTaskSheet(
             onDismiss = { showCreateTask = false },
@@ -1149,6 +1192,57 @@ fun GroupsScreen(
             groupName = selectedGroup?.name ?: "Group",
             onDismiss = { detailTask = null },
             onToggleComplete = { onToggleTask(it) }
+        )
+    }
+    // Sprint 5-2 (feature 31, Q5=(a)): who completed this task — every
+    // member sees the names. UIDs are resolved against the member list;
+    // an unresolvable UID (members still loading) reads as "Member".
+    whoCompletedTask?.let { task ->
+        val memberList = members
+        val completion = effectiveCompletion(
+            completions[task.id] ?: GroupCompletion(),
+            memberList?.map { it.uid }?.toSet() ?: emptySet()
+        )
+        val names = completion.completedBy.map { uid ->
+            memberList?.firstOrNull { it.uid == uid }?.displayName?.ifBlank { "Member" }
+                ?: "Member"
+        }
+        AlertDialog(
+            onDismissRequest = { whoCompletedTask = null },
+            title = { Text("Who completed this") },
+            text = {
+                Column {
+                    Text(
+                        text = task.title,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = NudgyCharcoal
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    if (names.isEmpty()) {
+                        Text(
+                            text = "No one has completed this yet.",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                            color = NudgyMuted
+                        )
+                    } else {
+                        names.forEach { name ->
+                            Text(
+                                text = name,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                                color = NudgyCharcoal,
+                                modifier = Modifier.padding(vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { whoCompletedTask = null }) {
+                    Text("Close")
+                }
+            }
         )
     }
     taskPendingDelete?.let { task ->
@@ -1207,6 +1301,11 @@ fun GroupsScreen(
             }
         )
     }
+    }
+    // Sprint 5-4 — the group delete/leave dialogs stay behind
+    // groupWorkEnabled; unreachable until then (their buttons are
+    // gated above).
+    if (groupWorkEnabled) {
     deleteGroupTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { deleteGroupTarget = null },

@@ -2,6 +2,7 @@ package com.nextgentool.nudgy.ui.navigation
 
 import android.Manifest
 import android.app.Activity
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -416,12 +417,24 @@ fun NudgyNavHost(
             // Sprint 5-1 — Groups tab (spec §4): the v1 screen wired to
             // the S5-0 repository through GroupsViewModel. The deep-link
             // join code is a one-shot prefill (the user still taps Join).
+            // Sprint 5-2 — group tasks (spec §5, Q3=(b) admin-only):
+            // the task/schedule sections are on; delete/leave stay
+            // gated for S5-4. Failed group-task writes toast (the
+            // sheets close on submit, so there is no inline result).
             val groupsViewModel: GroupsViewModel = hiltViewModel()
             val joinCode = backStackEntry.arguments?.getString("code")
             LaunchedEffect(joinCode) {
                 if (joinCode != null) groupsViewModel.setPrefillJoinCode(joinCode)
             }
+            val context = LocalContext.current
+            LaunchedEffect(groupsViewModel) {
+                groupsViewModel.groupTaskError.collect { message ->
+                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                }
+            }
             val groupsUiState by groupsViewModel.uiState.collectAsState()
+            val completions by groupsViewModel.observeCompletions()
+                .collectAsState(initial = emptyMap())
             GroupsScreen(
                 user = groupsUiState.user,
                 groups = groupsUiState.groups,
@@ -429,8 +442,27 @@ fun NudgyNavHost(
                 allEvents = groupsUiState.allEvents,
                 onCreateGroup = { name -> groupsViewModel.createGroup(name) },
                 onJoinGroup = { code -> groupsViewModel.joinGroup(code) },
+                onCreateGroupTask = { groupId, title, description, due, priority, category, reminderSet ->
+                    groupsViewModel.createGroupTask(
+                        groupId, title, description, due, priority, category, reminderSet
+                    )
+                },
+                onCreateGroupSchedule = { groupId, title, start, end, location, type ->
+                    groupsViewModel.createGroupSchedule(
+                        groupId, title, start, end, location, type
+                    )
+                },
+                onUpdateGroupTask = { groupId, task ->
+                    groupsViewModel.updateGroupTask(groupId, task)
+                },
+                onDeleteGroupItem = { groupId, itemId, isTask ->
+                    groupsViewModel.deleteGroupItem(groupId, itemId, isTask)
+                },
                 onObserveMembers = { groupId -> groupsViewModel.observeMembers(groupId) },
                 onRefreshMembers = { groupId -> groupsViewModel.refreshMembers(groupId) },
+                onToggleTask = { task -> groupsViewModel.toggleGroupTask(task) },
+                completions = completions,
+                groupTasksEnabled = true,
                 prefillJoinCode = groupsUiState.prefillJoinCode,
                 onPrefillJoinCodeConsumed = { groupsViewModel.consumePrefillJoinCode() }
             )

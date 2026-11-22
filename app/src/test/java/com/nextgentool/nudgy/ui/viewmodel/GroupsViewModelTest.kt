@@ -7,6 +7,8 @@ import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.auth.AuthManager
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.local.entity.GroupMemberEntity
+import com.nextgentool.nudgy.data.model.Priority
+import com.nextgentool.nudgy.data.model.TaskCategory
 import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.data.repository.FakeGroupRemoteGateway
 import com.nextgentool.nudgy.data.repository.GroupRepository
@@ -14,6 +16,7 @@ import com.nextgentool.nudgy.data.repository.GroupResult
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -267,5 +270,90 @@ class GroupsViewModelTest {
         val members = viewModel.refreshMembers(entity.groupId)
 
         assertTrue(members.any { it.uid == "user-9" && it.displayName == "Member" })
+    }
+
+    // ---- Sprint 5-2: group tasks (Q3=(b) admin-only) + completion (feature 31)
+
+    @Test
+    fun `createGroupTask as creator writes the shared doc and the local row`() = vmTest {
+        val viewModel = buildViewModel()
+        val created = viewModel.createGroup("DIU 41")
+        val entity = (created as GroupResult.Ok).value
+
+        viewModel.createGroupTask(
+            entity.groupId, "Homework", "Chapter 3",
+            5000L, Priority.HIGH, TaskCategory.WORK, true
+        )
+        val state = viewModel.awaitGroup("DIU 41")
+        val task = state.allTasks.single { it.groupId == entity.groupId }
+        assertEquals("Homework", task.title)
+        assertEquals("TASK", fake.items[entity.groupId]?.get(task.id)?.get("kind"))
+    }
+
+    @Test
+    fun `createGroupTask as a member emits the creator-only error`() = vmTest {
+        val created = groupRepository.createGroup(userId, "Creator", "DIU 41")
+        val entity = (created as GroupResult.Ok).value
+        setActiveUser("user-2")
+        val viewModel = buildViewModel()
+        val errorDeferred = backgroundScope.async { viewModel.groupTaskError.first() }
+
+        viewModel.createGroupTask(
+            entity.groupId, "Homework", null,
+            5000L, Priority.MEDIUM, TaskCategory.WORK, false
+        )
+
+        assertEquals("Only the creator can change group tasks.", errorDeferred.await())
+        assertTrue(fake.items[entity.groupId].isNullOrEmpty())
+    }
+
+    @Test
+    fun `toggleGroupTask completes and reopens through the repository`() = vmTest {
+        val viewModel = buildViewModel()
+        val created = viewModel.createGroup("DIU 41")
+        val entity = (created as GroupResult.Ok).value
+        val taskResult = groupRepository.createGroupTask(
+            entity.groupId, userId, "Homework", null,
+            5000L, Priority.MEDIUM, TaskCategory.WORK, false
+        )
+        val task = (taskResult as GroupResult.Ok).value
+
+        viewModel.toggleGroupTask(task)
+        val done = viewModel.uiState.first { state ->
+            state.allTasks.any { it.id == task.id && it.isCompleted }
+        }
+        assertTrue(done.allTasks.single { it.id == task.id }.isCompleted)
+        assertEquals(
+            listOf(userId),
+            fake.items[entity.groupId]?.get(task.id)?.get("completedBy")
+        )
+
+        viewModel.toggleGroupTask(done.allTasks.single { it.id == task.id })
+        val reopened = viewModel.uiState.first { state ->
+            state.allTasks.any { it.id == task.id && !it.isCompleted }
+        }
+        assertTrue(!reopened.allTasks.single { it.id == task.id }.isCompleted)
+        assertEquals(
+            emptyList<String>(),
+            fake.items[entity.groupId]?.get(task.id)?.get("completedBy")
+        )
+    }
+
+    @Test
+    fun `observeCompletions emits the shared count after a toggle`() = vmTest {
+        val viewModel = buildViewModel()
+        val created = viewModel.createGroup("DIU 41")
+        val entity = (created as GroupResult.Ok).value
+        val taskResult = groupRepository.createGroupTask(
+            entity.groupId, userId, "Homework", null,
+            5000L, Priority.MEDIUM, TaskCategory.WORK, false
+        )
+        val task = (taskResult as GroupResult.Ok).value
+
+        viewModel.toggleGroupTask(task)
+        val map = viewModel.observeCompletions().first {
+            it[task.id]?.completedCount == 1
+        }
+        assertEquals(listOf(userId), map[task.id]?.completedBy)
     }
 }

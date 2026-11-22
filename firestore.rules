@@ -65,17 +65,20 @@ service cloud.firestore {
     }
 
     function isCompletionOnlyUpdate() {
-      // Sprint 5-0 (feature 31): a member may update an item doc ONLY
-      // to toggle their own completion. The changed keys must be
-      // exactly completedBy + completedCount; the count must equal the
-      // array size; and the only UID added or removed must be the
-      // caller's own. A doc written before S5-0 has no completedBy —
-      // .get(..., []) treats it as empty.
+      // Sprint 5-0 (feature 31) + 5-2 (offline toggle, Q7=(a)): a member
+      // may update an item doc ONLY to toggle their own completion. The
+      // changed keys must be exactly completedBy + completedCount (+ an
+      // updatedAt server-timestamp bump, so the poll query sees the
+      // change — the toggle writes it, never any other field); the
+      // count must equal the array size; and the only UID added or
+      // removed must be the caller's own. A doc written before S5-0
+      // has no completedBy — .get(..., []) treats it as empty.
       return request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['completedBy', 'completedCount'])
+          .hasOnly(['completedBy', 'completedCount', 'updatedAt'])
         && request.resource.data.completedBy is list
         && request.resource.data.completedCount is int
         && request.resource.data.completedCount == request.resource.data.completedBy.size()
+        && request.resource.data.updatedAt is timestamp
         && request.resource.data.completedBy.toSet()
             .difference(resource.data.get('completedBy', []).toSet())
             .hasOnly([request.auth.uid])
@@ -120,10 +123,10 @@ service cloud.firestore {
       allow create: if request.auth != null &&
         request.resource.data.creatorUid == request.auth.uid;
       // Creator may update anything; a member may update ONLY
-      // lastUpdatedAt (Sprint 5-0: any member can now create an item,
-      // and every item write bumps lastUpdatedAt in the same batch —
-      // without this branch the member's batch would fail on the group
-      // update). A member changing any other group field is denied.
+      // lastUpdatedAt (kept from Sprint 5-0 — a narrow, harmless
+      // allowance; no current member write touches the group doc:
+      // the completion toggle bumps only the item doc's updatedAt).
+      // A member changing any other group field is denied.
       allow update: if request.auth != null &&
         (resource.data.creatorUid == request.auth.uid ||
          (isGroupMember(gid) && request.resource.data.diff(resource.data)
@@ -153,11 +156,13 @@ service cloud.firestore {
     match /groups/{gid}/items/{itemId} {
       allow read: if request.auth != null &&
         exists(/databases/$(database)/documents/groups/$(gid)/members/$(request.auth.uid));
-      // Sprint 5-0 (Q3=(a)): ANY member may create an item — the v1
-      // creator-only create is widened. The creator keeps full
-      // update/delete; a member may update ONLY their own completion
-      // (isCompletionOnlyUpdate), never another field.
-      allow create: if request.auth != null && isGroupMember(gid)
+      // Sprint 5-2 (Q3=(b)): ONLY the creator may create an item — the
+      // S5-0 widening (any member could create) is reverted. The
+      // creator keeps full update/delete; a member may update ONLY
+      // their own completion (isCompletionOnlyUpdate), never another
+      // field. The repository enforces the same check locally.
+      allow create: if request.auth != null &&
+        get(/databases/$(database)/documents/groups/$(gid)).data.creatorUid == request.auth.uid
         && request.resource.data.kind is string
         && request.resource.data.title is string
         && request.resource.data.title.size() > 0;

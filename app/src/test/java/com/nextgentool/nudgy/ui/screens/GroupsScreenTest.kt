@@ -6,9 +6,12 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
+import com.nextgentool.nudgy.data.local.entity.TaskEntity
+import com.nextgentool.nudgy.data.repository.GroupCompletion
 import com.nextgentool.nudgy.data.repository.GroupMember
 import com.nextgentool.nudgy.data.repository.GroupResult
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
@@ -28,6 +31,14 @@ import org.robolectric.annotation.Config
  * (members + placeholder, no group-work UI), the create/join sheets,
  * and the deep-link prefill. Compose 1.7 member rules apply:
  * assertExists/assertDoesNotExist are members, never top-level imports.
+ *
+ * Sprint 5-2 — group tasks (spec §5, feature 31): the same screen
+ * with groupTasksEnabled=true — the task rows with the shared
+ * completion count, the who-completed dialog, the creator-only
+ * Add task/schedule buttons, and the member toggle via the detail
+ * sheet. The detail is a scrolling column: below-fold nodes are
+ * scrolled to before tapping (performScrollTo) and asserted with
+ * assertExists, not assertIsDisplayed.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -55,6 +66,11 @@ class GroupsScreenTest {
     private fun render(
         user: NudgyUser = memberUser,
         groups: List<GroupEntity> = listOf(group()),
+        allTasks: List<TaskEntity> = emptyList(),
+        completions: Map<String, GroupCompletion> = emptyMap(),
+        membersOverride: List<GroupMember>? = null,
+        groupTasksEnabled: Boolean = false,
+        onToggleTask: (TaskEntity) -> Unit = {},
         onCreateGroup: suspend (String) -> GroupResult<GroupEntity> =
             { GroupResult.Ok(group()) },
         onJoinGroup: suspend (String) -> GroupResult<GroupEntity> =
@@ -62,17 +78,21 @@ class GroupsScreenTest {
         prefillJoinCode: String? = null,
         initialSelectedGroup: GroupEntity? = null
     ) {
+        val shownMembers = membersOverride ?: members
         composeRule.setContent {
             NudgyTheme {
                 GroupsScreen(
                     user = user,
                     groups = groups,
-                    allTasks = emptyList(),
+                    allTasks = allTasks,
                     allEvents = emptyList(),
                     onCreateGroup = onCreateGroup,
                     onJoinGroup = onJoinGroup,
-                    onObserveMembers = { flowOf(members) },
-                    onRefreshMembers = { members },
+                    onObserveMembers = { flowOf(shownMembers) },
+                    onRefreshMembers = { shownMembers },
+                    onToggleTask = onToggleTask,
+                    completions = completions,
+                    groupTasksEnabled = groupTasksEnabled,
                     prefillJoinCode = prefillJoinCode,
                     initialSelectedGroup = initialSelectedGroup
                 )
@@ -80,6 +100,16 @@ class GroupsScreenTest {
         }
         composeRule.waitForIdle()
     }
+
+    private fun groupTask(
+        id: String = "t-1",
+        title: String = "Homework",
+        isCompleted: Boolean = false
+    ) = TaskEntity(
+        id = id, userId = "user-1", title = title,
+        dueDateEpochMillis = 1_800_000_000_000L,
+        isCompleted = isCompleted, groupId = "g-1"
+    )
 
     @Test
     fun `list shows groups with name code and role pill`() {
@@ -195,6 +225,113 @@ class GroupsScreenTest {
         composeRule.waitForIdle()
 
         assertEquals("K7Q2XA", captured)
+    }
+
+    // ---- Sprint 5-2: group tasks + shared completion count (feature 31)
+
+    @Test
+    fun `creator detail with tasks enabled shows Add task and the shared count`() {
+        render(
+            user = creator,
+            allTasks = listOf(groupTask()),
+            completions = mapOf("t-1" to GroupCompletion(listOf("user-1"), 1)),
+            groupTasksEnabled = true,
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithText("Add task").assertExists()
+        composeRule.onNodeWithText("Add schedule").assertExists()
+        composeRule.onNodeWithText("Group tasks and notices").assertDoesNotExist()
+        composeRule.onNodeWithText("১/২ করেছে").assertExists()
+        composeRule.onNodeWithText("Homework").assertExists()
+    }
+
+    @Test
+    fun `member detail shows the count but no Add task`() {
+        render(
+            allTasks = listOf(groupTask()),
+            completions = mapOf("t-1" to GroupCompletion(listOf("user-1"), 1)),
+            groupTasksEnabled = true,
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithText("Add task").assertDoesNotExist()
+        composeRule.onNodeWithText("Add schedule").assertDoesNotExist()
+        composeRule.onNodeWithText("১/২ করেছে").assertExists()
+    }
+
+    @Test
+    fun `tapping the count lists who completed it, blank names read as Member`() {
+        render(
+            allTasks = listOf(groupTask()),
+            completions = mapOf(
+                "t-1" to GroupCompletion(listOf("user-1", "user-2"), 2)
+            ),
+            membersOverride = listOf(
+                GroupMember(uid = "user-1", displayName = "Ayesha"),
+                GroupMember(uid = "user-2", displayName = "")
+            ),
+            groupTasksEnabled = true,
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithText("২/২ করেছে").performScrollTo().performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Who completed this").assertIsDisplayed()
+        composeRule.onNodeWithText("Ayesha").assertExists()
+        // user-2 has a blank display name: the dialog falls back to
+        // "Member", never a blank row.
+        composeRule.onNodeWithText("Member").assertIsDisplayed()
+    }
+
+    @Test
+    fun `tapping the count with no completions says no one has completed it`() {
+        render(
+            allTasks = listOf(groupTask()),
+            completions = emptyMap(),
+            groupTasksEnabled = true,
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithText("০/২ করেছে").performScrollTo().performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Who completed this").assertIsDisplayed()
+        composeRule.onNodeWithText("No one has completed this yet.").assertIsDisplayed()
+    }
+
+    @Test
+    fun `member marks a task done from the detail sheet`() {
+        var toggled: TaskEntity? = null
+        render(
+            allTasks = listOf(groupTask()),
+            completions = emptyMap(),
+            groupTasksEnabled = true,
+            onToggleTask = { toggled = it },
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithText("Homework").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Mark as done").performClick()
+        composeRule.waitForIdle()
+
+        assertEquals("t-1", toggled?.id)
+    }
+
+    @Test
+    fun `creator tapping Add task opens the create sheet`() {
+        render(
+            user = creator,
+            groupTasksEnabled = true,
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithText("Add task").performScrollTo().performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Post a group task").assertIsDisplayed()
     }
 }
 
