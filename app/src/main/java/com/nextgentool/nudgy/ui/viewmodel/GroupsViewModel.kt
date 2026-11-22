@@ -118,6 +118,33 @@ class GroupsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Sprint 5-4 — creator delete cascade (feature 33, spec §7). The
+     * repo enforces the creator check and purges locally; a member
+     * calling this gets the Err on [groupTaskError] (the UI never shows
+     * them the button).
+     */
+    fun deleteGroup(groupId: String) {
+        viewModelScope.launch {
+            val result = groupRepository.deleteGroup(userId, groupId)
+            if (result is GroupResult.Err) _groupTaskError.emit(result.message)
+        }
+    }
+
+    /**
+     * Sprint 5-4 — member leave (feature 33, spec §7). The repo
+     * sweeps the leaver out of the shared counts (Q6=(a)) and purges
+     * locally; rejoin with the same code stays possible. The creator
+     * calling this gets the Err on [groupTaskError] — they delete
+     * instead of leaving.
+     */
+    fun leaveGroup(groupId: String) {
+        viewModelScope.launch {
+            val result = groupRepository.leaveGroup(userId, groupId)
+            if (result is GroupResult.Err) _groupTaskError.emit(result.message)
+        }
+    }
+
     /** The shared completion map (raw — the screen filters it to current members). */
     fun observeCompletions(): Flow<Map<String, GroupCompletion>> =
         groupRepository.observeCompletions()

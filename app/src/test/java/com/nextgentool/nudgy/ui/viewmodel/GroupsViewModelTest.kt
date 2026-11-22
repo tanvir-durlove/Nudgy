@@ -400,4 +400,66 @@ class GroupsViewModelTest {
 
         assertEquals(listOf("Class at 10"), refreshed.map { it.text })
     }
+
+    // ---- Sprint 5-4: delete / leave (feature 33, spec §7)
+
+    @Test
+    fun `deleteGroup as creator deletes the group everywhere`() = vmTest {
+        val viewModel = buildViewModel()
+        val created = viewModel.createGroup("DIU 41")
+        val entity = (created as GroupResult.Ok).value
+        viewModel.uiState.first { state -> state.groups.any { it.groupId == entity.groupId } }
+
+        viewModel.deleteGroup(entity.groupId)
+
+        val state = viewModel.uiState.first { state -> state.groups.none { it.groupId == entity.groupId } }
+        assertTrue(state.groups.isEmpty())
+        assertTrue(fake.groups.isEmpty())
+        assertTrue(fake.codes.isEmpty())
+    }
+
+    @Test
+    fun `deleteGroup as member emits the creator-only error`() = vmTest {
+        val created = groupRepository.createGroup(userId, "Creator", "DIU 41")
+        val entity = (created as GroupResult.Ok).value
+        groupRepository.joinGroup("user-2", "Bob", entity.code)
+        setActiveUser("user-2")
+        val viewModel = buildViewModel()
+        val errorDeferred = backgroundScope.async { viewModel.groupTaskError.first() }
+
+        viewModel.deleteGroup(entity.groupId)
+
+        assertEquals("Only the creator can delete this group.", errorDeferred.await())
+        checkNotNull(fake.groups[entity.groupId])
+    }
+
+    @Test
+    fun `leaveGroup as member leaves and purges locally`() = vmTest {
+        val created = groupRepository.createGroup(userId, "Creator", "DIU 41")
+        val entity = (created as GroupResult.Ok).value
+        groupRepository.joinGroup("user-2", "Bob", entity.code)
+        setActiveUser("user-2")
+        val viewModel = buildViewModel()
+        viewModel.uiState.first { state -> state.groups.any { it.groupId == entity.groupId } }
+
+        viewModel.leaveGroup(entity.groupId)
+
+        val state = viewModel.uiState.first { state -> state.groups.none { it.groupId == entity.groupId } }
+        assertTrue(state.groups.isEmpty())
+        assertNull(fake.members[entity.groupId]?.get("user-2"))
+        assertNull(fake.mirrors["user-2"]?.get(entity.groupId))
+    }
+
+    @Test
+    fun `leaveGroup as creator emits the delete-instead error`() = vmTest {
+        val viewModel = buildViewModel()
+        val created = viewModel.createGroup("DIU 41")
+        val entity = (created as GroupResult.Ok).value
+        val errorDeferred = backgroundScope.async { viewModel.groupTaskError.first() }
+
+        viewModel.leaveGroup(entity.groupId)
+
+        assertEquals("The creator can't leave — delete the group instead.", errorDeferred.await())
+        checkNotNull(fake.groups[entity.groupId])
+    }
 }

@@ -1012,9 +1012,18 @@ class GroupRepository(
         calendarDao.insertEvent(event)
     }
 
-    /** Group-arrival alarm rule: exact alarm on arrival, never the M4 gap. */
+    /**
+     * Group-arrival alarm rule: exact alarm on arrival, never the M4 gap.
+     * Sprint 5-4: a task whose reminder is OFF cancels any alarm armed
+     * earlier — returning early here left a stale alarm that still fired
+     * at the old trigger (the creator turning a reminder off, and the
+     * same upsert arriving on a member's phone, both flow through here).
+     */
     private fun scheduleGroupTaskAlarm(task: TaskEntity) {
-        if (!task.reminderSet) return
+        if (!task.reminderSet) {
+            reminderManager.cancelReminder(task.id)
+            return
+        }
         if (task.isCompleted) {
             reminderManager.cancelReminder(task.id)
             return
