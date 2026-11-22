@@ -57,6 +57,7 @@ import com.nextgentool.nudgy.ui.theme.NudgyCard
 import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
 import com.nextgentool.nudgy.ui.theme.NudgyMuted
 import com.nextgentool.nudgy.ui.theme.NudgyTokens
+import com.nextgentool.nudgy.ui.viewmodel.HabitViewModel
 import com.nextgentool.nudgy.ui.viewmodel.TaskListItem
 import com.nextgentool.nudgy.ui.viewmodel.TasksViewModel
 import com.nextgentool.nudgy.ui.viewmodel.TodayTab
@@ -95,7 +96,14 @@ fun TodayScreen(
     // are identical.
     tasksViewModel: TasksViewModel = hiltViewModel(),
     // Sprint 1-2: Today/Upcoming/My Day/Timeline/carry-over state.
-    todayViewModel: TodayViewModel = hiltViewModel()
+    todayViewModel: TodayViewModel = hiltViewModel(),
+    // Sprint 4-2: the Habits section (spec §5, Q10=(a)). Passed in
+    // from the NavHost; null in older call sites and in tests that do
+    // not wire habits — the section is simply skipped then. It is
+    // nullable (not a hiltViewModel() default) on purpose: the
+    // existing Today tests omit this parameter, and a default would
+    // evaluate hiltViewModel() in a non-Hilt Robolectric test.
+    habitViewModel: HabitViewModel? = null
 ) {
     val uiState by todayViewModel.uiState.collectAsState()
     val tasksUiState by tasksViewModel.uiState.collectAsState()
@@ -492,6 +500,12 @@ fun TodayScreen(
                     }
                 }
             }
+        }
+        // Sprint 4-2 — Habits (spec §5, Q10=(a)): a section inside
+        // Today, above the weekly review, on either tab.
+        habitViewModel?.let { habitVm ->
+            Spacer(modifier = Modifier.height(24.dp))
+            HabitsSection(viewModel = habitVm)
         }
         // Weekly review (Feature 17, S1-5) — always visible at the
         // bottom of Today, on either tab: this week's finished / missed /

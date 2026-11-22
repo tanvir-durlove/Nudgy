@@ -62,6 +62,7 @@ import com.nextgentool.nudgy.ui.sheets.QuickChatSheet
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
 import com.nextgentool.nudgy.ui.viewmodel.CalendarViewModel
 import com.nextgentool.nudgy.ui.viewmodel.ChatViewModel
+import com.nextgentool.nudgy.ui.viewmodel.HabitViewModel
 import com.nextgentool.nudgy.ui.viewmodel.ShareIntentViewModel
 
 /**
@@ -213,10 +214,16 @@ fun NudgyNavHost(
             route = TODAY_GRAPH_ROUTE
         ) {
             composable(NudgyRoute.Today.route) {
+                // Sprint 4-2 — the Habits section's ViewModel lives in
+                // the NavHost (same as the share/chat ViewModels above):
+                // TodayScreen takes it nullable so non-Hilt tests that
+                // render Today without it keep working.
+                val habitViewModel: HabitViewModel = hiltViewModel()
                 TodayScreen(
                     onPlanClick = { navController.navigate(NudgyRoute.Plan.route) },
                     onAllTasksClick = { navController.navigate(NudgyRoute.Tasks.route) },
-                    onFocusClick = { navController.navigate(NudgyRoute.Focus.route) }
+                    onFocusClick = { navController.navigate(NudgyRoute.Focus.route) },
+                    habitViewModel = habitViewModel
                 )
             }
             composable(NudgyRoute.Plan.route) {
