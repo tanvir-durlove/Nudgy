@@ -280,8 +280,13 @@ class GroupsScreenTest {
 
         composeRule.onNodeWithText("Who completed this").assertIsDisplayed()
         // "Ayesha" appears twice — the members list AND the dialog —
-        // so onNodeWithText (exactly one node) fails; count both.
-        composeRule.onAllNodesWithText("Ayesha").assertCountEquals(2)
+        // so onNodeWithText (exactly one node) fails; count both via
+        // fetchSemanticsNodes (assertCountEquals does not exist in
+        // Compose 1.7 — same member-only API gap as onAllNodes).
+        assertEquals(
+            2,
+            composeRule.onAllNodesWithText("Ayesha").fetchSemanticsNodes().size
+        )
         // user-2 has a blank display name: the dialog falls back to
         // "Member", never a blank row.
         composeRule.onNodeWithText("Member").assertIsDisplayed()
