@@ -38,6 +38,57 @@ import org.robolectric.annotation.Config
 @Config(sdk = [36])
 class BoardDragTest {
 
+    companion object {
+        // S4-1 round 10 — TEMPORARY DIAGNOSTIC (delete once the leaker is
+        // named). The CI log prints only "<type> at <file>:<line>" for a
+        // test failure, so the UncaughtExceptionsBeforeTest wrapper hides
+        // the underlying exception. This ClassRule runs BEFORE any test
+        // method's runTest enter(), and reflectively reads the
+        // coroutines-test ExceptionCollector's `unprocessedExceptions`
+        // buffer (still holding the poison — nothing consumed it, or a
+        // test between the leaker and here would have failed instead).
+        // If non-empty it RE-THROWS the first buffered exception itself,
+        // so the CI log shows THAT exception's type + throw site (the
+        // leaker), not the wrapper. If the buffer is empty and this class
+        // still fails, the leaker is BoardDragTest's own method 1.
+        @get:ClassRule
+        @JvmStatic
+        val revealLeakRule = object : org.junit.rules.TestRule {
+            override fun apply(
+                base: org.junit.runners.model.Statement,
+                description: org.junit.runner.Description
+            ): org.junit.runners.model.Statement {
+                return object : org.junit.runners.model.Statement() {
+                    override fun evaluate() {
+                        val buffered = readUnprocessedExceptions()
+                        if (buffered.isNotEmpty()) {
+                            // Re-throw the poison itself — its top frame is
+                            // the leaker's throw site.
+                            throw buffered.first()
+                        }
+                        base.evaluate()
+                    }
+                }
+            }
+        }
+
+        private fun readUnprocessedExceptions(): List<Throwable> {
+            return try {
+                val clazz =
+                    Class.forName("kotlinx.coroutines.test.internal.ExceptionCollector")
+                val instanceField = clazz.getDeclaredField("INSTANCE")
+                instanceField.isAccessible = true
+                val instance = instanceField.get(null)
+                val listField = clazz.getDeclaredField("unprocessedExceptions")
+                listField.isAccessible = true
+                @Suppress("UNCHECKED_CAST")
+                (listField.get(instance) as? List<Throwable>)?.toList().orEmpty()
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+    }
+
     @get:Rule
     val composeRule = createComposeRule()
 
