@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
@@ -44,6 +45,7 @@ import org.robolectric.annotation.Config
 class ShareIntentViewModelTest {
 
     private lateinit var db: NudgyDatabase
+    private val viewModelStore = ViewModelStore()
     private lateinit var taskRepository: TaskRepository
 
     @Before
@@ -58,11 +60,15 @@ class ShareIntentViewModelTest {
 
     @After
     fun tearDown() {
+        // PR #86 rule: cancel the ViewModel scopes before the database
+        // closes, so no viewModelScope coroutine can run Room work
+        // against the closed DB and poison the next test's TestScope.
+        viewModelStore.clear()
         db.close()
     }
 
     private fun viewModel(handle: SavedStateHandle = SavedStateHandle()): ShareIntentViewModel =
-        ShareIntentViewModel(handle, taskRepository)
+        ShareIntentViewModel(handle, taskRepository).also { viewModelStore.put("share", it) }
 
     private fun shareIntent(subject: String? = null, text: String?): Intent =
         Intent(Intent.ACTION_SEND).apply {

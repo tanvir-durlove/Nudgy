@@ -3,6 +3,7 @@ package com.nextgentool.nudgy.ui.viewmodel
 import android.app.Activity
 import android.content.Context
 import androidx.activity.ComponentActivity
+import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.ads.ChatTurnCap
@@ -197,6 +198,7 @@ class ChatViewModelTest {
 
     private lateinit var context: Context
     private lateinit var db: NudgyDatabase
+    private val viewModelStore = ViewModelStore()
     private lateinit var chatRepository: ChatRepository
     private lateinit var preFilter: ClientIntentPreFilter
     private lateinit var taskRepository: TaskRepository
@@ -248,6 +250,10 @@ class ChatViewModelTest {
 
     @After
     fun tearDown() {
+        // PR #86 rule: cancel the ViewModel scopes before the database
+        // closes, so no viewModelScope coroutine can run Room work
+        // against the closed DB and poison the next test's TestScope.
+        viewModelStore.clear()
         db.close()
         context.getSharedPreferences("nudgy_ads", Context.MODE_PRIVATE).edit().clear().apply()
         context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE).edit().clear().apply()
@@ -268,7 +274,7 @@ class ChatViewModelTest {
         LlmConfigProvider { config },
         fakeRewarded,
         PlanDayUseCase()
-    )
+    ).also { viewModelStore.put("chat", it) }
 
     private fun setByokKey() {
         context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE)

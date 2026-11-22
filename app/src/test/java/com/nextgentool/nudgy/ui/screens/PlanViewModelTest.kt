@@ -2,6 +2,7 @@ package com.nextgentool.nudgy.ui.screens
 
 import android.content.Context
 import android.os.Looper
+import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
@@ -48,6 +49,7 @@ class PlanViewModelTest {
     private lateinit var repository: TaskRepository
     private lateinit var viewModel: PlanViewModel
     private lateinit var scope: CoroutineScope
+    private val viewModelStore = ViewModelStore()
 
     private fun at(dayOffset: Int, hour: Int, minute: Int = 0): Long =
         Calendar.getInstance().apply {
@@ -97,13 +99,17 @@ class PlanViewModelTest {
             repository = repository,
             planDayUseCase = PlanDayUseCase(),
             carryOverUseCase = CarryOverUseCase()
-        )
+        ).also { viewModelStore.put("plan", it) }
         scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
         scope.launch { viewModel.uiState.collect {} }
     }
 
     @After
     fun tearDown() {
+        // PR #86 rule: cancel the ViewModel scopes before the database
+        // closes, so no viewModelScope coroutine can run Room work
+        // against the closed DB and poison the next test's TestScope.
+        viewModelStore.clear()
         scope.cancel()
         db.close()
     }

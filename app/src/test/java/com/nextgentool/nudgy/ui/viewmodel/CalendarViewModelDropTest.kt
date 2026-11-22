@@ -1,6 +1,7 @@
 package com.nextgentool.nudgy.ui.viewmodel
 
 import android.content.Context
+import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
@@ -51,6 +52,7 @@ class CalendarViewModelDropTest {
 
     private lateinit var context: Context
     private lateinit var db: NudgyDatabase
+    private val viewModelStore = ViewModelStore()
     private lateinit var provider: FakeCalendarProviderGateway
     private lateinit var calendarRepository: CalendarRepository
     private lateinit var taskRepository: TaskRepository
@@ -77,6 +79,10 @@ class CalendarViewModelDropTest {
 
     @After
     fun tearDown() {
+        // PR #86 rule: cancel the ViewModel scopes before the database
+        // closes, so no viewModelScope coroutine can run Room work
+        // against the closed DB and poison the next test's TestScope.
+        viewModelStore.clear()
         db.close()
     }
 
@@ -116,7 +122,7 @@ class CalendarViewModelDropTest {
     }
 
     private fun viewModel(): CalendarViewModel =
-        CalendarViewModel(calendarRepository, taskRepository, groupRepository)
+        CalendarViewModel(calendarRepository, taskRepository, groupRepository).also { viewModelStore.put("calendar", it) }
 
     /** Waits until the strip contains the task (state has caught up). */
     private suspend fun waitForStrip(viewModel: CalendarViewModel, id: String) {

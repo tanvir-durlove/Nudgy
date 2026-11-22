@@ -12,6 +12,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.lifecycle.ViewModelStore
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -118,6 +119,7 @@ class ChatScreenSmokeTest {
     }
 
     private lateinit var db: NudgyDatabase
+    private val viewModelStore = ViewModelStore()
     private lateinit var context: Context
     private lateinit var viewModel: ChatViewModel
     private lateinit var taskRepository: TaskRepository
@@ -174,11 +176,15 @@ class ChatScreenSmokeTest {
             },
             com.nextgentool.nudgy.ads.NudgyAdsRewardedGateway(context),
             PlanDayUseCase()
-        )
+        ).also { viewModelStore.put("chat", it) }
     }
 
     @After
     fun tearDown() {
+        // PR #86 rule: cancel the ViewModel scopes before the database
+        // closes, so no viewModelScope coroutine can run Room work
+        // against the closed DB and poison the next test's TestScope.
+        viewModelStore.clear()
         db.close()
         context.getSharedPreferences("nudgy_ads", Context.MODE_PRIVATE).edit().clear().apply()
         context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE).edit().clear().apply()

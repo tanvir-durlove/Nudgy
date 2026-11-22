@@ -1,6 +1,7 @@
 package com.nextgentool.nudgy.ui.viewmodel
 
 import android.content.Context
+import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
@@ -42,6 +43,7 @@ class CalendarViewModelTest {
 
     private lateinit var context: Context
     private lateinit var db: NudgyDatabase
+    private val viewModelStore = ViewModelStore()
     private lateinit var provider: FakeCalendarProviderGateway
     private lateinit var calendarRepository: CalendarRepository
     private lateinit var taskRepository: TaskRepository
@@ -72,6 +74,10 @@ class CalendarViewModelTest {
 
     @After
     fun tearDown() {
+        // PR #86 rule: cancel the ViewModel scopes before the database
+        // closes, so no viewModelScope coroutine can run Room work
+        // against the closed DB and poison the next test's TestScope.
+        viewModelStore.clear()
         db.close()
     }
 
@@ -96,7 +102,7 @@ class CalendarViewModelTest {
                 FakeGoogleEvent(id = 42L, title = "Design review", start = tomorrow, end = tomorrow + 60 * 60 * 1000L)
             )
             calendarRepository.syncGoogleCalendar(userId)
-            val viewModel = CalendarViewModel(calendarRepository, taskRepository, groupRepository)
+            val viewModel = CalendarViewModel(calendarRepository, taskRepository, groupRepository).also { viewModelStore.put("calendar", it) }
             viewModel.selectDay(tomorrow)
             // The suggested slot lands asynchronously (refreshSuggestedSlot
             // runs in the init collect), so wait for it too — asserting
@@ -120,7 +126,7 @@ class CalendarViewModelTest {
         val testDispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(testDispatcher)
         try {
-            val viewModel = CalendarViewModel(calendarRepository, taskRepository, groupRepository)
+            val viewModel = CalendarViewModel(calendarRepository, taskRepository, groupRepository).also { viewModelStore.put("calendar", it) }
             // The init sync already ran against an empty provider; add
             // the event now and sync again via the ViewModel.
             val tomorrow = dayAt(1, 14)

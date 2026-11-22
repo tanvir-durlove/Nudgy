@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.lifecycle.ViewModelStore
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -54,6 +55,7 @@ class PlanScreenTest {
     val composeRule = createComposeRule()
 
     private lateinit var db: NudgyDatabase
+    private val viewModelStore = ViewModelStore()
     private lateinit var repository: TaskRepository
     private lateinit var viewModel: PlanViewModel
 
@@ -87,11 +89,15 @@ class PlanScreenTest {
             repository = repository,
             planDayUseCase = PlanDayUseCase(),
             carryOverUseCase = CarryOverUseCase()
-        )
+        ).also { viewModelStore.put("plan", it) }
     }
 
     @After
     fun tearDown() {
+        // PR #86 rule: cancel the ViewModel scopes before the database
+        // closes, so no viewModelScope coroutine can run Room work
+        // against the closed DB and poison the next test's TestScope.
+        viewModelStore.clear()
         db.close()
     }
 
@@ -337,7 +343,7 @@ class PlanScreenTest {
             repository = repository,
             planDayUseCase = PlanDayUseCase(),
             carryOverUseCase = CarryOverUseCase()
-        )
+        ).also { viewModelStore.put("plan-2", it) }
         composeRule.runOnIdle { currentViewModel = secondViewModel }
         // Let the swap's recomposition settle (the new ViewModel starts
         // in loading) so the wait below cannot pass on the first
