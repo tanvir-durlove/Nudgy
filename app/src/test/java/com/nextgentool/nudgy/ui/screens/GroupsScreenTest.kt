@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
@@ -110,6 +111,9 @@ class GroupsScreenTest {
     fun `tapping a group shows members and the placeholder, no group-work UI`() {
         render()
 
+        // Scroll the row into view first (CalendarScreenTest precedent for
+        // tagged nodes in scrollable containers), then tap it.
+        composeRule.onNodeWithTag("group_row_g-1").performScrollTo()
         composeRule.onNodeWithTag("group_row_g-1").performClick()
         // The detail opens first ("All groups" back row is detail-only);
         // members load asynchronously after that (LaunchedEffect + flow
