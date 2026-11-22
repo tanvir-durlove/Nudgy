@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -119,6 +120,9 @@ import kotlinx.coroutines.launch
  *   to change it (see GroupScheduleSheet note).
  * - Phase 3: group detail shows the member list and a share-invite button;
  *   the creator sees Delete group, members see Leave (both confirmed).
+ * - Sprint 5-1: the group-work sections (tasks, schedules, delete/leave)
+ *   are gated behind groupWorkEnabled and land in S5-2/S5-4; until then
+ *   the detail shows members + a placeholder.
  */
 @Composable
 fun GroupsScreen(
@@ -128,24 +132,32 @@ fun GroupsScreen(
     allEvents: List<CalendarEventEntity>,
     onCreateGroup: suspend (name: String) -> GroupResult<GroupEntity>,
     onJoinGroup: suspend (code: String) -> GroupResult<GroupEntity>,
+    // Sprint 5-1 — the group-work callbacks (tasks, schedules,
+    // delete/leave) land in S5-2/S5-4, so they default to no-ops here:
+    // the S5-1 call site passes only the create/join/member wiring and
+    // the detail shows members + a placeholder, never dead buttons.
     onCreateGroupTask: (
         groupId: String, title: String, description: String?, dueEpochMillis: Long,
         priority: Priority, category: TaskCategory, reminderSet: Boolean
-    ) -> Unit,
+    ) -> Unit = { _, _, _, _, _, _, _ -> },
     onCreateGroupSchedule: (
         groupId: String, title: String, startEpochMillis: Long, endEpochMillis: Long,
         locationOrLink: String?, eventType: String
-    ) -> Unit,
-    onUpdateGroupTask: (groupId: String, task: TaskEntity) -> Unit,
+    ) -> Unit = { _, _, _, _, _, _ -> },
+    onUpdateGroupTask: (groupId: String, task: TaskEntity) -> Unit = { _, _ -> },
     onSignInClick: () -> Unit = {},
-    onDeleteGroupItem: (groupId: String, itemId: String, isTask: Boolean) -> Unit,
-    onDeleteGroup: (groupId: String) -> Unit,
-    onLeaveGroup: (groupId: String) -> Unit,
+    onDeleteGroupItem: (groupId: String, itemId: String, isTask: Boolean) -> Unit = { _, _, _ -> },
+    onDeleteGroup: (groupId: String) -> Unit = {},
+    onLeaveGroup: (groupId: String) -> Unit = {},
     // Member list (minimization): cached rows flow from Room instantly,
     // refresh fetches remotely in the background on every detail open.
     onObserveMembers: (groupId: String) -> Flow<List<GroupMember>>,
     onRefreshMembers: suspend (groupId: String) -> List<GroupMember>,
-    onToggleTask: (TaskEntity) -> Unit,
+    onToggleTask: (TaskEntity) -> Unit = {},
+    // Sprint 5-1 — group-work sections (tasks, schedules, delete/leave)
+    // land in S5-2/S5-4. Until then the detail shows members + a
+    // placeholder, and the S5-2/S5-4 controls are not rendered at all.
+    groupWorkEnabled: Boolean = false,
     prefillJoinCode: String? = null,
     onPrefillJoinCodeConsumed: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -438,6 +450,7 @@ fun GroupsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(bottom = 12.dp)
+                            .testTag("group_row_${item.groupId}")
                             .clickable { selectedGroup = item }
                     ) {
                         Row(
@@ -631,7 +644,7 @@ fun GroupsScreen(
                                     type = "text/plain"
                                     putExtra(
                                         Intent.EXTRA_TEXT,
-                                        "Join \"${group.name}\" on Nudgy: https://tanvir-durlove.github.io/nudgy/join?code=${group.code}"
+                                        groupInviteText(group.name, group.code)
                                     )
                                 }
                                 context.startActivity(
@@ -650,7 +663,7 @@ fun GroupsScreen(
                     }
                 }
             }
-            if (groupTasks.isNotEmpty()) {
+            if (groupWorkEnabled && groupTasks.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(20.dp))
                 Surface(
                     shape = RoundedCornerShape(20.dp),
@@ -698,7 +711,7 @@ fun GroupsScreen(
                     }
                 }
             }
-            if (isCreator) {
+            if (groupWorkEnabled && isCreator) {
                 Spacer(modifier = Modifier.height(20.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
@@ -737,7 +750,9 @@ fun GroupsScreen(
                 shape = RoundedCornerShape(20.dp),
                 color = NudgyCard,
                 shadowElevation = 2.dp,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("group_members")
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -792,6 +807,10 @@ fun GroupsScreen(
                     }
                 }
             }
+            // Sprint 5-1 — the Tasks card lands in S5-2; until then the
+            // placeholder below takes its place (same for the Schedule
+            // card and the Delete/Leave buttons).
+            if (groupWorkEnabled) {
             Spacer(modifier = Modifier.height(20.dp))
             // Tasks section card: header inside the card, rows below a rule.
             Surface(
@@ -893,6 +912,36 @@ fun GroupsScreen(
                     }
                 }
             }
+            } else {
+            Spacer(modifier = Modifier.height(20.dp))
+            // Sprint 5-1 placeholder — group tasks (S5-2) and notices
+            // (S5-3) land here; the detail shows members only until then.
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = NudgyCard,
+                shadowElevation = 2.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("group_work_placeholder")
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Group tasks and notices",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = NudgyCharcoal
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Shared tasks and admin notices will appear here.",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                        color = NudgyMuted
+                    )
+                }
+            }
+            }
+            if (groupWorkEnabled) {
             Spacer(modifier = Modifier.height(20.dp))
             // Schedule section card: header inside the card, rows below a rule.
             Surface(
@@ -982,7 +1031,9 @@ fun GroupsScreen(
                     }
                 }
             }
+            }
             Spacer(modifier = Modifier.height(20.dp))
+            if (groupWorkEnabled) {
             if (isCreator) {
                 OutlinedButton(
                     onClick = { deleteGroupTarget = group },
@@ -1012,6 +1063,7 @@ fun GroupsScreen(
                     )
                 }
             }
+            }
         }
     }
 
@@ -1030,6 +1082,10 @@ fun GroupsScreen(
         )
     }
     val activeGroup = selectedGroup
+    // Sprint 5-1 — the task/schedule/edit/detail sheets and the
+    // delete/leave dialogs land in S5-2/S5-4; unreachable until then
+    // (their buttons are gated above), but composed only when enabled.
+    if (groupWorkEnabled) {
     if (showCreateTask && activeGroup != null) {
         CreateTaskSheet(
             onDismiss = { showCreateTask = false },
@@ -1189,8 +1245,17 @@ fun GroupsScreen(
             }
         )
     }
+    }
 }
 
+
+/** The App Links join URL for a group code (S2-4 pattern; the manifest already declares /nudgy/join — keep in sync with GROUP_JOIN_DEEP_LINK). */
+fun groupJoinLink(code: String): String =
+    "https://tanvir-durlove.github.io/nudgy/join?code=$code"
+
+/** The invite text shared for a group (system share sheet). */
+fun groupInviteText(groupName: String, code: String): String =
+    "Join \"$groupName\" on Nudgy: ${groupJoinLink(code)}"
 
 /** Initials for the group avatar: first letters of the first two letter-led words. */
 private fun groupInitials(name: String): String {

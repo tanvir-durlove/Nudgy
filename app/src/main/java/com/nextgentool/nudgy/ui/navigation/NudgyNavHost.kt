@@ -45,13 +45,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.navigation
 import androidx.navigation.compose.rememberNavController
-import androidx.navigation.navDeepLink
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.intent.IncomingIntent
 import com.nextgentool.nudgy.ui.screens.CalendarScreen
 import com.nextgentool.nudgy.ui.screens.ChatScreen
 import com.nextgentool.nudgy.ui.screens.FocusScreen
-import com.nextgentool.nudgy.ui.screens.GroupsShell
+import com.nextgentool.nudgy.ui.screens.GroupsScreen
 import com.nextgentool.nudgy.ui.screens.PlanScreen
 import com.nextgentool.nudgy.ui.screens.SettingsShell
 import com.nextgentool.nudgy.ui.screens.TasksScreen
@@ -63,6 +62,7 @@ import com.nextgentool.nudgy.ui.sheets.QuickChatSheet
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
 import com.nextgentool.nudgy.ui.viewmodel.CalendarViewModel
 import com.nextgentool.nudgy.ui.viewmodel.ChatViewModel
+import com.nextgentool.nudgy.ui.viewmodel.GroupsViewModel
 import com.nextgentool.nudgy.ui.viewmodel.HabitViewModel
 import com.nextgentool.nudgy.ui.viewmodel.ShareIntentViewModel
 
@@ -411,8 +411,30 @@ fun NudgyNavHost(
         }
         composable(
             route = NudgyRoute.Groups.route,
-            deepLinks = listOf(navDeepLink { uriPattern = GROUP_JOIN_DEEP_LINK })
-        ) { GroupsShell() }
+            deepLinks = GROUP_JOIN_DEEP_LINKS
+        ) { backStackEntry ->
+            // Sprint 5-1 — Groups tab (spec §4): the v1 screen wired to
+            // the S5-0 repository through GroupsViewModel. The deep-link
+            // join code is a one-shot prefill (the user still taps Join).
+            val groupsViewModel: GroupsViewModel = hiltViewModel()
+            val joinCode = backStackEntry.arguments?.getString("code")
+            LaunchedEffect(joinCode) {
+                if (joinCode != null) groupsViewModel.setPrefillJoinCode(joinCode)
+            }
+            val groupsUiState by groupsViewModel.uiState.collectAsState()
+            GroupsScreen(
+                user = groupsUiState.user,
+                groups = groupsUiState.groups,
+                allTasks = groupsUiState.allTasks,
+                allEvents = groupsUiState.allEvents,
+                onCreateGroup = { name -> groupsViewModel.createGroup(name) },
+                onJoinGroup = { code -> groupsViewModel.joinGroup(code) },
+                onObserveMembers = { groupId -> groupsViewModel.observeMembers(groupId) },
+                onRefreshMembers = { groupId -> groupsViewModel.refreshMembers(groupId) },
+                prefillJoinCode = groupsUiState.prefillJoinCode,
+                onPrefillJoinCodeConsumed = { groupsViewModel.consumePrefillJoinCode() }
+            )
+        }
         composable(NudgyRoute.Settings.route) {
             SettingsShell(
                 // Sprint 4-4 — the Settings entry to the same weekly
