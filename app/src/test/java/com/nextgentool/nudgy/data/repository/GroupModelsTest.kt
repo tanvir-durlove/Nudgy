@@ -99,6 +99,49 @@ class GroupModelsTest {
         assertEquals(original.completedCount, read.completedCount)
     }
 
+    // ---------------------------------------------------------------- S5-2: effective completion (Q6)
+
+    @Test
+    fun `effectiveCompletion drops a leaver and keeps current members`() {
+        val stored = GroupCompletion(listOf("u-1", "u-2", "u-3"), 3)
+        val effective = effectiveCompletion(stored, setOf("u-1", "u-3"))
+        assertEquals(listOf("u-1", "u-3"), effective.completedBy)
+        assertEquals(2, effective.completedCount)
+    }
+
+    @Test
+    fun `effectiveCompletion with no current members is empty`() {
+        val stored = GroupCompletion(listOf("u-1", "u-2"), 2)
+        val effective = effectiveCompletion(stored, emptySet())
+        assertEquals(emptyList<String>(), effective.completedBy)
+        assertEquals(0, effective.completedCount)
+    }
+
+    @Test
+    fun `effectiveCompletion keeps order and drops duplicates`() {
+        val stored = GroupCompletion(listOf("u-2", "u-1", "u-2"), 3)
+        val effective = effectiveCompletion(stored, setOf("u-1", "u-2"))
+        assertEquals(listOf("u-2", "u-1"), effective.completedBy)
+        assertEquals(2, effective.completedCount)
+    }
+
+    // ---------------------------------------------------------------- S5-2: count label
+
+    @Test
+    fun `toBengaliDigits maps 0-9 and multi-digit counts`() {
+        assertEquals("০", 0.toBengaliDigits())
+        assertEquals("৩", 3.toBengaliDigits())
+        assertEquals("১২", 12.toBengaliDigits())
+        assertEquals("১০০", 100.toBengaliDigits())
+    }
+
+    @Test
+    fun `formatCompletionCount writes the spec label in Bengali digits`() {
+        assertEquals("৩/৫ করেছে", formatCompletionCount(3, 5))
+        assertEquals("০/২ করেছে", formatCompletionCount(0, 2))
+        assertEquals("১২/১২ করেছে", formatCompletionCount(12, 12))
+    }
+
     // ---------------------------------------------------------------- group / member / code docs
 
     @Test

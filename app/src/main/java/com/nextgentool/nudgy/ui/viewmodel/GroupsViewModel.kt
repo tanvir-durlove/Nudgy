@@ -7,19 +7,25 @@ import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
+import com.nextgentool.nudgy.data.model.Priority
+import com.nextgentool.nudgy.data.model.TaskCategory
 import com.nextgentool.nudgy.data.repository.CalendarRepository
+import com.nextgentool.nudgy.data.repository.GroupCompletion
 import com.nextgentool.nudgy.data.repository.GroupMember
 import com.nextgentool.nudgy.data.repository.GroupRepository
 import com.nextgentool.nudgy.data.repository.GroupResult
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class GroupsUiState(
@@ -53,6 +59,12 @@ data class GroupsUiState(
  * the user still taps Join — never auto-joined. The code is dropped
  * for guests (the signed-out prefill gap already noted in
  * MainActivity).
+ *
+ * Sprint 5-2 — group tasks (spec §5, Q3=(b) admin-only): the creator
+ * creates/edits/deletes group tasks and schedules; every member
+ * toggles their own completion (shared count via [observeCompletions],
+ * offline-capable — Q7=(a)). Failures surface on [groupTaskError]
+ * (the sheets close on submit, so there is no result to show inline).
  */
 @HiltViewModel
 class GroupsViewModel @Inject constructor(
@@ -72,6 +84,92 @@ class GroupsViewModel @Inject constructor(
     )
 
     private val prefillJoinCodeFlow = MutableStateFlow<String?>(null)
+
+    /**
+     * One-shot group-task errors (create/edit/delete/toggle): the
+     * sheets close on submit, so a failed write has nowhere to show
+     * inline — the NavHost toasts these. Replay 0, buffer 1: an error
+     * emitted while nothing collects is dropped, never queued stale.
+     */
+    private val _groupTaskError = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
+    val groupTaskError: SharedFlow<String> = _groupTaskError
+
+    /** The shared completion map (raw — the screen filters it to current members). */
+    fun observeCompletions(): Flow<Map<String, GroupCompletion>> =
+        groupRepository.observeCompletions()
+
+    /**
+     * Sprint 5-2 — creator-only group task create (Q3=(b)). The repo
+     * enforces the creator check; a member calling this gets the Err
+     * on [groupTaskError] (the UI never shows them the button).
+     */
+    fun createGroupTask(
+        groupId: String,
+        title: String,
+        description: String?,
+        dueEpochMillis: Long,
+        priority: Priority,
+        category: TaskCategory,
+        reminderSet: Boolean
+    ) {
+        viewModelScope.launch {
+            val result = groupRepository.createGroupTask(
+                groupId, userId, title, description,
+                dueEpochMillis, priority, category, reminderSet
+            )
+            if (result is GroupResult.Err) _groupTaskError.emit(result.message)
+        }
+    }
+
+    /** Sprint 5-2 — creator-only group schedule create (Q3=(b); no count — Q4=(a)). */
+    fun createGroupSchedule(
+        groupId: String,
+        title: String,
+        startEpochMillis: Long,
+        endEpochMillis: Long,
+        locationOrLink: String?,
+        eventType: String
+    ) {
+        viewModelScope.launch {
+            val result = groupRepository.createGroupSchedule(
+                groupId, userId, title, startEpochMillis, endEpochMillis,
+                locationOrLink, eventType
+            )
+            if (result is GroupResult.Err) _groupTaskError.emit(result.message)
+        }
+    }
+
+    /** Sprint 5-2 — creator-only group task edit (Q3=(b)). */
+    fun updateGroupTask(groupId: String, task: TaskEntity) {
+        viewModelScope.launch {
+            val result = groupRepository.updateGroupTask(groupId, userId, task)
+            if (result is GroupResult.Err) _groupTaskError.emit(result.message)
+        }
+    }
+
+    /** Sprint 5-2 — creator-only group item delete (Q3=(b)). */
+    fun deleteGroupItem(groupId: String, itemId: String, isTask: Boolean) {
+        viewModelScope.launch {
+            val result = groupRepository.deleteGroupItem(groupId, userId, itemId, isTask)
+            if (result is GroupResult.Err) _groupTaskError.emit(result.message)
+        }
+    }
+
+    /**
+     * Sprint 5-2 — any member toggles their own completion on a group
+     * task (feature 31). The repo writes the shared counter AND the
+     * local flag in one call; on failure the local flag never moved,
+     * so the checkbox cannot disagree with the shared count.
+     */
+    fun toggleGroupTask(task: TaskEntity) {
+        val groupId = task.groupId ?: return
+        viewModelScope.launch {
+            val result = groupRepository.setGroupTaskCompleted(
+                groupId, task.id, userId, !task.isCompleted
+            )
+            if (result is GroupResult.Err) _groupTaskError.emit(result.message)
+        }
+    }
 
     val uiState: StateFlow<GroupsUiState> = combine(
         groupRepository.observeGroups(),

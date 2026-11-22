@@ -107,10 +107,18 @@ interface GroupRemoteGateway {
     suspend fun queryItemsSince(groupId: String, lastSeenMs: Long): List<GroupItemDoc>
 
     /**
-     * Atomically toggles one member's completion on an item doc: reads
-     * the doc in a transaction, applies [toggleCompletion], writes the
-     * resulting completedBy + completedCount. Returns the new completion,
-     * or null when the item doc does not exist.
+     * Toggles one member's completion on an item doc (S5-2, Q7=(a):
+     * offline-capable). The write is arrayUnion/arrayRemove +
+     * increment — both resolve against the local cache while offline
+     * and sync when the network returns, where the transaction version
+     * failed outright offline. The caller's local isCompleted is the
+     * idempotency guard (the UI only ever sends a genuine state
+     * change); the rules are the backstop — they reject any write
+     * whose count does not equal the array size. The write also bumps
+     * updatedAt (a server timestamp) so the poll query sees the
+     * change; isCompletionOnlyUpdate allows exactly that third key.
+     * Returns the completion read back after the write, or null when
+     * the item doc does not exist.
      */
     suspend fun runCompletionToggle(
         groupId: String,
@@ -355,14 +363,22 @@ class FirestoreGroupRemoteGateway(
         val fs = firestore()
         val itemRef = fs.collection("groups").document(groupId)
             .collection("items").document(itemId)
-        return fs.runTransaction { tx ->
-            val snap = tx.get(itemRef)
-            if (!snap.exists()) return@runTransaction null
-            val current = completionFromFields(normalizeFields(snap.data ?: emptyMap()))
-            val updated = toggleCompletion(current, uid, completed)
-            tx.update(itemRef, completionToFields(updated))
-            updated
-        }.await()
+        // Array ops (not a transaction — S5-2, Q7=(a)): arrayUnion /
+        // arrayRemove are idempotent and resolve against the local
+        // cache while offline; increment moves the count with the
+        // array. The read-back returns the post-write state (the
+        // cache already holds it, offline or not).
+        itemRef.update(
+            mapOf<String, Any>(
+                "completedBy" to if (completed) FieldValue.arrayUnion(uid)
+                else FieldValue.arrayRemove(uid),
+                "completedCount" to FieldValue.increment(if (completed) 1L else -1L),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
+        val snap = itemRef.get().await()
+        if (!snap.exists()) return null
+        return completionFromFields(normalizeFields(snap.data ?: emptyMap()))
     }
 
     // ---- notices ----

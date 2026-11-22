@@ -59,6 +59,41 @@ fun toggleCompletion(
     return GroupCompletion(completedBy = next, completedCount = next.size)
 }
 
+/**
+ * Pure (S5-2, Q6=(a)): the completion as the group sees it — only
+ * CURRENT members count. A member who left is dropped from the array
+ * (and the count) even if their UID is still stored on the item doc
+ * (the leave sweep in GroupRepository.leaveGroup removes it, but a
+ * leave from another device or a partial sweep must never show a stale
+ * count — so the display filters too). Rejoin is fresh only because
+ * the sweep removed the UID; without the sweep this filter would count
+ * a rejoined member's old completion again.
+ */
+fun effectiveCompletion(
+    completion: GroupCompletion,
+    memberUids: Set<String>
+): GroupCompletion {
+    val current = completion.completedBy.filter { it in memberUids }.distinct()
+    return GroupCompletion(completedBy = current, completedCount = current.size)
+}
+
+/** Bengali digits, for the completion count the spec writes as "৩/৫ করেছে". */
+private val BENGALI_DIGITS = listOf('০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯')
+
+/** Pure: a non-negative count in Bengali digits ("3" → "৩", "12" → "১২"). */
+fun Int.toBengaliDigits(): String {
+    require(this >= 0) { "completion counts are never negative" }
+    return toString().map { BENGALI_DIGITS[it - '0'] }.joinToString("")
+}
+
+/**
+ * Pure (S5-2, feature 31): the per-task shared completion label —
+ * "৩/৫ করেছে" (denominator = current member count, Q6=(a)). Shown
+ * only on group tasks, never on personal tasks (PRD draft §4).
+ */
+fun formatCompletionCount(completed: Int, total: Int): String =
+    "${completed.toBengaliDigits()}/${total.toBengaliDigits()} করেছে"
+
 /** Pure: reads the completion fields off an item doc's field map. Tolerant: a doc written before S5-0 has neither field, which reads as empty; a missing or wrong completedCount is derived from the array. */
 fun completionFromFields(fields: Map<String, Any?>): GroupCompletion {
     val by = (fields["completedBy"] as? List<*>)
