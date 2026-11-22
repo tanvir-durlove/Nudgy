@@ -1,8 +1,7 @@
 package com.nextgentool.nudgy.ui.screens
 
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertTextEquals
-import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -112,10 +111,14 @@ class GroupsScreenTest {
         render()
 
         composeRule.onNodeWithTag("group_row_g-1").performClick()
-        composeRule.waitForIdle()
-        // Members arrive asynchronously (LaunchedEffect + flow collect) —
-        // wait for them like ChatScreenSmokeTest waits for the seeded
-        // welcome message, instead of racing waitForIdle().
+        // The detail opens first ("All groups" back row is detail-only);
+        // members load asynchronously after that (LaunchedEffect + flow
+        // collect) — wait for each step in turn so a failure names the
+        // step that never arrived (click vs members load).
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("All groups")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("Ayesha")
                 .fetchSemanticsNodes().isNotEmpty()
@@ -168,18 +171,26 @@ class GroupsScreenTest {
 
     @Test
     fun `deep-link prefill opens the join sheet with the code`() {
-        render(prefillJoinCode = "K7Q2XA")
+        var captured: String? = null
+        render(
+            prefillJoinCode = "K7Q2XA",
+            onJoinGroup = {
+                captured = it
+                GroupResult.Ok(group())
+            }
+        )
 
         composeRule.onNodeWithText("Join a group").assertIsDisplayed()
-        // The sheet's only editable field is the code field: target it by
-        // its SetTextAction (ChatScreenSmokeTest idiom) and assert its
-        // value — onNodeWithText does not reliably match a TextField's
-        // editable value.
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodes(hasSetTextAction())
-                .fetchSemanticsNodes().isNotEmpty()
-        }
-        composeRule.onNode(hasSetTextAction()).assertTextEquals("K7Q2XA")
+        // The prefill fills the code field: the Join button is only
+        // enabled with a non-blank code, and tapping it sends exactly the
+        // prefilled code. Assert the value through that real flow instead
+        // of through TextField semantics (assertTextEquals did not see the
+        // prefilled value in round 4).
+        composeRule.onNodeWithText("Join group").assertIsEnabled()
+        composeRule.onNodeWithText("Join group").performClick()
+        composeRule.waitForIdle()
+
+        assertEquals("K7Q2XA", captured)
     }
 }
 
