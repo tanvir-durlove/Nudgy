@@ -266,7 +266,7 @@ private fun MatrixQuadrant(
     Surface(
         modifier = modifier
             .testTag("matrix_quadrant_${quadrant.name}")
-            .onGloballyPositioned { quadrantBounds[quadrant] = it.boundsInRoot },
+            .onGloballyPositioned { quadrantBounds[quadrant] = it.boundsInRoot() },
         shape = NudgyTokens.cardRadius,
         color = if (hovered) {
             colorResource(R.color.nudgy_teal).copy(alpha = 0.10f)
