@@ -96,6 +96,24 @@ class GroupRepository(
     /** The shared completion map (raw — the UI filters it to current members). */
     fun observeCompletions(): Flow<Map<String, GroupCompletion>> = completionFlow
 
+    /**
+     * Sprint 5-3 (feature 32): the notices per group, newest first,
+     * as the listener last reported them. In-memory only — no new Room
+     * table: the listener re-fires the full snapshot on every attach,
+     * so the list repopulates on restart, and [refreshNotices] + the
+     * optimistic prepend in [createGroupNotice] feed the same map.
+     * [MutableStateFlow] is thread-safe: writers are the listener
+     * scope, the refresh path and [createGroupNotice].
+     */
+    private val noticesFlow =
+        MutableStateFlow<Map<String, List<GroupNotice>>>(emptyMap())
+
+    /** The notices of one group, newest first (empty until the first snapshot). */
+    fun observeNotices(groupId: String): Flow<List<GroupNotice>> =
+        noticesFlow.map { it[groupId] ?: emptyList() }
+
+    private val noticeListeners = mutableMapOf<String, () -> Unit>()
+
     companion object {
         private const val TAG = "GroupRepository"
         private const val CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -540,16 +558,23 @@ class GroupRepository(
                     groupId,
                     noticeToFields(authorUid, authorName, text)
                 )
-                GroupResult.Ok(
-                    GroupNotice(
-                        id = id,
-                        groupId = groupId,
-                        authorUid = authorUid,
-                        authorName = authorName,
-                        text = text,
-                        createdAtEpochMillis = System.currentTimeMillis()
-                    )
+                val notice = GroupNotice(
+                    id = id,
+                    groupId = groupId,
+                    authorUid = authorUid,
+                    authorName = authorName,
+                    text = text,
+                    createdAtEpochMillis = System.currentTimeMillis()
                 )
+                // Sprint 5-3: the detail shows the new notice without
+                // waiting for the listener round-trip (the listener
+                // re-fires the same list, so this is idempotent — the
+                // snapshot replaces the whole list, never appends).
+                noticesFlow.update { current ->
+                    val existing = current[groupId] ?: emptyList()
+                    current + (groupId to listOf(notice) + existing.filter { it.id != id })
+                }
+                GroupResult.Ok(notice)
             } catch (e: Exception) {
                 Log.w(TAG, "createGroupNotice failed: ${e.message}")
                 GroupResult.Err("Could not send the notice. Check your connection and try again.")
@@ -568,6 +593,30 @@ class GroupRepository(
                 emptyList()
             }
         }
+
+    /**
+     * Sprint 5-3 — one-shot notices refresh for the detail: reads the
+     * list and feeds the flow, so the detail shows notices even before
+     * the listener's first snapshot. Returns the fresh list (empty on
+     * failure — the previous list stays in the flow, never wiped).
+     */
+    suspend fun refreshNotices(groupId: String): List<GroupNotice> =
+        withContext(Dispatchers.IO) {
+            val fresh = getGroupNotices(groupId)
+            if (fresh.isNotEmpty()) {
+                noticesFlow.update { it + (groupId to fresh) }
+            }
+            fresh
+        }
+
+    /**
+     * Sprint 5-3 — notices changed since [lastSeenMs] (the poll
+     * query). The worker decides what is genuinely new (see
+     * [filterNewNotices]) — notices are not stored locally, so the
+     * dedup lives in the worker's seen set, not here.
+     */
+    suspend fun queryGroupNoticesSince(groupId: String, lastSeenMs: Long): List<GroupNotice> =
+        withContext(Dispatchers.IO) { remote.queryNoticesSince(groupId, lastSeenMs) }
 
     // ---------------------------------------------------------------- Phase 3: members / leave / delete
 
@@ -641,6 +690,9 @@ class GroupRepository(
             // snapshot and repopulates them — never a stale count).
             val taskIds = taskDao.getTaskIdsByGroupId(userId, groupId)
             completionFlow.update { current -> current - taskIds.toSet() }
+            // S5-3: same for notices — a later rejoin re-fires the
+            // notices snapshot and repopulates them.
+            noticesFlow.update { current -> current - groupId }
             try {
                 reconcileGroupItems(userId, groupId, emptySet())
             } catch (e: Exception) {
@@ -807,6 +859,7 @@ class GroupRepository(
             for (groupId in groupIds) {
                 attachGroupListener(userId, groupId)
                 attachGroupDocListener(userId, groupId)
+                attachNoticesListener(groupId)
             }
         }
     }
@@ -816,12 +869,32 @@ class GroupRepository(
         groupListeners.clear()
         groupDocListeners.values.forEach { it() }
         groupDocListeners.clear()
+        noticeListeners.values.forEach { it() }
+        noticeListeners.clear()
     }
 
-    /** Drops both listeners for one group (leave/delete/purge path). */
+    /** Drops all three listeners for one group (leave/delete/purge path). */
     private fun stopGroupListener(groupId: String) {
         groupListeners.remove(groupId)?.invoke()
         groupDocListeners.remove(groupId)?.invoke()
+        noticeListeners.remove(groupId)?.invoke()
+    }
+
+    /**
+     * Sprint 5-3 — watches a group's notices: every snapshot replaces
+     * the flow entry (newest first), so the detail list updates live
+     * while the app is open (spec §6) and the poll worker's baseline
+     * never needs a local copy.
+     */
+    private fun attachNoticesListener(groupId: String) {
+        try {
+            val remove = remote.addNoticesListener(groupId) { notices ->
+                noticesFlow.update { it + (groupId to notices) }
+            }
+            noticeListeners[groupId] = remove
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to attach notices listener for $groupId: ${e.message}")
+        }
     }
 
     /**

@@ -135,12 +135,31 @@ interface GroupRemoteGateway {
     /** Every notice of a group as (doc id, fields) pairs, newest first. */
     suspend fun getNotices(groupId: String): List<Pair<String, Map<String, Any?>>>
 
+    /**
+     * Sprint 5-3 — notices changed since [lastSeenMs] (the poll
+     * query), with the 60s overlap window applied here (never in the
+     * caller) so every poll tick shares it. Single-field range on
+     * createdAt — automatic index, no composite index needed.
+     */
+    suspend fun queryNoticesSince(groupId: String, lastSeenMs: Long): List<GroupNotice>
+
     // ---- listeners ----
 
     /** Watches a group's items; returns a remover. The callback receives only non-empty change lists. */
     fun addItemsListener(
         groupId: String,
         onChanges: (List<GroupItemChange>) -> Unit
+    ): () -> Unit
+
+    /**
+     * Sprint 5-3 — watches a group's notices; returns a remover. The
+     * callback receives the FULL list, newest first, on every snapshot
+     * (including the initial one) — the repository keeps it in a flow,
+     * so the detail list updates live while the app is open.
+     */
+    fun addNoticesListener(
+        groupId: String,
+        onNotices: (List<GroupNotice>) -> Unit
     ): () -> Unit
 
     /** Watches a group doc; fires when the doc vanishes (creator deleted the group). Returns a remover. */
@@ -396,7 +415,41 @@ class FirestoreGroupRemoteGateway(
             .limit(NOTICE_QUERY_LIMIT)
             .get().await().documents.map { it.id to normalizeFields(it.data ?: emptyMap()) }
 
+    override suspend fun queryNoticesSince(groupId: String, lastSeenMs: Long): List<GroupNotice> =
+        firestore().collection("groups").document(groupId).collection("notices")
+            .whereGreaterThan(
+                "createdAt",
+                Timestamp(Date(lastSeenMs - POLL_OVERLAP_MS))
+            )
+            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.ASCENDING)
+            .limit(POLL_QUERY_LIMIT)
+            .get().await().documents.mapNotNull { doc ->
+                noticeFromDoc(doc.id, groupId, normalizeFields(doc.data ?: emptyMap()))
+            }
+
     // ---- listeners ----
+
+    override fun addNoticesListener(
+        groupId: String,
+        onNotices: (List<GroupNotice>) -> Unit
+    ): () -> Unit {
+        val registration = firestore().collection("groups").document(groupId)
+            .collection("notices")
+            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w(TAG, "Group notices listener error for $groupId: ${error.message}")
+                    return@addSnapshotListener
+                }
+                if (snapshot == null) return@addSnapshotListener
+                onNotices(
+                    snapshot.documents.mapNotNull { doc ->
+                        noticeFromDoc(doc.id, groupId, normalizeFields(doc.data ?: emptyMap()))
+                    }
+                )
+            }
+        return { registration.remove() }
+    }
 
     override fun addItemsListener(
         groupId: String,

@@ -18,7 +18,10 @@ import androidx.work.WorkerParameters
 import com.nextgentool.nudgy.MainActivity
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.auth.AuthManager
+import com.nextgentool.nudgy.data.repository.GroupNotice
 import com.nextgentool.nudgy.data.repository.GroupRepository
+import com.nextgentool.nudgy.data.repository.filterNewNotices
+import com.nextgentool.nudgy.data.repository.groupPollSummaryText
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
 
@@ -46,10 +49,25 @@ import java.util.concurrent.TimeUnit
  *   returned. When the query is empty, lastSeen is left alone: advancing
  *   it to device-now could skip items whose server timestamps lag a
  *   fast device clock, and an empty re-query costs at most 1 read.
- * - Post ONE summary notification per group per tick, and only when the
- *   tick inserted genuinely new item ids. Updates to already-known items
- *   refresh the lists silently (v1 scope — see dev log). No notification
- *   is posted when nothing new arrived, or on the baseline tick.
+ * - Sprint 5-3 — notices (feature 32) poll the same way, on their own
+ *   watermark (createdAt) + a seen-ids set: notices are NOT stored
+ *   locally, so the dedup lives here, not in Room (see
+ *   [filterNewNotices] — the overlap window is shared with the query).
+ *   The seen set is replaced with each tick's window, never grown:
+ *   the next tick's window is a subset of this one, so only ids from
+ *   this tick can ever reappear.
+ * - Post ONE summary notification per group per tick, and only when
+ *   the tick found genuinely new items and/or notices. Updates to
+ *   already-known items refresh the lists silently (v1 scope — see dev
+ *   log). No notification is posted when nothing new arrived, or on a
+ *   baseline tick.
+ * - Sprint 5-3 — the tap opens the GROUP DETAIL (not just the Groups
+ *   tab): the launch intent carries the group id, MainActivity feeds
+ *   it through NudgyApp, and the Groups destination opens the detail.
+ * - Honest delay (spec §6, Q1=(a)): the 1-hour periodic tick plus
+ *   the night skip means a notice/task arrives ~1 hour late in the
+ *   day and ~3 hours late at night (Doze) — NEVER "instant". The
+ *   device test measures the real delay; the code never claims less.
  * - Deletes are invisible to the updatedAt query, so the worker
  *   reconciles against the group's lastDeleteAt signal (minimization):
  *   it fetches the group's item ids (limit 500; the mobile SDKs have no
@@ -178,9 +196,36 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
         if (docs.isNotEmpty()) {
             prefs.edit().putLong(lastSeenKey, maxUpdatedAt).apply()
         }
-        if (newCount > 0) {
+        // Sprint 5-3 — notices (feature 32): same watermark pattern,
+        // separate watermark + seen set (notices are not stored
+        // locally). The baseline tick watermarks without notifying —
+        // pre-existing notices must never all notify at once.
+        val noticeSeenKey = KEY_LAST_SEEN_NOTICE_PREFIX + groupId
+        val noticeSeenIdsKey = KEY_SEEN_NOTICE_IDS_PREFIX + groupId
+        val lastSeenNotice = prefs.getLong(noticeSeenKey, 0L)
+        var newNotices: List<GroupNotice> = emptyList()
+        if (lastSeenNotice == 0L) {
+            prefs.edit().putLong(noticeSeenKey, now).apply()
+        } else {
+            val seenIds = prefs.getStringSet(noticeSeenIdsKey, emptySet()) ?: emptySet()
+            val noticeDocs = repo.queryGroupNoticesSince(groupId, lastSeenNotice)
+            newNotices = filterNewNotices(noticeDocs, lastSeenNotice, seenIds)
+            if (noticeDocs.isNotEmpty()) {
+                var maxCreatedAt = lastSeenNotice
+                for (doc in noticeDocs) {
+                    if (doc.createdAtEpochMillis > maxCreatedAt) {
+                        maxCreatedAt = doc.createdAtEpochMillis
+                    }
+                }
+                prefs.edit()
+                    .putLong(noticeSeenKey, maxCreatedAt)
+                    .putStringSet(noticeSeenIdsKey, noticeDocs.map { it.id }.toSet())
+                    .apply()
+            }
+        }
+        if (newCount > 0 || newNotices.isNotEmpty()) {
             val groupName = repo.getGroupById(groupId)?.name ?: "A group"
-            postSummaryNotification(context, groupId, groupName, newCount)
+            postSummaryNotification(context, groupId, groupName, newCount, newNotices.size)
         }
         // Reconcile gating (minimization): the full id fetch runs only
         // when a delete actually happened — lastDeleteAt advanced past
@@ -209,7 +254,8 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
         context: Context,
         groupId: String,
         groupName: String,
-        newCount: Int
+        newCount: Int,
+        newNotices: Int = 0
     ) {
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -224,13 +270,19 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
                 }
             )
         }
-        // Tap opens the Groups tab. CLEAR_TASK guarantees a fresh
-        // MainActivity that reads the extra in onCreate (the activity
-        // has no onNewIntent routing); the trade-off is that tapping
-        // resets the back stack.
+        // Sprint 5-3 — the tap opens the GROUP DETAIL: the launch
+        // intent carries the group id; MainActivity feeds it through
+        // NudgyApp (onCreate for the fresh activity CLEAR_TASK
+        // creates, onNewIntent for the singleTop re-tap) and the
+        // Groups destination opens the detail and consumes it.
+        // The channel stays the worker's own groups channel
+        // (nudgy_groups_channel): group updates are not reminders,
+        // and the v1 item notifications already live here — moving
+        // them to the reminders channel would split one group's
+        // notifications across two system channels.
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            putExtra(EXTRA_OPEN_GROUPS, true)
+            putExtra(EXTRA_OPEN_GROUP_ID, groupId)
         }
         val pendingIntent = PendingIntent.getActivity(
             context,
@@ -238,7 +290,7 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val text = if (newCount == 1) "1 new item" else "$newCount new items"
+        val text = groupPollSummaryText(newCount, newNotices)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_nudgy_notification)
             .setContentTitle(groupName)
@@ -260,12 +312,19 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
         /** Summary-notification channel (plan §3.5). */
         const val CHANNEL_ID = "nudgy_groups_channel"
 
-        /** Intent extra: notification tap opens the Groups tab. */
-        const val EXTRA_OPEN_GROUPS = "nudgy_open_groups"
+        /**
+         * Sprint 5-3 — intent extra: the notified group's id. The tap
+         * opens that group's detail (MainActivity → NudgyApp → Groups
+         * destination). Replaces the v1 EXTRA_OPEN_GROUPS boolean,
+         * which nothing ever read (the tap only ever opened the app).
+         */
+        const val EXTRA_OPEN_GROUP_ID = "nudgy_open_group_id"
 
         private const val PREFS_NAME = "group_poll_prefs"
         private const val KEY_LAST_POLL = "last_poll_epoch_ms"
         private const val KEY_LAST_SEEN_PREFIX = "last_seen_"
+        private const val KEY_LAST_SEEN_NOTICE_PREFIX = "last_seen_notice_"
+        private const val KEY_SEEN_NOTICE_IDS_PREFIX = "seen_notice_ids_"
         private const val KEY_LAST_RECONCILE_PREFIX = "last_reconcile_"
         private const val KEY_LAST_EXISTENCE_CHECK_PREFIX = "last_existence_check_"
         private const val KEY_LAST_DELETE_AT_PREFIX = "last_delete_at_"
@@ -319,6 +378,8 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit()
                 .remove(KEY_LAST_SEEN_PREFIX + groupId)
+                .remove(KEY_LAST_SEEN_NOTICE_PREFIX + groupId)
+                .remove(KEY_SEEN_NOTICE_IDS_PREFIX + groupId)
                 .remove(KEY_LAST_RECONCILE_PREFIX + groupId)
                 .remove(KEY_LAST_EXISTENCE_CHECK_PREFIX + groupId)
                 .remove(KEY_LAST_DELETE_AT_PREFIX + groupId)

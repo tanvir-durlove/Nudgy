@@ -86,7 +86,14 @@ import com.nextgentool.nudgy.ui.viewmodel.ShareIntentViewModel
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun NudgyApp() {
+fun NudgyApp(
+    // Sprint 5-3 — a pending group-notification tap: MainActivity
+    // feeds the notified group id (from the poll worker's launch
+    // intent); the Groups destination opens that group's detail and
+    // consumes the id. Null in every other flow.
+    openGroupId: String? = null,
+    onOpenGroupIdConsumed: () -> Unit = {}
+) {
     val navController = rememberNavController()
     // Sprint 2-3 — share-to-task (Feature 12): the Activity-scoped
     // view model (the Activity is the ViewModelStoreOwner at this
@@ -104,6 +111,14 @@ fun NudgyApp() {
     LaunchedEffect(pendingDateLink, pendingInsertEvent) {
         if (pendingDateLink != null || pendingInsertEvent != null) {
             navigateTo(navController, NudgyRoute.Calendar)
+        }
+    }
+    // Sprint 5-3 — a group-notification tap navigates to the Groups
+    // tab first (singleTop — a no-op when already on Groups); the
+    // Groups destination acts on the id and consumes it.
+    LaunchedEffect(openGroupId) {
+        if (openGroupId != null) {
+            navigateTo(navController, NudgyRoute.Groups)
         }
     }
     NudgyTheme {
@@ -135,7 +150,9 @@ fun NudgyApp() {
                 pendingDateLink = pendingDateLink,
                 onDateLinkConsumed = { shareViewModel.consumeDateLink() },
                 pendingInsertEvent = pendingInsertEvent,
-                onInsertEventConsumed = { shareViewModel.consumeInsertEvent() }
+                onInsertEventConsumed = { shareViewModel.consumeInsertEvent() },
+                pendingOpenGroupId = openGroupId,
+                onOpenGroupIdConsumed = onOpenGroupIdConsumed
             )
         }
         // Sprint 3-1 — Quick Chat sheet over the current tab.
@@ -204,7 +221,12 @@ fun NudgyNavHost(
     pendingDateLink: com.nextgentool.nudgy.intent.IncomingIntent.DateLink? = null,
     onDateLinkConsumed: () -> Unit = {},
     pendingInsertEvent: com.nextgentool.nudgy.intent.IncomingIntent.InsertEvent? = null,
-    onInsertEventConsumed: () -> Unit = {}
+    onInsertEventConsumed: () -> Unit = {},
+    // Sprint 5-3 — a pending group-notification tap, passed to the
+    // Groups destination (which opens the detail, then consumes it).
+    // Null in every other flow.
+    pendingOpenGroupId: String? = null,
+    onOpenGroupIdConsumed: () -> Unit = {}
 ) {
     NavHost(
         navController = navController,
@@ -463,6 +485,14 @@ fun NudgyNavHost(
                 onToggleTask = { task -> groupsViewModel.toggleGroupTask(task) },
                 completions = completions,
                 groupTasksEnabled = true,
+                // Sprint 5-3 — notices (feature 32, Q2=(a) text-only)
+                // + the notification-tap entry point (feature 34).
+                groupNoticesEnabled = true,
+                onObserveNotices = { groupId -> groupsViewModel.observeNotices(groupId) },
+                onRefreshNotices = { groupId -> groupsViewModel.refreshNotices(groupId) },
+                onSendNotice = { groupId, text -> groupsViewModel.sendNotice(groupId, text) },
+                openGroupId = pendingOpenGroupId,
+                onOpenGroupIdConsumed = onOpenGroupIdConsumed,
                 prefillJoinCode = groupsUiState.prefillJoinCode,
                 onPrefillJoinCodeConsumed = { groupsViewModel.consumePrefillJoinCode() }
             )

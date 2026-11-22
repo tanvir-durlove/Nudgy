@@ -245,3 +245,14 @@ the 1.0.5 UI never exposed member item creation.
     toggling ANOTHER member's UID → DENIED. Member writing
     completedCount != completedBy.size() → DENIED.
 20. All S5-0 checklist items 14–17 still pass (no regression).
+
+## S5-3 — no rules change
+
+S5-3 (notices UI + polling notifications) needs NO rules change:
+the notices rules from S5-0 already say exactly what the feature
+needs — creator-only create/delete, members read, no update, text
+1–2000 chars. The poll worker only READS (items since a watermark,
+notices since a watermark) through the member's own membership, so
+the existing read rules cover it. The notification tap is local
+(MainActivity → NudgyApp → Groups detail) — no Firestore write.
+No new checklist items; items 1–20 still apply unchanged.

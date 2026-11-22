@@ -250,6 +250,78 @@ class GroupRepositoryTest {
         assertEquals(emptyList<GroupNotice>(), repo.getGroupNotices(group.groupId))
     }
 
+    // ---------------------------------------------------------------- notices (S5-3: live flow + poll query)
+
+    @Test
+    fun `notices listener feeds the flow and replaces the list on every snapshot`() = runTest {
+        val group = createTestGroup()
+        awaitCondition { fake.noticeListenerCount(group.groupId) == 1 }
+        val first = listOf(
+            GroupNotice("n-1", group.groupId, "user-1", "Creator", "Class at 10", 2_000L)
+        )
+        fake.emitNotices(group.groupId, first)
+        assertEquals(first, repo.observeNotices(group.groupId).first())
+        val second = listOf(
+            GroupNotice("n-2", group.groupId, "user-1", "Creator", "Moved to 11", 3_000L),
+            GroupNotice("n-1", group.groupId, "user-1", "Creator", "Class at 10", 2_000L)
+        )
+        fake.emitNotices(group.groupId, second)
+        assertEquals(second, repo.observeNotices(group.groupId).first())
+    }
+
+    @Test
+    fun `refreshNotices feeds the flow and returns the fresh list`() = runTest {
+        val group = createTestGroup()
+        awaitCondition { fake.noticeListenerCount(group.groupId) == 1 }
+        fake.seedNotice(
+            group.groupId, "n-1",
+            mapOf("authorUid" to "user-1", "authorName" to "Creator",
+                "text" to "Class at 10", "createdAt" to 2_000L)
+        )
+        val refreshed = repo.refreshNotices(group.groupId)
+        assertEquals(listOf("Class at 10"), refreshed.map { it.text })
+        assertEquals(listOf("Class at 10"), repo.observeNotices(group.groupId).first().map { it.text })
+    }
+
+    @Test
+    fun `createGroupNotice appears in the flow at once`() = runTest {
+        val group = createTestGroup()
+        awaitCondition { fake.noticeListenerCount(group.groupId) == 1 }
+        val result = repo.createGroupNotice(group.groupId, "user-1", "Creator", "Class at 10")
+        assertTrue(result is GroupResult.Ok)
+        assertEquals(
+            listOf("Class at 10"),
+            repo.observeNotices(group.groupId).first().map { it.text }
+        )
+    }
+
+    @Test
+    fun `purgeLocalGroup drops the group's notices from the flow`() = runTest {
+        val group = createTestGroup()
+        awaitCondition { fake.noticeListenerCount(group.groupId) == 1 }
+        repo.createGroupNotice(group.groupId, "user-1", "Creator", "Class at 10")
+        assertEquals(1, repo.observeNotices(group.groupId).first().size)
+        repo.purgeLocalGroup("user-1", group.groupId)
+        assertEquals(emptyList<GroupNotice>(), repo.observeNotices(group.groupId).first())
+    }
+
+    @Test
+    fun `queryGroupNoticesSince returns only notices past the watermark window`() = runTest {
+        val group = createTestGroup()
+        fake.seedNotice(
+            group.groupId, "n-old",
+            mapOf("authorUid" to "user-1", "authorName" to "Creator",
+                "text" to "Old", "createdAt" to 1_000_000L)
+        )
+        fake.seedNotice(
+            group.groupId, "n-new",
+            mapOf("authorUid" to "user-1", "authorName" to "Creator",
+                "text" to "New", "createdAt" to 2_000_000L)
+        )
+        val found = repo.queryGroupNoticesSince(group.groupId, 1_900_000L)
+        assertEquals(listOf("n-new"), found.map { it.id })
+    }
+
     // ---------------------------------------------------------------- leave / delete
 
     @Test

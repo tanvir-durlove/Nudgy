@@ -76,6 +76,7 @@ import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
 import com.nextgentool.nudgy.data.repository.GroupCompletion
 import com.nextgentool.nudgy.data.repository.GroupMember
+import com.nextgentool.nudgy.data.repository.GroupNotice
 import com.nextgentool.nudgy.data.repository.GroupResult
 import com.nextgentool.nudgy.data.repository.effectiveCompletion
 import com.nextgentool.nudgy.data.repository.formatCompletionCount
@@ -86,6 +87,7 @@ import com.nextgentool.nudgy.ui.sheets.EditTaskSheet
 import com.nextgentool.nudgy.ui.sheets.GroupScheduleSheet
 import com.nextgentool.nudgy.ui.sheets.GroupTaskDetailSheet
 import com.nextgentool.nudgy.ui.sheets.JoinGroupSheet
+import com.nextgentool.nudgy.ui.sheets.SendNoticeSheet
 import com.nextgentool.nudgy.ui.theme.NudgyAccent
 import com.nextgentool.nudgy.ui.theme.NudgyAvatarPalettes
 import com.nextgentool.nudgy.ui.theme.NudgyBorder
@@ -132,6 +134,10 @@ import kotlinx.coroutines.flow.flowOf
  *   S5-4). Each group task row shows the shared completion count
  *   ("৩/৫ করেছে", denominator = current members); tapping the count
  *   lists who completed it. The count is tasks-only (Q4=(a)).
+ * - Sprint 5-3: the notices card behind groupNoticesEnabled — text-only
+ *   admin notices (Q2=(a)), newest first, live via the listener; only
+ *   the creator sees Send notice. A notification tap opens the detail
+ *   for the notified group (openGroupId).
  */
 @Composable
 fun GroupsScreen(
@@ -173,6 +179,19 @@ fun GroupsScreen(
     // Sprint 5-1 — group delete/leave lands in S5-4. Until then the
     // buttons are not rendered at all.
     groupWorkEnabled: Boolean = false,
+    // Sprint 5-3 — notices (feature 32, Q2=(a) text-only). Same
+    // observe + refresh pattern as members; the list is live via the
+    // listener, the refresh warms it on detail open.
+    groupNoticesEnabled: Boolean = false,
+    onObserveNotices: (groupId: String) -> Flow<List<GroupNotice>> = { flowOf(emptyList()) },
+    onRefreshNotices: suspend (groupId: String) -> List<GroupNotice> = { emptyList() },
+    onSendNotice: (groupId: String, text: String) -> Unit = { _, _ -> },
+    // Sprint 5-3 — notification tap: opens the detail for this group
+    // (the worker puts the group id in the launch intent; MainActivity
+    // feeds it through NudgyApp → NavHost). Consumed once — even when
+    // the group is not found (stale id), so a later tap can never loop.
+    openGroupId: String? = null,
+    onOpenGroupIdConsumed: () -> Unit = {},
     prefillJoinCode: String? = null,
     onPrefillJoinCodeConsumed: () -> Unit = {},
     // Detail entry: opens the detail for this group on first composition.
@@ -247,6 +266,31 @@ fun GroupsScreen(
         flowMembers != null && flowMembers!!.isNotEmpty() -> flowMembers
         refreshEmpty -> emptyList()
         else -> null
+    }
+    // Sprint 5-3 — notices for the selected group, observed
+    // declaratively (same pattern as members). An empty list is a real
+    // state ("No notices yet."), not loading — no tri-state needed.
+    var showSendNotice by remember { mutableStateOf(false) }
+    val noticesFlow = remember(selectedGroupId) {
+        if (selectedGroupId == null) flowOf(emptyList())
+        else onObserveNotices(selectedGroupId)
+    }
+    val notices by noticesFlow.collectAsState(initial = emptyList())
+    LaunchedEffect(selectedGroupId) {
+        val groupId = selectedGroupId ?: return@LaunchedEffect
+        try {
+            onRefreshNotices(groupId)
+        } catch (e: Exception) {
+            // Refresh is best-effort — the listener feeds the list.
+        }
+    }
+    // Sprint 5-3 — notification tap: open the detail once the group
+    // list has loaded (a stale id is consumed without opening).
+    LaunchedEffect(openGroupId, groups) {
+        if (openGroupId != null && groups.isNotEmpty()) {
+            groups.firstOrNull { it.groupId == openGroupId }?.let { selectedGroup = it }
+            onOpenGroupIdConsumed()
+        }
     }
     // A group deleted elsewhere (creator cascade, member purge) must not
     // linger as a stale detail view.
@@ -970,8 +1014,8 @@ fun GroupsScreen(
             }
             } else {
             Spacer(modifier = Modifier.height(20.dp))
-            // Sprint 5-1 placeholder — group tasks (S5-2) and notices
-            // (S5-3) land here; the detail shows members only until then.
+            // Sprint 5-1 placeholder — shown while the task sections are
+            // off (S5-2); the notices card has its own flag (S5-3).
             Surface(
                 shape = RoundedCornerShape(20.dp),
                 color = NudgyCard,
@@ -1077,6 +1121,102 @@ fun GroupsScreen(
                                     }
                                 }
                                 if (index != groupEvents.lastIndex) {
+                                    HorizontalDivider(
+                                        color = NudgyBorder,
+                                        thickness = 1.dp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            }
+            // Sprint 5-3 — the Notices card (groupNoticesEnabled).
+            // Text-only admin notices (Q2=(a)), newest first; every
+            // member reads them, only the creator sends them. The
+            // author is always the creator — a blank name reads "Admin"
+            // (display names are "" until the Sprint 6 auth flow).
+            if (groupNoticesEnabled) {
+            Spacer(modifier = Modifier.height(20.dp))
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = NudgyCard,
+                shadowElevation = 2.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("notices_card")
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "NOTICES",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.sp
+                                ),
+                                color = NudgyAccent
+                            )
+                            Text(
+                                text = "Notices",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = NudgyCharcoal
+                            )
+                        }
+                        if (isCreator) {
+                            TextButton(
+                                onClick = { showSendNotice = true },
+                                modifier = Modifier.testTag("send_notice_open")
+                            ) {
+                                Text(
+                                    text = "Send notice",
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontSize = 13.sp, fontWeight = FontWeight.SemiBold
+                                    ),
+                                    color = NudgyPrimary
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(color = NudgyBorder, thickness = 1.dp)
+                    if (notices.isEmpty()) {
+                        Text(
+                            text = "No notices yet.",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                            color = NudgyMuted,
+                            modifier = Modifier.padding(top = 12.dp)
+                        )
+                    } else {
+                        Column {
+                            notices.forEachIndexed { index, notice ->
+                                Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = notice.authorName.ifBlank { "Admin" },
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                fontSize = 12.sp, fontWeight = FontWeight.SemiBold
+                                            ),
+                                            color = NudgyCharcoal,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (notice.createdAtEpochMillis > 0L) {
+                                            Text(
+                                                text = taskDateFormatter.format(notice.createdAtEpochMillis),
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                                color = NudgyMuted
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = notice.text,
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                                        color = NudgyCharcoal
+                                    )
+                                }
+                                if (index != notices.lastIndex) {
                                     HorizontalDivider(
                                         color = NudgyBorder,
                                         thickness = 1.dp
@@ -1298,6 +1438,19 @@ fun GroupsScreen(
                 TextButton(onClick = { schedulePendingDelete = null }) {
                     Text("Cancel")
                 }
+            }
+        )
+    }
+    }
+    // Sprint 5-3 — the send-notice sheet (creator-only button in the
+    // Notices card above).
+    if (groupNoticesEnabled) {
+    if (showSendNotice && activeGroup != null) {
+        SendNoticeSheet(
+            onDismiss = { showSendNotice = false },
+            onSendNotice = { text ->
+                onSendNotice(activeGroup.groupId, text)
+                showSendNotice = false
             }
         )
     }
