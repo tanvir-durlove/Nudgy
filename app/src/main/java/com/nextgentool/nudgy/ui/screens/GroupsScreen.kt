@@ -41,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -98,7 +99,7 @@ import com.nextgentool.nudgy.ui.theme.NudgyPrimary
 import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.flowOf
 
 /**
  * Groups tab (Group v1).
@@ -192,38 +193,43 @@ fun GroupsScreen(
     var taskPendingDelete by remember { mutableStateOf<TaskEntity?>(null) }
     var deleteGroupTarget by remember { mutableStateOf<GroupEntity?>(null) }
     var leaveGroupTarget by remember { mutableStateOf<GroupEntity?>(null) }
-    var members by remember { mutableStateOf<List<GroupMember>?>(null) }
+    // Members for the selected group, observed declaratively:
+    // collectAsState is driven by the composition, so the rows arrive
+    // with recomposition. (A manual LaunchedEffect + collect did not
+    // deliver in the Robolectric harness — the detail test's members
+    // never arrived in rounds 5-8.) The refresh effect only warms the
+    // cache and records whether the refresh came back empty, for the
+    // "No members yet." fallback.
+    val selectedGroupId = selectedGroup?.groupId
+    val membersFlow = remember(selectedGroupId) {
+        if (selectedGroupId == null) flowOf(emptyList())
+        else onObserveMembers(selectedGroupId)
+    }
+    val flowMembers by membersFlow.collectAsState(initial = null)
+    var refreshEmpty by remember(selectedGroupId) { mutableStateOf(false) }
+    LaunchedEffect(selectedGroupId) {
+        val groupId = selectedGroupId ?: return@LaunchedEffect
+        val refreshed = try {
+            onRefreshMembers(groupId)
+        } catch (e: Exception) {
+            emptyList()
+        }
+        if (refreshed.isEmpty()) refreshEmpty = true
+    }
+    // An empty flow emission means "not loaded yet" (a group always has
+    // its creator as a member): keep the loading state until real rows
+    // arrive, unless the refresh already came back empty.
+    val members: List<GroupMember>? = when {
+        flowMembers != null && flowMembers!!.isNotEmpty() -> flowMembers
+        refreshEmpty -> emptyList()
+        else -> null
+    }
     // A group deleted elsewhere (creator cascade, member purge) must not
     // linger as a stale detail view.
     LaunchedEffect(groups) {
         val selected = selectedGroup
         if (selected != null && groups.none { it.groupId == selected.groupId }) {
             selectedGroup = null
-        }
-    }
-    LaunchedEffect(selectedGroup?.groupId) {
-        val groupId = selectedGroup?.groupId
-        members = null
-        if (groupId != null) {
-            // Background refresh (cache + refresh together): the flow
-            // below shows cached rows instantly; the refresh replaces
-            // them when the network returns. On a cold cache + failed
-            // refresh, fall back to the old empty state instead of
-            // spinning forever.
-            launch {
-                val refreshed = try {
-                    onRefreshMembers(groupId)
-                } catch (e: Exception) {
-                    emptyList()
-                }
-                if (members == null && refreshed.isEmpty()) members = emptyList()
-            }
-            onObserveMembers(groupId).collect { list ->
-                // An empty cache means "not loaded yet" (a group always
-                // has its creator as a member), so keep the loading state
-                // until real rows arrive.
-                if (list.isNotEmpty()) members = list
-            }
         }
     }
 
@@ -447,11 +453,11 @@ fun GroupsScreen(
                         shape = RoundedCornerShape(20.dp),
                         color = NudgyCard,
                         shadowElevation = 2.dp,
+                        onClick = { selectedGroup = item },
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(bottom = 12.dp)
                             .testTag("group_row_${item.groupId}")
-                            .clickable { selectedGroup = item }
                     ) {
                         Row(
                             modifier = Modifier.padding(16.dp),
