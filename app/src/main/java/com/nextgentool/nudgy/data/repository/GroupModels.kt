@@ -142,6 +142,38 @@ fun noticeFromDoc(id: String, groupId: String, fields: Map<String, Any?>): Group
 }
 
 /**
+ * Pure (S5-3, feature 34): which polled notices are genuinely new.
+ * A notice is new when its createdAt is past the watermark, or when it
+ * sits inside the overlap window ([overlapMs], which MUST match the
+ * gateway query window) and was never notified — the window exists
+ * because batch writes share server timestamps, so a watermark landing
+ * on a shared timestamp could otherwise skip a notice. A doc at or
+ * before the window is stale (a clock-skewed re-read), never new,
+ * even when its id was never seen.
+ */
+fun filterNewNotices(
+    notices: List<GroupNotice>,
+    lastSeenMs: Long,
+    seenIds: Set<String>,
+    overlapMs: Long = 60_000L
+): List<GroupNotice> = notices.filter { notice ->
+    notice.createdAtEpochMillis > lastSeenMs ||
+        (notice.createdAtEpochMillis > lastSeenMs - overlapMs && notice.id !in seenIds)
+}
+
+/**
+ * Pure (S5-3, feature 34): one summary line for a poll tick's new
+ * arrivals — "1 new item", "2 new notices", "1 new item · 2 new
+ * notices". Both zero returns "" (the worker never posts then).
+ */
+fun groupPollSummaryText(newItems: Int, newNotices: Int): String {
+    val parts = mutableListOf<String>()
+    if (newItems > 0) parts += if (newItems == 1) "1 new item" else "$newItems new items"
+    if (newNotices > 0) parts += if (newNotices == 1) "1 new notice" else "$newNotices new notices"
+    return parts.joinToString(" · ")
+}
+
+/**
  * One group item doc, as the app sees it — the plain representation the
  * gateway hands the repository (listeners and poll both). The Firestore
  * [DocumentSnapshot] never crosses into the repository anymore.

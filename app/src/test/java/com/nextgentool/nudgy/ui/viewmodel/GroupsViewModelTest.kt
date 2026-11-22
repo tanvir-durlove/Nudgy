@@ -356,4 +356,48 @@ class GroupsViewModelTest {
         }
         assertEquals(listOf(userId), map[task.id]?.completedBy)
     }
+
+    // ---- Sprint 5-3: notices (feature 32, Q2=(a) text-only) ----
+
+    @Test
+    fun `sendNotice as creator appears in observeNotices at once`() = vmTest {
+        val viewModel = buildViewModel()
+        val created = viewModel.createGroup("DIU 41")
+        val entity = (created as GroupResult.Ok).value
+
+        viewModel.sendNotice(entity.groupId, "Class at 10")
+
+        val notices = viewModel.observeNotices(entity.groupId).first { it.isNotEmpty() }
+        assertEquals(listOf("Class at 10"), notices.map { it.text })
+        assertEquals(
+            "Class at 10",
+            fake.notices[entity.groupId]?.values?.single()?.get("text")
+        )
+    }
+
+    @Test
+    fun `sendNotice as a member emits the creator-only error`() = vmTest {
+        val created = groupRepository.createGroup(userId, "Creator", "DIU 41")
+        val entity = (created as GroupResult.Ok).value
+        setActiveUser("user-2")
+        val viewModel = buildViewModel()
+        val errorDeferred = backgroundScope.async { viewModel.groupTaskError.first() }
+
+        viewModel.sendNotice(entity.groupId, "Hello")
+
+        assertEquals("Only the creator can send a notice.", errorDeferred.await())
+        assertTrue(fake.notices[entity.groupId].isNullOrEmpty())
+    }
+
+    @Test
+    fun `refreshNotices returns the fresh list from the gateway`() = vmTest {
+        val viewModel = buildViewModel()
+        val created = viewModel.createGroup("DIU 41")
+        val entity = (created as GroupResult.Ok).value
+        groupRepository.createGroupNotice(entity.groupId, userId, "Creator", "Class at 10")
+
+        val refreshed = viewModel.refreshNotices(entity.groupId)
+
+        assertEquals(listOf("Class at 10"), refreshed.map { it.text })
+    }
 }

@@ -12,6 +12,7 @@ import com.nextgentool.nudgy.data.model.TaskCategory
 import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.data.repository.GroupCompletion
 import com.nextgentool.nudgy.data.repository.GroupMember
+import com.nextgentool.nudgy.data.repository.GroupNotice
 import com.nextgentool.nudgy.data.repository.GroupRepository
 import com.nextgentool.nudgy.data.repository.GroupResult
 import com.nextgentool.nudgy.data.repository.TaskRepository
@@ -86,13 +87,36 @@ class GroupsViewModel @Inject constructor(
     private val prefillJoinCodeFlow = MutableStateFlow<String?>(null)
 
     /**
-     * One-shot group-task errors (create/edit/delete/toggle): the
+     * One-shot group errors (create/edit/delete/toggle/notice): the
      * sheets close on submit, so a failed write has nowhere to show
      * inline — the NavHost toasts these. Replay 0, buffer 1: an error
      * emitted while nothing collects is dropped, never queued stale.
      */
     private val _groupTaskError = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
     val groupTaskError: SharedFlow<String> = _groupTaskError
+
+    /** The notices of one group, newest first (live — the listener feeds it). */
+    fun observeNotices(groupId: String): Flow<List<GroupNotice>> =
+        groupRepository.observeNotices(groupId)
+
+    /** One-shot notices refresh for the detail (warms the flow before the listener fires). */
+    suspend fun refreshNotices(groupId: String): List<GroupNotice> =
+        groupRepository.refreshNotices(groupId)
+
+    /**
+     * Sprint 5-3 — creator-only text-only notice (feature 32, Q2=(a)).
+     * The repo enforces the creator check and the 2000-char limit; a
+     * member calling this gets the Err on [groupTaskError] (the UI
+     * never shows them the button).
+     */
+    fun sendNotice(groupId: String, text: String) {
+        viewModelScope.launch {
+            val result = groupRepository.createGroupNotice(
+                groupId, userId, user.displayName, text
+            )
+            if (result is GroupResult.Err) _groupTaskError.emit(result.message)
+        }
+    }
 
     /** The shared completion map (raw — the screen filters it to current members). */
     fun observeCompletions(): Flow<Map<String, GroupCompletion>> =

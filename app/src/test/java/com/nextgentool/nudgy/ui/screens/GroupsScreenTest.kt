@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -13,6 +14,7 @@ import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.repository.GroupCompletion
 import com.nextgentool.nudgy.data.repository.GroupMember
+import com.nextgentool.nudgy.data.repository.GroupNotice
 import com.nextgentool.nudgy.data.repository.GroupResult
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
 import kotlinx.coroutines.flow.flowOf
@@ -39,6 +41,11 @@ import org.robolectric.annotation.Config
  * sheet. The detail is a scrolling column: below-fold nodes are
  * scrolled to before tapping (performScrollTo) and asserted with
  * assertExists, not assertIsDisplayed.
+ *
+ * Sprint 5-3 — notices (spec §6, feature 32) + notification tap
+ * (feature 34): the same screen with groupNoticesEnabled=true — the
+ * notices card (newest first), the creator-only Send notice sheet,
+ * and openGroupId opening the detail (the tap entry point).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -70,13 +77,17 @@ class GroupsScreenTest {
         completions: Map<String, GroupCompletion> = emptyMap(),
         membersOverride: List<GroupMember>? = null,
         groupTasksEnabled: Boolean = false,
+        groupNoticesEnabled: Boolean = false,
+        noticesOverride: List<GroupNotice> = emptyList(),
+        onSendNotice: (String, String) -> Unit = { _, _ -> },
         onToggleTask: (TaskEntity) -> Unit = {},
         onCreateGroup: suspend (String) -> GroupResult<GroupEntity> =
             { GroupResult.Ok(group()) },
         onJoinGroup: suspend (String) -> GroupResult<GroupEntity> =
             { GroupResult.Ok(group()) },
         prefillJoinCode: String? = null,
-        initialSelectedGroup: GroupEntity? = null
+        initialSelectedGroup: GroupEntity? = null,
+        openGroupId: String? = null
     ) {
         val shownMembers = membersOverride ?: members
         composeRule.setContent {
@@ -93,6 +104,11 @@ class GroupsScreenTest {
                     onToggleTask = onToggleTask,
                     completions = completions,
                     groupTasksEnabled = groupTasksEnabled,
+                    groupNoticesEnabled = groupNoticesEnabled,
+                    onObserveNotices = { flowOf(noticesOverride) },
+                    onRefreshNotices = { noticesOverride },
+                    onSendNotice = onSendNotice,
+                    openGroupId = openGroupId,
                     prefillJoinCode = prefillJoinCode,
                     initialSelectedGroup = initialSelectedGroup
                 )
@@ -339,6 +355,89 @@ class GroupsScreenTest {
         composeRule.waitForIdle()
 
         composeRule.onNodeWithText("Post a group task").assertIsDisplayed()
+    }
+
+    // ---------------------------------------------------------------- Sprint 5-3: notices + notification tap
+
+    private fun notice(
+        id: String = "n-1",
+        text: String = "Class at 10",
+        createdAt: Long = 2_000L
+    ) = GroupNotice(id, "g-1", "user-1", "", text, createdAt)
+
+    @Test
+    fun `notices card lists notices newest first, no Send button for members`() {
+        render(
+            user = memberUser,
+            groupTasksEnabled = true,
+            groupNoticesEnabled = true,
+            noticesOverride = listOf(
+                notice("n-2", "Moved to 11", 3_000L),
+                notice("n-1", "Class at 10", 2_000L)
+            ),
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithTag("notices_card").assertExists()
+        composeRule.onNodeWithText("Class at 10").assertExists()
+        composeRule.onNodeWithText("Moved to 11").assertExists()
+        composeRule.onNodeWithText("Send notice").assertDoesNotExist()
+    }
+
+    @Test
+    fun `notices card shows the empty state when there are no notices`() {
+        render(
+            user = creator,
+            groupTasksEnabled = true,
+            groupNoticesEnabled = true,
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithText("No notices yet.").assertExists()
+    }
+
+    @Test
+    fun `creator sends a notice through the sheet`() {
+        val sent = mutableListOf<Pair<String, String>>()
+        render(
+            user = creator,
+            groupTasksEnabled = true,
+            groupNoticesEnabled = true,
+            onSendNotice = { groupId, text -> sent += groupId to text },
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithTag("send_notice_open").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("send_notice_field").performTextInput("Class at 10")
+        composeRule.onNodeWithTag("send_notice_submit").performClick()
+        composeRule.waitForIdle()
+
+        assertEquals(listOf("g-1" to "Class at 10"), sent)
+    }
+
+    @Test
+    fun `openGroupId opens the detail for the notified group`() {
+        render(
+            groupTasksEnabled = true,
+            groupNoticesEnabled = true,
+            openGroupId = "g-1"
+        )
+
+        composeRule.onNodeWithText("All groups").assertIsDisplayed()
+        composeRule.onNodeWithText("Ayesha").assertExists()
+    }
+
+    @Test
+    fun `openGroupId with an unknown group stays on the list`() {
+        render(
+            groupTasksEnabled = true,
+            groupNoticesEnabled = true,
+            openGroupId = "g-gone"
+        )
+
+        composeRule.onNodeWithText("All groups").assertDoesNotExist()
+        composeRule.onNodeWithText("DIU 41").assertExists()
     }
 }
 

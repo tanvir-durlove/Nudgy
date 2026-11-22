@@ -31,6 +31,8 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
     private val itemListeners =
         mutableMapOf<String, MutableList<(List<GroupItemChange>) -> Unit>>()
     private val groupDocListeners = mutableMapOf<String, MutableList<() -> Unit>>()
+    private val noticeListeners =
+        mutableMapOf<String, MutableList<(List<GroupNotice>) -> Unit>>()
 
     var failNextWith: Exception? = null
     var collideFirstCodeCheck = false
@@ -41,6 +43,7 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
 
     fun itemListenerCount(groupId: String): Int = itemListeners[groupId]?.size ?: 0
     fun groupDocListenerCount(groupId: String): Int = groupDocListeners[groupId]?.size ?: 0
+    fun noticeListenerCount(groupId: String): Int = noticeListeners[groupId]?.size ?: 0
 
     /** Delivers listener changes to every registered items listener for the group. */
     fun emitItemChanges(groupId: String, changes: List<GroupItemChange>) {
@@ -50,6 +53,16 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
     /** Delivers a group-doc deletion to every registered group-doc listener. */
     fun emitGroupDeleted(groupId: String) {
         groupDocListeners[groupId]?.toList()?.forEach { it() }
+    }
+
+    /** Delivers a notices snapshot to every registered notices listener for the group. */
+    fun emitNotices(groupId: String, notices: List<GroupNotice>) {
+        noticeListeners[groupId]?.toList()?.forEach { it(notices) }
+    }
+
+    /** Seeds one notice doc (as the real gateway would have stored it). */
+    fun seedNotice(groupId: String, noticeId: String, fields: Map<String, Any?>) {
+        notices.getOrPut(groupId) { mutableMapOf() }[noticeId] = fields.toMutableMap()
     }
 
     /** Seeds one item doc (as the real gateway would have stored it). */
@@ -224,6 +237,16 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
             } ?: emptyList()
     }
 
+    override suspend fun queryNoticesSince(groupId: String, lastSeenMs: Long): List<GroupNotice> {
+        maybeThrow()
+        val cutoff = lastSeenMs - 60_000L
+        return notices[groupId]?.mapNotNull { (noticeId, fields) ->
+            val createdAt = (fields["createdAt"] as? Number)?.toLong() ?: 0L
+            if (createdAt <= cutoff) return@mapNotNull null
+            noticeFromDoc(noticeId, groupId, fields)
+        }?.sortedBy { it.createdAtEpochMillis } ?: emptyList()
+    }
+
     override fun addItemsListener(
         groupId: String,
         onChanges: (List<GroupItemChange>) -> Unit
@@ -237,5 +260,19 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
         val list = groupDocListeners.getOrPut(groupId) { mutableListOf() }
         list.add(onDeleted)
         return { list.remove(onDeleted) }
+    }
+
+    override fun addNoticesListener(
+        groupId: String,
+        onNotices: (List<GroupNotice>) -> Unit
+    ): () -> Unit {
+        val list = noticeListeners.getOrPut(groupId) { mutableListOf() }
+        list.add(onNotices)
+        // The real listener fires its initial snapshot on attach.
+        onNotices(
+            notices[groupId]?.mapNotNull { (id, fields) -> noticeFromDoc(id, groupId, fields) }
+                ?.sortedByDescending { it.createdAtEpochMillis } ?: emptyList()
+        )
+        return { list.remove(onNotices) }
     }
 }

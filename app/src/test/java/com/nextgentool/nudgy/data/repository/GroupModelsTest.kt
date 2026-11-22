@@ -239,6 +239,55 @@ class GroupModelsTest {
         assertTrue("createdAt" !in fields)
     }
 
+    // ---------------------------------------------------------------- poll (S5-3)
+
+    private fun notice(id: String, createdAt: Long) =
+        GroupNotice(id, "g-1", "u-1", "Ayesha", "n-$id", createdAt)
+
+    @Test
+    fun `filterNewNotices keeps a notice past the watermark`() {
+        val found = filterNewNotices(
+            listOf(notice("n-1", 2_000L)), lastSeenMs = 1_000L, seenIds = emptySet()
+        )
+        assertEquals(listOf("n-1"), found.map { it.id })
+    }
+
+    @Test
+    fun `filterNewNotices keeps an unseen notice inside the overlap window`() {
+        val found = filterNewNotices(
+            listOf(notice("n-1", 990L)), lastSeenMs = 1_000L, seenIds = emptySet()
+        )
+        assertEquals(listOf("n-1"), found.map { it.id })
+    }
+
+    @Test
+    fun `filterNewNotices drops a notice already seen inside the overlap window`() {
+        val found = filterNewNotices(
+            listOf(notice("n-1", 990L)), lastSeenMs = 1_000L, seenIds = setOf("n-1")
+        )
+        assertTrue(found.isEmpty())
+    }
+
+    @Test
+    fun `filterNewNotices drops a stale notice at or before the window even when unseen`() {
+        val found = filterNewNotices(
+            listOf(notice("n-1", 900L), notice("n-2", 940L)),
+            lastSeenMs = 1_000L, seenIds = emptySet()
+        )
+        assertTrue(found.isEmpty())
+    }
+
+    @Test
+    fun `groupPollSummaryText covers items only, notices only, both, and neither`() {
+        assertEquals("1 new item", groupPollSummaryText(1, 0))
+        assertEquals("2 new items", groupPollSummaryText(2, 0))
+        assertEquals("1 new notice", groupPollSummaryText(0, 1))
+        assertEquals("3 new notices", groupPollSummaryText(0, 3))
+        assertEquals("1 new item · 2 new notices", groupPollSummaryText(1, 2))
+        assertEquals("2 new items · 1 new notice", groupPollSummaryText(2, 1))
+        assertEquals("", groupPollSummaryText(0, 0))
+    }
+
     // ---------------------------------------------------------------- item docs
 
     @Test
