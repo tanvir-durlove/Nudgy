@@ -270,9 +270,12 @@ class GroupModelsTest {
 
     @Test
     fun `filterNewNotices drops a stale notice at or before the window even when unseen`() {
+        // The window is (lastSeen - 60s, lastSeen]: 39_000 is before
+        // it, 40_000 sits exactly on its edge (not past it) — both
+        // stale, even though neither id was ever seen.
         val found = filterNewNotices(
-            listOf(notice("n-1", 900L), notice("n-2", 940L)),
-            lastSeenMs = 1_000L, seenIds = emptySet()
+            listOf(notice("n-1", 39_000L), notice("n-2", 40_000L)),
+            lastSeenMs = 100_000L, seenIds = emptySet()
         )
         assertTrue(found.isEmpty())
     }
