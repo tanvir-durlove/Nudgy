@@ -1,7 +1,9 @@
 package com.nextgentool.nudgy.ui.screens
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -110,6 +112,13 @@ class GroupsScreenTest {
 
         composeRule.onNodeWithTag("group_row_g-1").performClick()
         composeRule.waitForIdle()
+        // Members arrive asynchronously (LaunchedEffect + flow collect) —
+        // wait for them like ChatScreenSmokeTest waits for the seeded
+        // welcome message, instead of racing waitForIdle().
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Ayesha")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
 
         composeRule.onNodeWithText("Ayesha").assertIsDisplayed()
         composeRule.onNodeWithText("Tanvir").assertIsDisplayed()
@@ -161,7 +170,15 @@ class GroupsScreenTest {
         render(prefillJoinCode = "K7Q2XA")
 
         composeRule.onNodeWithText("Join a group").assertIsDisplayed()
-        composeRule.onNodeWithText("K7Q2XA").assertIsDisplayed()
+        // The sheet's only editable field is the code field: target it by
+        // its SetTextAction (ChatScreenSmokeTest idiom) and assert its
+        // value — onNodeWithText does not reliably match a TextField's
+        // editable value.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodes(hasSetTextAction())
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNode(hasSetTextAction()).assertTextEquals("K7Q2XA")
     }
 }
 
