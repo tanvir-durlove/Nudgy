@@ -130,8 +130,26 @@ class MatrixInTodayTest {
         }
     }
 
+    /**
+     * A Plan-picked task in My Day (HIGH, due today noon → Q1).
+     * Returns the task id. Needed even for the chip test: with an empty
+     * My Day, Today shows "Nothing planned for today yet" instead of
+     * ANY view (List / Board / Matrix alike) — so the matrix only
+     * renders once a task is planned.
+     */
+    private fun seedMyDayTask(title: String): String = runBlocking {
+        val noonToday = startOfDayMillis(System.currentTimeMillis()) + 12 * 60 * 60 * 1000L
+        val task = repository.createTask(
+            repository.currentUserId(), title,
+            dueEpochMillis = noonToday, priority = Priority.HIGH
+        )
+        repository.updateTask(task.copy(plannedDate = todayDateString()))
+        task.id
+    }
+
     @Test
     fun `the Matrix chip sits in the My Day toggle next to List and Board`() {
+        seedMyDayTask("Call the bank")
         setTodayContent()
 
         composeRule.onNodeWithTag("my_day_view_mode_list").assertExists()
@@ -144,20 +162,12 @@ class MatrixInTodayTest {
 
     @Test
     fun `a Plan-picked HIGH task due today shows in Q1 of the Matrix`() {
-        val noonToday = startOfDayMillis(System.currentTimeMillis()) + 12 * 60 * 60 * 1000L
-        val created = runBlocking {
-            val task = repository.createTask(
-                repository.currentUserId(), "Call the bank",
-                dueEpochMillis = noonToday, priority = Priority.HIGH
-            )
-            repository.updateTask(task.copy(plannedDate = todayDateString()))
-            task
-        }
+        val createdId = seedMyDayTask("Call the bank")
         setTodayContent()
         selectMatrixView()
 
         composeRule.onNodeWithTag("matrix_count_Q1").assertTextEquals("1")
-        composeRule.onNodeWithTag("matrix_card_${created.id}").assertExists()
+        composeRule.onNodeWithTag("matrix_card_$createdId").assertExists()
     }
 
     @Test
