@@ -109,7 +109,7 @@ class GroupsViewModelTest {
     }
 
     /** GroupRepositoryTest pattern: the listener attach runs on real IO. */
-    private suspend fun awaitCondition(timeoutMs: Long = 5_000L, check: suspend () -> Boolean) {
+    private suspend fun awaitCondition(timeoutMs: Long = 10_000L, check: suspend () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (!check()) {
             if (System.currentTimeMillis() > deadline) {

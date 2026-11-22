@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.repository.GroupMember
@@ -112,9 +113,18 @@ class GroupsScreenTest {
         render()
 
         // Scroll the row into view first (CalendarScreenTest precedent for
-        // tagged nodes in scrollable containers), then tap it.
+        // tagged nodes in scrollable containers), then tap the group NAME
+        // with a real touch: the name sits on the left of the row, away
+        // from the nested copy-code button, so hit-testing lands on the
+        // row's clickable. (performClick on the row tag proved flaky
+        // across rounds 5-7 — the detail opened in round 6 but not in
+        // rounds 5 and 7 with identical click code.)
         composeRule.onNodeWithTag("group_row_g-1").performScrollTo()
-        composeRule.onNodeWithTag("group_row_g-1").performClick()
+        composeRule.onNodeWithText("DIU 41").performTouchInput {
+            down(center)
+            advanceEventTime(100)
+            up()
+        }
         // The detail opens first ("All groups" back row is detail-only);
         // members load asynchronously after that (LaunchedEffect + flow
         // collect) — wait for each step in turn so a failure names the
