@@ -131,7 +131,18 @@ class S14SmokeTest {
     @Test
     fun `Templates screen renders the 3 seeded built-ins, read-only`() {
         runBlocking { repository.seedBuiltInTemplates(userId) }
+        // S4-1 round 9 — this ViewModel MUST be owned by the store:
+        // its init launches a never-ending observeTemplates Flow
+        // collection in viewModelScope. Constructed bare, its scope was
+        // never cancelled, so the collection was still alive when
+        // tearDown closed the DB; its next query threw
+        // IllegalStateException against the closed DB, which the global
+        // coroutines-test ExceptionCollector buffered and replayed into
+        // the next runTest enter() as UncaughtExceptionsBeforeTest
+        // (the BoardDragTest victim). The store's clear() + drain in
+        // tearDown now cancels it first.
         val templatesViewModel = TemplatesViewModel(repository)
+            .also { viewModelStore.put("templates", it) }
         composeRule.setContent {
             TemplatesScreen(onBack = {}, viewModel = templatesViewModel)
         }
