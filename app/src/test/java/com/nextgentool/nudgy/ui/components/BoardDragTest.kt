@@ -13,6 +13,7 @@ import com.nextgentool.nudgy.data.model.TaskStatus
 import com.nextgentool.nudgy.ui.viewmodel.TaskListItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.ClassRule
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -51,8 +52,8 @@ class BoardDragTest {
         // so the CI log shows THAT exception's type + throw site (the
         // leaker), not the wrapper. If the buffer is empty and this class
         // still fails, the leaker is BoardDragTest's own method 1.
-        @get:ClassRule
-        @JvmStatic
+        @ClassRule
+        @JvmField
         val revealLeakRule = object : org.junit.rules.TestRule {
             override fun apply(
                 base: org.junit.runners.model.Statement,
