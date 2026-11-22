@@ -8,6 +8,7 @@ import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.TaskStatus
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -53,13 +54,13 @@ class GroupRepositoryTest {
         db.close()
     }
 
-    private fun awaitCondition(timeoutMs: Long = 5_000L, check: () -> Boolean) {
+    private suspend fun awaitCondition(timeoutMs: Long = 5_000L, check: suspend () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (!check()) {
             if (System.currentTimeMillis() > deadline) {
                 error("condition not met within ${timeoutMs}ms")
             }
-            Thread.sleep(25)
+            delay(25)
         }
     }
 
