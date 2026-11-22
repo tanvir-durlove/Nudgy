@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.lifecycle.ViewModelStore
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -54,6 +55,7 @@ class PlanScreenTest {
     val composeRule = createComposeRule()
 
     private lateinit var db: NudgyDatabase
+    private val viewModelStore = ViewModelStore()
     private lateinit var repository: TaskRepository
     private lateinit var viewModel: PlanViewModel
 
@@ -87,11 +89,27 @@ class PlanScreenTest {
             repository = repository,
             planDayUseCase = PlanDayUseCase(),
             carryOverUseCase = CarryOverUseCase()
-        )
+        ).also { viewModelStore.put("plan", it) }
     }
 
     @After
     fun tearDown() {
+        // PR #86 rule: cancel the ViewModel scopes before the database
+        // closes, so no viewModelScope coroutine can run Room work
+        // against the closed DB and poison the next test's TestScope.
+        viewModelStore.clear()
+        // S4-1 round 7 — drain in-flight Room IO before closing the DB.
+        // clear() cancels the ViewModels' scopes, but a Room call already
+        // running on a real IO thread (a ViewModel init sync, or a
+        // never-ending Room Flow collection re-querying after a write)
+        // does not notice the cancellation until it returns; closing the
+        // DB first makes that call throw IllegalStateException, which the
+        // global coroutines-test ExceptionCollector buffers and replays
+        // into the next test's runTest enter() as UncaughtExceptionsBeforeTest
+        // (the compose rule wraps every test method in runTest, so the
+        // victim is the next compose test — BoardDragTest). 500ms is ample
+        // for in-memory Room calls.
+        Thread.sleep(500)
         db.close()
     }
 
@@ -337,7 +355,7 @@ class PlanScreenTest {
             repository = repository,
             planDayUseCase = PlanDayUseCase(),
             carryOverUseCase = CarryOverUseCase()
-        )
+        ).also { viewModelStore.put("plan-2", it) }
         composeRule.runOnIdle { currentViewModel = secondViewModel }
         // Let the swap's recomposition settle (the new ViewModel starts
         // in loading) so the wait below cannot pass on the first

@@ -2,6 +2,7 @@ package com.nextgentool.nudgy.ui.screens
 
 import android.content.Context
 import android.os.Looper
+import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
@@ -48,6 +49,7 @@ class PlanViewModelTest {
     private lateinit var repository: TaskRepository
     private lateinit var viewModel: PlanViewModel
     private lateinit var scope: CoroutineScope
+    private val viewModelStore = ViewModelStore()
 
     private fun at(dayOffset: Int, hour: Int, minute: Int = 0): Long =
         Calendar.getInstance().apply {
@@ -97,14 +99,30 @@ class PlanViewModelTest {
             repository = repository,
             planDayUseCase = PlanDayUseCase(),
             carryOverUseCase = CarryOverUseCase()
-        )
+        ).also { viewModelStore.put("plan", it) }
         scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
         scope.launch { viewModel.uiState.collect {} }
     }
 
     @After
     fun tearDown() {
+        // PR #86 rule: cancel the ViewModel scopes before the database
+        // closes, so no viewModelScope coroutine can run Room work
+        // against the closed DB and poison the next test's TestScope.
+        viewModelStore.clear()
         scope.cancel()
+        // S4-1 round 7 — drain in-flight Room IO before closing the DB.
+        // clear() cancels the ViewModels' scopes, but a Room call already
+        // running on a real IO thread (a ViewModel init sync, or a
+        // never-ending Room Flow collection re-querying after a write)
+        // does not notice the cancellation until it returns; closing the
+        // DB first makes that call throw IllegalStateException, which the
+        // global coroutines-test ExceptionCollector buffers and replays
+        // into the next test's runTest enter() as UncaughtExceptionsBeforeTest
+        // (the compose rule wraps every test method in runTest, so the
+        // victim is the next compose test — BoardDragTest). 500ms is ample
+        // for in-memory Room calls.
+        Thread.sleep(500)
         db.close()
     }
 

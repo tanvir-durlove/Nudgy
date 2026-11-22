@@ -10,6 +10,9 @@ import com.nextgentool.nudgy.MainActivity
 import com.nextgentool.nudgy.auth.AuthManager
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.data.local.NudgyDatabase
+import com.nextgentool.nudgy.data.model.FocusSessionKind
+import com.nextgentool.nudgy.data.repository.FocusHabitRepository
+import com.nextgentool.nudgy.focus.PomodoroAlarm
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -17,6 +20,13 @@ import kotlinx.coroutines.launch
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action ?: return
+        // Sprint 4-1 — the Pomodoro end signal: it carries a session
+        // id, not a task id, so it is handled before the task-id
+        // extraction below (which returns early without one).
+        if (action == PomodoroAlarm.ACTION_POMODORO_END) {
+            handlePomodoroEnd(context, intent)
+            return
+        }
         val taskId = intent.getStringExtra(ReminderManager.EXTRA_TASK_ID) ?: return
         val taskTitle = intent.getStringExtra(ReminderManager.EXTRA_TASK_TITLE) ?: "Task Reminder"
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -42,7 +52,7 @@ class ReminderReceiver : BroadcastReceiver() {
                     } catch (e: Exception) {
                         android.util.Log.w("ReminderReceiver", "Error showing reminder: ${e.message}")
                     } finally {
-                        pendingResult.finish()
+                        pendingResult?.finish()
                     }
                 }
             }
@@ -71,7 +81,7 @@ class ReminderReceiver : BroadcastReceiver() {
                     } catch (e: Exception) {
                         android.util.Log.w("ReminderReceiver", "Error marking task done: ${e.message}")
                     } finally {
-                        pendingResult.finish()
+                        pendingResult?.finish()
                     }
                 }
             }
@@ -97,11 +107,95 @@ class ReminderReceiver : BroadcastReceiver() {
                         val reminderManager = ReminderManager(context)
                         reminderManager.scheduleReminder(taskId, taskTitle, snoozeTime)
                     } finally {
-                        pendingResult.finish()
+                        pendingResult?.finish()
                     }
                 }
             }
         }
+    }
+
+    /**
+     * Sprint 4-1 — the Pomodoro end signal (spec §4, Q2=(a), Q4=(a)).
+     * Fires at the session's persisted planned end even when the app
+     * is backgrounded or dead: the session is completed in Room (the
+     * minutes count from that moment) and the end notification is
+     * posted. Completing is idempotent — when the timer screen's
+     * ticker already completed the session (app open), this only
+     * posts the notification. A session that belongs to another
+     * account, or one already cancelled, never notifies.
+     */
+    private fun handlePomodoroEnd(context: Context, intent: Intent) {
+        val sessionId = intent.getStringExtra(PomodoroAlarm.EXTRA_SESSION_ID) ?: return
+        val kindName = intent.getStringExtra(PomodoroAlarm.EXTRA_SESSION_KIND)
+            ?: FocusSessionKind.FOCUS.name
+        val taskTitle = intent.getStringExtra(PomodoroAlarm.EXTRA_TASK_TITLE)
+        val kind = runCatching { FocusSessionKind.valueOf(kindName) }
+            .getOrDefault(FocusSessionKind.FOCUS)
+        val notificationManager =
+            context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val pendingResult = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val repository = FocusHabitRepository(context)
+                val session = repository.getSessionById(sessionId)
+                if (session != null && session.userId == AuthManager.getActiveUserId(context)) {
+                    val wasRunning = session.endedAtEpochMillis == null
+                    // A cancelled session has an end time but is not
+                    // completed: a stale alarm (e.g. one that survived
+                    // a crash) must never complete or notify for it.
+                    if (wasRunning) {
+                        repository.completeSession(sessionId, System.currentTimeMillis())
+                    }
+                    // Notify when the session ran to its end — either
+                    // just now, or already completed by the timer
+                    // screen's ticker while the app was open.
+                    if (wasRunning || session.completed) {
+                        showPomodoroEndNotification(
+                            context, notificationManager, sessionId, kind, taskTitle
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("ReminderReceiver", "Error completing pomodoro session: ${e.message}")
+            } finally {
+                pendingResult?.finish()
+            }
+        }
+    }
+
+    private fun showPomodoroEndNotification(
+        context: Context,
+        notificationManager: NotificationManager,
+        sessionId: String,
+        kind: FocusSessionKind,
+        taskTitle: String?
+    ) {
+        val notifId = PomodoroAlarm.requestCode(sessionId)
+        val contentIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            context,
+            notifId,
+            contentIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val (title, text) = if (kind == FocusSessionKind.FOCUS) {
+            "Focus session complete" to
+                (taskTitle?.let { "Nice work on \"$it\" — time for a break." }
+                    ?: "Nice work — time for a break.")
+        } else {
+            "Break over" to "Ready to focus?"
+        }
+        val notification = NotificationCompat.Builder(context, ReminderManager.CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_nudgy_notification)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setContentIntent(contentPendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+        notificationManager.notify(notifId, notification)
     }
 
     /**

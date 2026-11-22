@@ -3,6 +3,7 @@ package com.nextgentool.nudgy.ui.viewmodel
 import android.app.Activity
 import android.content.Context
 import androidx.activity.ComponentActivity
+import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.ads.ChatTurnCap
@@ -197,6 +198,7 @@ class ChatViewModelTest {
 
     private lateinit var context: Context
     private lateinit var db: NudgyDatabase
+    private val viewModelStore = ViewModelStore()
     private lateinit var chatRepository: ChatRepository
     private lateinit var preFilter: ClientIntentPreFilter
     private lateinit var taskRepository: TaskRepository
@@ -248,6 +250,22 @@ class ChatViewModelTest {
 
     @After
     fun tearDown() {
+        // PR #86 rule: cancel the ViewModel scopes before the database
+        // closes, so no viewModelScope coroutine can run Room work
+        // against the closed DB and poison the next test's TestScope.
+        viewModelStore.clear()
+        // S4-1 round 7 — drain in-flight Room IO before closing the DB.
+        // clear() cancels the ViewModels' scopes, but a Room call already
+        // running on a real IO thread (a ViewModel init sync, or a
+        // never-ending Room Flow collection re-querying after a write)
+        // does not notice the cancellation until it returns; closing the
+        // DB first makes that call throw IllegalStateException, which the
+        // global coroutines-test ExceptionCollector buffers and replays
+        // into the next test's runTest enter() as UncaughtExceptionsBeforeTest
+        // (the compose rule wraps every test method in runTest, so the
+        // victim is the next compose test — BoardDragTest). 500ms is ample
+        // for in-memory Room calls.
+        Thread.sleep(500)
         db.close()
         context.getSharedPreferences("nudgy_ads", Context.MODE_PRIVATE).edit().clear().apply()
         context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE).edit().clear().apply()
@@ -268,7 +286,7 @@ class ChatViewModelTest {
         LlmConfigProvider { config },
         fakeRewarded,
         PlanDayUseCase()
-    )
+    ).also { viewModelStore.put("chat", it) }
 
     private fun setByokKey() {
         context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE)
@@ -602,8 +620,14 @@ class ChatViewModelTest {
                 proposal.focusStartMillis!!, proposal.focusEndMillis!!,
                 "Focus Time", proposal.id
             )
-            val today = startOfDayMillis(System.currentTimeMillis())
-            val events = calendarRepository.observeEventsForDay(userId, today)
+            // S4-1 round 4 — the proposal's slot can cross midnight:
+            // after 23:20 the empty-day slot (next :00/:30 after
+            // now + 10 min) starts at 00:00 tomorrow, so the blocked
+            // event lands on the proposal's own day, not "today".
+            // (Round-3 CI 23:26 UTC failed here; round-2 CI 23:10
+            // passed with a 23:30 slot that still started today.)
+            val dayOfProposal = startOfDayMillis(proposal.focusStartMillis!!)
+            val events = calendarRepository.observeEventsForDay(userId, dayOfProposal)
                 .first { it.any { event -> event.title == "Focus Time" } }
             assertTrue(events.any { it.title == "Focus Time" })
             val updated = viewModel.messages.first { list ->
@@ -1586,7 +1610,22 @@ class ChatViewModelTest {
             seedTask("Task one", at(0, 9))
             viewModel.messages.first { it.size == 1 } // welcome seeded
             viewModel.sendMessage("plan my day")
-            viewModel.messages.first { it.size == 3 }
+            val messages = viewModel.messages.first { it.size == 3 }
+            val drafts = viewModel.pendingPlanDrafts.value
+            if (drafts.isEmpty()) {
+                // S4-1 round 3 — the 5th late-evening flake of the
+                // class S4-0 round 3 fixed for 4 sibling tests: after
+                // 22:50 no 45-minute block ends tonight, so the plan
+                // reply is the plain "No free slot" answer, not a
+                // preview — there is nothing to discard, and
+                // discardPlan() correctly does nothing.
+                assertEquals(0, focusBlocksThatFitTonight())
+                assertEquals(ChatActionType.NONE, messages[2].actionType)
+                assertTrue(messages[2].text.contains("No free slot"))
+                assertTrue(calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first().isEmpty())
+                assertTrue(viewModel.pendingPlanDrafts.value.isEmpty())
+                return@runTest
+            }
             viewModel.discardPlan()
             val afterDiscard = viewModel.messages.first { it.size == 4 }
             assertTrue(afterDiscard[3].text.contains("didn't schedule anything"))

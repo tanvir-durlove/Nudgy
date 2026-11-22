@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.lifecycle.ViewModelStore
 import androidx.compose.ui.test.performTextInput
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -70,6 +71,7 @@ class QuickChatSheetTest {
     }
 
     private lateinit var db: NudgyDatabase
+    private val viewModelStore = ViewModelStore()
     private lateinit var viewModel: ChatViewModel
 
     @Before
@@ -124,11 +126,27 @@ class QuickChatSheetTest {
             },
             com.nextgentool.nudgy.ads.NudgyAdsRewardedGateway(context),
             PlanDayUseCase()
-        )
+        ).also { viewModelStore.put("chat", it) }
     }
 
     @After
     fun tearDown() {
+        // PR #86 rule: cancel the ViewModel scopes before the database
+        // closes, so no viewModelScope coroutine can run Room work
+        // against the closed DB and poison the next test's TestScope.
+        viewModelStore.clear()
+        // S4-1 round 7 — drain in-flight Room IO before closing the DB.
+        // clear() cancels the ViewModels' scopes, but a Room call already
+        // running on a real IO thread (a ViewModel init sync, or a
+        // never-ending Room Flow collection re-querying after a write)
+        // does not notice the cancellation until it returns; closing the
+        // DB first makes that call throw IllegalStateException, which the
+        // global coroutines-test ExceptionCollector buffers and replays
+        // into the next test's runTest enter() as UncaughtExceptionsBeforeTest
+        // (the compose rule wraps every test method in runTest, so the
+        // victim is the next compose test — BoardDragTest). 500ms is ample
+        // for in-memory Room calls.
+        Thread.sleep(500)
         db.close()
     }
 

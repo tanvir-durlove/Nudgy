@@ -104,6 +104,19 @@ class FocusHabitRepository @Inject constructor(
         withContext(Dispatchers.IO) { focusDao.getSessionById(sessionId) }
 
     /**
+     * Sprint 4-1 — pause/resume freezes the timer: on resume the
+     * planned end moves to now + the remaining time, so the pause
+     * itself never eats into the session. The session keeps its
+     * original startedAt + durationMinutes, so a completed session
+     * still counts its full planned minutes (spec §4).
+     */
+    suspend fun updateSessionPlannedEnd(sessionId: String, plannedEndEpochMillis: Long) =
+        withContext(Dispatchers.IO) {
+            val session = focusDao.getSessionById(sessionId) ?: return@withContext
+            focusDao.updateSession(session.copy(plannedEndEpochMillis = plannedEndEpochMillis))
+        }
+
+    /**
      * Completed FOCUS minutes in [start, end). Breaks never count, and
      * cancelled sessions never count (spec §4).
      */

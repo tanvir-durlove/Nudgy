@@ -86,6 +86,18 @@ class S14SmokeTest {
         // viewModelScope coroutine can run Room work against the
         // DB once it is closed (same leak as DarkThemeTest).
         viewModelStore.clear()
+        // S4-1 round 7 — drain in-flight Room IO before closing the DB.
+        // clear() cancels the ViewModels' scopes, but a Room call already
+        // running on a real IO thread (a ViewModel init sync, or a
+        // never-ending Room Flow collection re-querying after a write)
+        // does not notice the cancellation until it returns; closing the
+        // DB first makes that call throw IllegalStateException, which the
+        // global coroutines-test ExceptionCollector buffers and replays
+        // into the next test's runTest enter() as UncaughtExceptionsBeforeTest
+        // (the compose rule wraps every test method in runTest, so the
+        // victim is the next compose test — BoardDragTest). 500ms is ample
+        // for in-memory Room calls.
+        Thread.sleep(500)
         db.close()
     }
 
@@ -119,7 +131,18 @@ class S14SmokeTest {
     @Test
     fun `Templates screen renders the 3 seeded built-ins, read-only`() {
         runBlocking { repository.seedBuiltInTemplates(userId) }
+        // S4-1 round 9 — this ViewModel MUST be owned by the store:
+        // its init launches a never-ending observeTemplates Flow
+        // collection in viewModelScope. Constructed bare, its scope was
+        // never cancelled, so the collection was still alive when
+        // tearDown closed the DB; its next query threw
+        // IllegalStateException against the closed DB, which the global
+        // coroutines-test ExceptionCollector buffered and replayed into
+        // the next runTest enter() as UncaughtExceptionsBeforeTest
+        // (the BoardDragTest victim). The store's clear() + drain in
+        // tearDown now cancels it first.
         val templatesViewModel = TemplatesViewModel(repository)
+            .also { viewModelStore.put("templates", it) }
         composeRule.setContent {
             TemplatesScreen(onBack = {}, viewModel = templatesViewModel)
         }
