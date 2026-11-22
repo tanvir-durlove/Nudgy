@@ -52,7 +52,7 @@ class ReminderReceiver : BroadcastReceiver() {
                     } catch (e: Exception) {
                         android.util.Log.w("ReminderReceiver", "Error showing reminder: ${e.message}")
                     } finally {
-                        pendingResult.finish()
+                        pendingResult?.finish()
                     }
                 }
             }
@@ -81,7 +81,7 @@ class ReminderReceiver : BroadcastReceiver() {
                     } catch (e: Exception) {
                         android.util.Log.w("ReminderReceiver", "Error marking task done: ${e.message}")
                     } finally {
-                        pendingResult.finish()
+                        pendingResult?.finish()
                     }
                 }
             }
@@ -107,7 +107,7 @@ class ReminderReceiver : BroadcastReceiver() {
                         val reminderManager = ReminderManager(context)
                         reminderManager.scheduleReminder(taskId, taskTitle, snoozeTime)
                     } finally {
-                        pendingResult.finish()
+                        pendingResult?.finish()
                     }
                 }
             }
@@ -158,7 +158,7 @@ class ReminderReceiver : BroadcastReceiver() {
             } catch (e: Exception) {
                 android.util.Log.w("ReminderReceiver", "Error completing pomodoro session: ${e.message}")
             } finally {
-                pendingResult.finish()
+                pendingResult?.finish()
             }
         }
     }
