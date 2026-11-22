@@ -87,7 +87,9 @@ class WeeklyReviewScreenTest {
             )
         }
 
-        composeRule.onNodeWithText("Weekly review").assertIsDisplayed()
+        // "Weekly review" appears twice (screen title + card title),
+        // so pin the card by tag instead of a bare text match.
+        composeRule.onNodeWithTag("weekly_review_card").assertExists()
         composeRule.onNodeWithText("Nothing finished yet").assertIsDisplayed()
         composeRule.onNodeWithTag("weekly_review_focus_minutes").assertDoesNotExist()
         composeRule.onNodeWithTag("weekly_review_current_streak").assertDoesNotExist()
