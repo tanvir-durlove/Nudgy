@@ -57,6 +57,7 @@ import com.nextgentool.nudgy.ui.screens.SettingsShell
 import com.nextgentool.nudgy.ui.screens.TasksScreen
 import com.nextgentool.nudgy.ui.screens.TemplatesScreen
 import com.nextgentool.nudgy.ui.screens.TodayScreen
+import com.nextgentool.nudgy.ui.screens.WeeklyReviewScreen
 import com.nextgentool.nudgy.ui.sheets.CreateTaskSheet
 import com.nextgentool.nudgy.ui.sheets.QuickChatSheet
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
@@ -223,6 +224,9 @@ fun NudgyNavHost(
                     onPlanClick = { navController.navigate(NudgyRoute.Plan.route) },
                     onAllTasksClick = { navController.navigate(NudgyRoute.Tasks.route) },
                     onFocusClick = { navController.navigate(NudgyRoute.Focus.route) },
+                    // Sprint 4-4 — the progress ring opens the week's
+                    // summary (spec §7, Q9=(a)).
+                    onWeeklyReviewClick = { navController.navigate(NudgyRoute.WeeklyReview.route) },
                     habitViewModel = habitViewModel
                 )
             }
@@ -234,6 +238,12 @@ fun NudgyNavHost(
         // highlighted while it is open (see NudgyRoute.all).
         composable(NudgyRoute.Focus.route) {
             FocusScreen(onBackClick = { navController.popBackStack() })
+        }
+        // Sprint 4-4 — Weekly review. NOT a bottom destination either:
+        // the same screen from the Today progress ring and from
+        // Settings (spec §7, Q9=(a)).
+        composable(NudgyRoute.WeeklyReview.route) {
+            WeeklyReviewScreen(onBackClick = { navController.popBackStack() })
         }
         // Sprint 1-1 — Tasks list. NOT a bottom destination: no tab is
         // highlighted while it is open (see NudgyRoute.all).
@@ -403,7 +413,13 @@ fun NudgyNavHost(
             route = NudgyRoute.Groups.route,
             deepLinks = listOf(navDeepLink { uriPattern = GROUP_JOIN_DEEP_LINK })
         ) { GroupsShell() }
-        composable(NudgyRoute.Settings.route) { SettingsShell() }
+        composable(NudgyRoute.Settings.route) {
+            SettingsShell(
+                // Sprint 4-4 — the Settings entry to the same weekly
+                // review screen the progress ring opens (spec §7).
+                onWeeklyReviewClick = { navController.navigate(NudgyRoute.WeeklyReview.route) }
+            )
+        }
     }
 }
 

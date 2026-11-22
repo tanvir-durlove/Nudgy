@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.repository.CalendarRepository
+import com.nextgentool.nudgy.data.repository.FocusHabitRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.domain.dayLabel
 import com.nextgentool.nudgy.domain.startOfDayMillis
@@ -14,7 +15,9 @@ import com.nextgentool.nudgy.domain.usecase.GetTodayTimelineUseCase
 import com.nextgentool.nudgy.domain.usecase.TimelineEntry
 import com.nextgentool.nudgy.domain.usecase.ToggleTaskCompletionUseCase
 import com.nextgentool.nudgy.domain.usecase.WeeklyReview
+import com.nextgentool.nudgy.domain.usecase.WeeklyReviewStats
 import com.nextgentool.nudgy.domain.usecase.WeeklyReviewUseCase
+import com.nextgentool.nudgy.domain.usecase.summarizeWeeklyStats
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -64,7 +67,13 @@ data class TodayUiState(
     val doneCount: Int = 0,
     val todayTotal: Int = 0,
     /** Sprint 1-5 — this week's review (Feature 17): three plain lists. */
-    val weeklyReview: WeeklyReview? = null
+    val weeklyReview: WeeklyReview? = null,
+    /** Sprint 4-4 — the review's numbers (Feature 27): focus minutes
+     * this week + best streaks, from real session/check-in data.
+     * Null when the FocusHabitRepository is not wired (older call
+     * sites and tests that construct this ViewModel without it) — the
+     * review then shows its lists only, exactly as before. */
+    val weeklyReviewStats: WeeklyReviewStats? = null
 )
 
 /**
@@ -95,7 +104,14 @@ class TodayViewModel @Inject constructor(
     private val carryOverUseCase: CarryOverUseCase,
     private val timelineUseCase: GetTodayTimelineUseCase,
     // Sprint 1-5 — Weekly review (Feature 17), computed from tasks only.
-    private val weeklyReviewUseCase: WeeklyReviewUseCase
+    private val weeklyReviewUseCase: WeeklyReviewUseCase,
+    // Sprint 4-4 — the review's numbers (Feature 27): focus minutes +
+    // streaks, read from the FocusHabitRepository (S4-0). Nullable with
+    // a default on purpose, like TodayScreen's habitViewModel (S4-2):
+    // the existing tests construct this ViewModel without it and keep
+    // working — the stats are simply absent then. Hilt injects the
+    // real repository in production (TaskModule provides it).
+    private val focusHabitRepository: FocusHabitRepository? = null
 ) : ViewModel() {
 
     private val userId: String = repository.currentUserId()
@@ -107,11 +123,28 @@ class TodayViewModel @Inject constructor(
 
     private val tabFlow = MutableStateFlow(TodayTab.TODAY)
 
+    /**
+     * Sprint 4-4 — the stats refresh trigger. The combine below reads
+     * focus sessions + check-ins (suspending repository calls, IO
+     * inside), so a plain re-subscription is not enough when the user
+     * comes back from a focus session: [refreshWeeklyStats] bumps this
+     * flow and the combine re-runs with fresh numbers. The weekly
+     * review screen calls it on entry.
+     */
+    private val statsRefreshFlow = MutableStateFlow(0)
+
+    /** Re-reads the review's numbers (focus minutes + streaks) now. */
+    fun refreshWeeklyStats() {
+        statsRefreshFlow.value += 1
+    }
+
     val uiState: StateFlow<TodayUiState> = combine(
         repository.observeAllTasks(userId),
         calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()),
-        tabFlow
-    ) { allTasks, events, tab ->
+        tabFlow,
+        statsRefreshFlow
+    ) { allTasks, events, tab, _ ->
+        val now = System.currentTimeMillis()
         val topLevel = allTasks.filter { it.parentTaskId == null }
         val subtasksByParent = allTasks.filter { it.parentTaskId != null }
             .groupBy { it.parentTaskId!! }
@@ -145,7 +178,7 @@ class TodayViewModel @Inject constructor(
             todayTasks = todayDue,
             todayEvents = events,
             startOfToday = todayStart,
-            now = System.currentTimeMillis()
+            now = now
         )
         val timelineEntries = timeline.entries.mapNotNull { entry ->
             when (entry) {
@@ -196,8 +229,21 @@ class TodayViewModel @Inject constructor(
         // slipped, from the same task list — no new table.
         val weeklyReview = weeklyReviewUseCase.buildReview(
             tasks = allTasks,
-            now = System.currentTimeMillis()
+            now = now
         )
+
+        // Sprint 4-4 — the review's numbers (Feature 27): focus minutes
+        // for the SAME week as the review above (one `now` for both,
+        // so the numbers can never disagree about which week it is)
+        // + the habits' streaks. All from real data — completed FOCUS
+        // sessions and HabitCheckIn rows — never cached counters.
+        // Skipped when the repository is not wired (older call sites).
+        val weeklyReviewStats = focusHabitRepository?.let { repo ->
+            summarizeWeeklyStats(
+                focusMinutesThisWeek = repo.getFocusMinutesForWeek(userId, now),
+                habits = repo.getHabitsWithStreaks(userId, now)
+            )
+        }
 
         TodayUiState(
             isLoading = false,
@@ -211,7 +257,8 @@ class TodayViewModel @Inject constructor(
             hasPlannedToday = myDayItems.isNotEmpty(),
             doneCount = doneCount,
             todayTotal = todayDue.size,
-            weeklyReview = weeklyReview
+            weeklyReview = weeklyReview,
+            weeklyReviewStats = weeklyReviewStats
         )
     }.stateIn(
         scope = viewModelScope,
