@@ -404,7 +404,11 @@ class GroupRepositoryTest {
         )
         val map = repo.observeCompletions().first { it["i-1"]?.completedCount == 2 }
         assertEquals(listOf("user-1", "user-2"), map["i-1"]?.completedBy)
-        // The task row landed locally too (same upsert path).
+        // The task row lands locally through the same upsert — but the
+        // flow updates BEFORE the row insert in applyGroupTaskDoc, so
+        // await the row (it guarantees the flow is already set) rather
+        // than asserting it straight after the flow emission.
+        awaitCondition { db.taskDao().getTaskById("i-1") != null }
         checkNotNull(db.taskDao().getTaskById("i-1"))
     }
 

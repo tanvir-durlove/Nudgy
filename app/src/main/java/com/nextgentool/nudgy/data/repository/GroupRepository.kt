@@ -412,6 +412,13 @@ class GroupRepository(
             val merged = task.copy(
                 isCompleted = existing?.isCompleted ?: task.isCompleted,
                 completedAtEpochMillis = existing?.completedAtEpochMillis,
+                // DONE ⇔ isCompleted: the status twin of the preserved
+                // flag must follow it, or the row lands completed in
+                // the TODO column (a stale edit passing status TODO
+                // while the local row is DONE). When the local row is
+                // not completed, the editor's status stands.
+                status = if (existing?.isCompleted == true) TaskStatus.DONE
+                else task.status,
                 isSyncedToCloud = true,
                 updatedAtEpochMillis = System.currentTimeMillis()
             )

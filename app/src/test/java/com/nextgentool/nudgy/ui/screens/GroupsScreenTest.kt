@@ -279,7 +279,9 @@ class GroupsScreenTest {
         composeRule.waitForIdle()
 
         composeRule.onNodeWithText("Who completed this").assertIsDisplayed()
-        composeRule.onNodeWithText("Ayesha").assertExists()
+        // "Ayesha" appears twice — the members list AND the dialog —
+        // so onNodeWithText (exactly one node) fails; count both.
+        composeRule.onAllNodesWithText("Ayesha").assertCountEquals(2)
         // user-2 has a blank display name: the dialog falls back to
         // "Member", never a blank row.
         composeRule.onNodeWithText("Member").assertIsDisplayed()
