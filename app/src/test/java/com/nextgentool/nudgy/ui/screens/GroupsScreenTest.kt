@@ -129,7 +129,10 @@ class GroupsScreenTest {
         composeRule.onNodeWithText("Tanvir").assertIsDisplayed()
         composeRule.onNodeWithText("Creator").assertIsDisplayed()
         composeRule.onNodeWithText("You").assertIsDisplayed()
-        composeRule.onNodeWithText("Group tasks and notices").assertIsDisplayed()
+        // The placeholder sits at the bottom of the scrollable detail,
+        // below the fold in the harness viewport — assertExists, not
+        // assertIsDisplayed (the below-fold lesson from the board tests).
+        composeRule.onNodeWithText("Group tasks and notices").assertExists()
         composeRule.onNodeWithText("Add task").assertDoesNotExist()
         composeRule.onNodeWithText("Add schedule").assertDoesNotExist()
         composeRule.onNodeWithText("Delete group").assertDoesNotExist()
