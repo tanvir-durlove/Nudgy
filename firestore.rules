@@ -59,6 +59,31 @@ service cloud.firestore {
         data.title.size() <= 200;
     }
 
+    function isGroupMember(gid) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/groups/$(gid)/members/$(request.auth.uid));
+    }
+
+    function isCompletionOnlyUpdate() {
+      // Sprint 5-0 (feature 31): a member may update an item doc ONLY
+      // to toggle their own completion. The changed keys must be
+      // exactly completedBy + completedCount; the count must equal the
+      // array size; and the only UID added or removed must be the
+      // caller's own. A doc written before S5-0 has no completedBy —
+      // .get(..., []) treats it as empty.
+      return request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['completedBy', 'completedCount'])
+        && request.resource.data.completedBy is list
+        && request.resource.data.completedCount is int
+        && request.resource.data.completedCount == request.resource.data.completedBy.size()
+        && request.resource.data.completedBy.toSet()
+            .difference(resource.data.get('completedBy', []).toSet())
+            .hasOnly([request.auth.uid])
+        && resource.data.get('completedBy', []).toSet()
+            .difference(request.resource.data.completedBy.toSet())
+            .hasOnly([request.auth.uid]);
+    }
+
     match /users/{userId} {
       allow read, delete: if isOwner(userId);
       allow create, update: if isOwner(userId) && isValidUser(request.resource.data);
@@ -94,8 +119,15 @@ service cloud.firestore {
       allow list: if false;
       allow create: if request.auth != null &&
         request.resource.data.creatorUid == request.auth.uid;
+      // Creator may update anything; a member may update ONLY
+      // lastUpdatedAt (Sprint 5-0: any member can now create an item,
+      // and every item write bumps lastUpdatedAt in the same batch —
+      // without this branch the member's batch would fail on the group
+      // update). A member changing any other group field is denied.
       allow update: if request.auth != null &&
-        resource.data.creatorUid == request.auth.uid;
+        (resource.data.creatorUid == request.auth.uid ||
+         (isGroupMember(gid) && request.resource.data.diff(resource.data)
+           .affectedKeys().hasOnly(['lastUpdatedAt'])));
       allow delete: if request.auth != null && resource.data.creatorUid == request.auth.uid;
     }
 
@@ -121,7 +153,34 @@ service cloud.firestore {
     match /groups/{gid}/items/{itemId} {
       allow read: if request.auth != null &&
         exists(/databases/$(database)/documents/groups/$(gid)/members/$(request.auth.uid));
-      allow create, update, delete: if request.auth != null &&
+      // Sprint 5-0 (Q3=(a)): ANY member may create an item — the v1
+      // creator-only create is widened. The creator keeps full
+      // update/delete; a member may update ONLY their own completion
+      // (isCompletionOnlyUpdate), never another field.
+      allow create: if request.auth != null && isGroupMember(gid)
+        && request.resource.data.kind is string
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0;
+      allow update: if request.auth != null &&
+        (get(/databases/$(database)/documents/groups/$(gid)).data.creatorUid == request.auth.uid ||
+         (isGroupMember(gid) && isCompletionOnlyUpdate()));
+      allow delete: if request.auth != null &&
+        get(/databases/$(database)/documents/groups/$(gid)).data.creatorUid == request.auth.uid;
+    }
+
+    // Sprint 5-0 (feature 32): text-only admin notices. Only the
+    // creator may send or delete one; members may read them. No update
+    // — a notice is never edited, only replaced by a new one.
+    match /groups/{gid}/notices/{noticeId} {
+      allow read: if request.auth != null && isGroupMember(gid);
+      allow create: if request.auth != null &&
+        get(/databases/$(database)/documents/groups/$(gid)).data.creatorUid == request.auth.uid &&
+        request.resource.data.authorUid == request.auth.uid &&
+        request.resource.data.text is string &&
+        request.resource.data.text.size() > 0 &&
+        request.resource.data.text.size() <= 2000;
+      allow update: if false;
+      allow delete: if request.auth != null &&
         get(/databases/$(database)/documents/groups/$(gid)).data.creatorUid == request.auth.uid;
     }
 

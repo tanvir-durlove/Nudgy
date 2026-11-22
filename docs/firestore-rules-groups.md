@@ -139,3 +139,61 @@ policy page (`tanvir-durlove.github.io/nudgy/`). Both must be reworked
 before this version ships — a missed update is a policy risk, not a
 code risk. Group names, codes, and item contents are visible only to
 members; a member's display name is visible to fellow group members.
+
+---
+
+# Sprint 5-0 additions (2026-11-22, spec §3 — NOT deployed yet)
+
+The rules in `firestore.rules` were extended additively. Every v1 rule above
+still holds; the additions below are the only changes. Do NOT deploy until
+the S5-0 checklist at the end of this section is verified against the
+Firestore emulator (no emulator is available on the build VM — the rules
+were reviewed by hand and the app-side mapping is unit-tested; live
+deployment needs a deliberate decision, never a PR side effect).
+
+## What changed and why
+
+1. **Any member may create an item** (Q3=(a)). The v1 `items` create was
+   creator-only. The create rule now requires membership + a non-empty
+   title (`kind` must be a string). The creator keeps full update/delete.
+2. **Member completion-only update** (feature 31). A member may update an
+   item doc ONLY to toggle their own completion: the changed keys must be
+   exactly `completedBy` + `completedCount`, the count must equal the
+   array size, and the only UID added or removed must be the caller's own
+   (`isCompletionOnlyUpdate`). A member editing a title, due date or
+   priority is denied. Item docs written before S5-0 have no
+   `completedBy` — the rule treats a missing array as empty.
+3. **Member lastUpdatedAt-only group update.** Every item write bumps the
+   group doc's `lastUpdatedAt` in the same batch. With member creates,
+   that bump would fail under the creator-only group update — so a member
+   may now update ONLY `lastUpdatedAt` on the group doc (checked with
+   `diff().affectedKeys().hasOnly(['lastUpdatedAt'])`). A member changing
+   the group name or code is denied.
+4. **Notices subcollection** (`groups/{gid}/notices/{noticeId}`, feature 32,
+   text-only). Read: members. Create: creator only, `authorUid` must be
+   the caller, text 1–2000 chars. Update: never. Delete: creator only.
+
+## Backward compatibility with the 1.0.5 production app
+
+The 1.0.5 app shares project `nudgy-8bd76` and its Firestore. All four
+changes are widenings, not narrowings: creators can still do everything
+they could; members gain create + completion-only update + the
+lastUpdatedAt bump. The 1.0.5 UI never exposes member item creation, so
+its behaviour does not change. Item docs without `completedBy` keep
+working (read as empty completion).
+
+## S5-0 rules test checklist (emulator — run before deploying)
+
+13. Non-creator member creates an item (+ group lastUpdatedAt bump in the
+    same batch) → ALLOWED. The same member editing the item's title →
+    DENIED.
+14. Member toggles own completion (completedBy +[uid], completedCount
+    +1) → ALLOWED. Member toggling ANOTHER member's UID → DENIED.
+    Member writing completedCount != completedBy.size() → DENIED.
+    Member completing an item twice (no change) → ALLOWED (no-op).
+15. Member updating ONLY lastUpdatedAt on the group doc → ALLOWED.
+    Member changing the group name → DENIED.
+16. Creator sends a notice (text 1–2000, authorUid == caller) →
+    ALLOWED. Member sending a notice → DENIED. Notice with empty text
+    or >2000 chars → DENIED. Member editing a notice → DENIED.
+17. All v1 checklist items 1–12 still pass (no regression).

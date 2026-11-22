@@ -171,7 +171,7 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
         val docs = repo.queryGroupItemsSince(groupId, lastSeen)
         var maxUpdatedAt = lastSeen
         for (doc in docs) {
-            val ts = doc.getTimestamp("updatedAt")?.toDate()?.time
+            val ts = doc.updatedAtEpochMillis
             if (ts != null && ts > maxUpdatedAt) maxUpdatedAt = ts
         }
         val newCount = repo.applyPolledDocs(uid, groupId, docs)
