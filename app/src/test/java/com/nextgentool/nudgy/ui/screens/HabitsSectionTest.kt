@@ -1,10 +1,14 @@
 package com.nextgentool.nudgy.ui.screens
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import com.nextgentool.nudgy.data.local.entity.HabitEntity
 import com.nextgentool.nudgy.data.repository.HabitStreak
@@ -93,16 +97,31 @@ class HabitsSectionTest {
 
     @Test
     fun `typing a title and tapping add calls back`() {
+        // Stateful: the add button is only enabled once the title is
+        // non-blank, so the typed text must flow back into the state
+        // (a static state would leave the button disabled forever).
         var created = false
-        var seenTitle = ""
-        setContent(
-            loadedState(),
-            onNewTitleChange = { seenTitle = it },
-            onCreateHabit = { created = true }
-        )
+        var title by mutableStateOf("")
+        composeRule.setContent {
+            NudgyTheme {
+                HabitsSectionContent(
+                    state = loadedState().copy(newTitle = title),
+                    onNewTitleChange = { title = it },
+                    onCreateHabit = { created = true },
+                    onToggleCheckIn = {},
+                    onStartRename = {},
+                    onEditTitleChange = {},
+                    onConfirmRename = {},
+                    onCancelRename = {},
+                    onRequestDelete = {},
+                    onConfirmDelete = {},
+                    onCancelDelete = {}
+                )
+            }
+        }
 
         composeRule.onNodeWithTag("habit_new_title").performTextInput("Read")
-        assertEquals("Read", seenTitle)
+        assertEquals("Read", title)
         composeRule.onNodeWithTag("habit_add").performClick()
         assertTrue(created)
     }
@@ -150,21 +169,37 @@ class HabitsSectionTest {
 
     @Test
     fun `rename opens the edit field and saving calls back`() {
-        var editSeen = ""
+        // Stateful edit title, and the field is cleared before typing:
+        // performTextInput inserts at the cursor (start of the field
+        // after focus), so appending to the existing title would
+        // produce " moreDrink water" instead of the new title.
         var saved = false
-        val state = loadedState(listOf(habit())).copy(
-            editingHabitId = "habit-1",
-            editTitle = "Drink water"
-        )
-        setContent(
-            state,
-            onEditTitleChange = { editSeen = it },
-            onConfirmRename = { saved = true }
-        )
+        var editTitle by mutableStateOf("Drink water")
+        composeRule.setContent {
+            NudgyTheme {
+                HabitsSectionContent(
+                    state = loadedState(listOf(habit())).copy(
+                        editingHabitId = "habit-1",
+                        editTitle = editTitle
+                    ),
+                    onNewTitleChange = {},
+                    onCreateHabit = {},
+                    onToggleCheckIn = {},
+                    onStartRename = {},
+                    onEditTitleChange = { editTitle = it },
+                    onConfirmRename = { saved = true },
+                    onCancelRename = {},
+                    onRequestDelete = {},
+                    onConfirmDelete = {},
+                    onCancelDelete = {}
+                )
+            }
+        }
 
         composeRule.onNodeWithTag("habit_edit_field_habit-1").assertIsDisplayed()
-        composeRule.onNodeWithTag("habit_edit_field_habit-1").performTextInput(" more")
-        assertTrue(editSeen.endsWith("more"))
+        composeRule.onNodeWithTag("habit_edit_field_habit-1").performTextClearance()
+        composeRule.onNodeWithTag("habit_edit_field_habit-1").performTextInput("Read daily")
+        assertEquals("Read daily", editTitle)
         composeRule.onNodeWithTag("habit_edit_save_habit-1").performClick()
         assertTrue(saved)
     }
