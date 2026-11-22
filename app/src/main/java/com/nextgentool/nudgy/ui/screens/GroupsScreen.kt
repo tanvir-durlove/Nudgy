@@ -161,6 +161,14 @@ fun GroupsScreen(
     groupWorkEnabled: Boolean = false,
     prefillJoinCode: String? = null,
     onPrefillJoinCodeConsumed: () -> Unit = {},
+    // Detail entry: opens the detail for this group on first composition.
+    // The NavHost leaves it null (tap-to-open); S5-3 notification taps
+    // will pass the notified group here. The detail test also uses it:
+    // the row tap proved untestable in the Robolectric harness (the
+    // detail opened in only 1 of 4 diagnostic CI rounds with identical
+    // tap code), so the tap itself is verified on the device (§10) and
+    // CI verifies the detail rendering through this entry point.
+    initialSelectedGroup: GroupEntity? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -172,7 +180,7 @@ fun GroupsScreen(
         SimpleDateFormat("EEE, MMM d · h:mm a", Locale.getDefault())
     }
 
-    var selectedGroup by remember { mutableStateOf<GroupEntity?>(null) }
+    var selectedGroup by remember { mutableStateOf(initialSelectedGroup) }
     var showCreateGroup by remember { mutableStateOf(false) }
     var showJoinGroup by remember { mutableStateOf(false) }
     // Deep-link prefill (one-shot): MainActivity delivers a join code from an
