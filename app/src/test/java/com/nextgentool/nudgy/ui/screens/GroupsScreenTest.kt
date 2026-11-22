@@ -123,6 +123,10 @@ class GroupsScreenTest {
             composeRule.onAllNodesWithText("All groups")
                 .fetchSemanticsNodes().isNotEmpty()
         }
+        // Pump the main looper once the detail is open so the members
+        // LaunchedEffect (key change null -> groupId) gets a clean run
+        // before we wait for its rows.
+        composeRule.waitForIdle()
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("Ayesha")
                 .fetchSemanticsNodes().isNotEmpty()
