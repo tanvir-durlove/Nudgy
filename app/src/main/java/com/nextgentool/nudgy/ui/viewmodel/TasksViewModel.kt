@@ -16,9 +16,11 @@ import com.nextgentool.nudgy.domain.model.SavedViewFilter
 import com.nextgentool.nudgy.domain.usecase.AddSubtaskUseCase
 import com.nextgentool.nudgy.domain.usecase.CreateTaskUseCase
 import com.nextgentool.nudgy.domain.usecase.DeleteTaskUseCase
+import com.nextgentool.nudgy.domain.usecase.EisenhowerQuadrant
 import com.nextgentool.nudgy.domain.usecase.SaveViewUseCase
 import com.nextgentool.nudgy.domain.usecase.ToggleTaskCompletionUseCase
 import com.nextgentool.nudgy.domain.usecase.UpdateTaskUseCase
+import com.nextgentool.nudgy.domain.usecase.moveTargetFor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -330,6 +332,26 @@ class TasksViewModel @Inject constructor(
         viewModelScope.launch {
             repository.moveTaskToPosition(
                 task, targetStatus, targetIndex, visibleItems, updatePlannedStart
+            )
+        }
+    }
+
+    /**
+     * Sprint 4-3 — Eisenhower move (spec §6, Q8=(a)). A quadrant move
+     * is a priority + due change, NOT a position change: the Board's
+     * boardOrder rules do not apply here. Written through the same
+     * UpdateTaskUseCase as every other edit, so the List shows the new
+     * priority/due from the same TaskEntity — and the reminder stays in
+     * sync with the new due time via the repository's update path.
+     */
+    fun moveTaskToQuadrant(task: TaskEntity, quadrant: EisenhowerQuadrant) {
+        viewModelScope.launch {
+            val target = moveTargetFor(quadrant)
+            updateTask(
+                task.copy(
+                    priority = target.priority,
+                    dueDateEpochMillis = target.dueDateEpochMillis
+                )
             )
         }
     }

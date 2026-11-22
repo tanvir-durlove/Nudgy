@@ -68,8 +68,8 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlin.math.roundToInt
 
-/** List vs Board view for the Tasks screen and Today's My Day section. */
-enum class TaskViewMode { LIST, BOARD }
+/** List vs Board view for the Tasks screen, plus the Matrix view that lives in Today's My Day section only (Sprint 4-3, spec §6/Q10). */
+enum class TaskViewMode { LIST, BOARD, MATRIX }
 
 /**
  * Groups filtered list items by Board column. Pure — unit-tested

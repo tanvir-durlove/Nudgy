@@ -49,6 +49,7 @@ import com.nextgentool.nudgy.domain.formatMinutes
 import com.nextgentool.nudgy.domain.startOfDayMillis
 import com.nextgentool.nudgy.domain.timeLabel
 import com.nextgentool.nudgy.ui.components.QuickAddTask
+import com.nextgentool.nudgy.ui.components.EisenhowerMatrix
 import com.nextgentool.nudgy.ui.components.TaskBoard
 import com.nextgentool.nudgy.ui.components.TaskViewMode
 import com.nextgentool.nudgy.ui.theme.NudgyAccent
@@ -334,13 +335,20 @@ fun TodayScreen(
                     color = NudgyCharcoal,
                     modifier = Modifier.weight(1f)
                 )
-                // Sprint 1-4 — List / Board toggle (Feature 5).
+                // Sprint 1-4 — List / Board / Matrix toggle (Feature 5,
+                // Sprint 4-3 — the Matrix is the third view of My Day).
                 TaskViewMode.entries.forEach { mode ->
                     FilterChip(
                         selected = myDayViewMode == mode,
                         onClick = { myDayViewMode = mode },
                         label = {
-                            Text(if (mode == TaskViewMode.LIST) "List" else "Board")
+                            Text(
+                                when (mode) {
+                                    TaskViewMode.LIST -> "List"
+                                    TaskViewMode.BOARD -> "Board"
+                                    TaskViewMode.MATRIX -> "Matrix"
+                                }
+                            )
                         },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = colorResource(R.color.nudgy_teal),
@@ -389,6 +397,20 @@ fun TodayScreen(
                     onToggle = { todayViewModel.toggleTask(it) },
                     onTaskClick = {},
                     sortByBoardOrder = false
+                )
+            } else if (myDayViewMode == TaskViewMode.MATRIX) {
+                // Sprint 4-3 — Eisenhower Matrix over the SAME My Day
+                // items. A quadrant move is a priority + due change
+                // (spec §6), not a position change — the List shows it
+                // from the same TaskEntity, and the Board's boardOrder
+                // rules do not apply here.
+                EisenhowerMatrix(
+                    items = uiState.myDayItems,
+                    onMoveTask = { task, quadrant ->
+                        tasksViewModel.moveTaskToQuadrant(task, quadrant)
+                    },
+                    onToggle = { todayViewModel.toggleTask(it) },
+                    onTaskClick = {}
                 )
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
