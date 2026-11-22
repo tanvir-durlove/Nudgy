@@ -96,10 +96,13 @@ interface GroupRemoteGateway {
     suspend fun getGroupItemIds(groupId: String, limit: Long): List<String>
 
     /**
-     * The creator delete cascade, in order: items, then members, then
-     * mirrors, then the code doc, then the group doc LAST (the code-doc
-     * and mirror delete rules read the group doc). Chunked at 400 writes
-     * per batch (Firestore caps a batch at 500).
+     * The creator delete cascade, in order: items, then notices, then
+     * members, then mirrors, then the code doc, then the group doc LAST
+     * (the code-doc and mirror delete rules read the group doc). Chunked
+     * at 400 writes per batch (Firestore caps a batch at 500).
+     * Sprint 5-4: notices are deleted too — the v1 cascade left the
+     * notices subcollection orphaned (subcollections survive their
+     * parent doc's deletion); spec §10 item 9 requires them gone.
      */
     suspend fun deleteGroupDocs(groupId: String, code: String?)
 
@@ -342,13 +345,16 @@ class FirestoreGroupRemoteGateway(
             .limit(500).get().await().documents.map { it.id }
         val itemIds = groupRef.collection("items")
             .limit(500).get().await().documents.map { it.id }
+        val noticeIds = groupRef.collection("notices")
+            .limit(500).get().await().documents.map { it.id }
         val itemRefs = itemIds.map { groupRef.collection("items").document(it) }
+        val noticeRefs = noticeIds.map { groupRef.collection("notices").document(it) }
         val memberRefs = memberIds.map { groupRef.collection("members").document(it) }
         val mirrorRefs = memberIds.map { uid ->
             fs.collection("users").document(uid)
                 .collection("groupMemberships").document(groupId)
         }
-        for (refs in listOf(itemRefs, memberRefs, mirrorRefs)) {
+        for (refs in listOf(itemRefs, noticeRefs, memberRefs, mirrorRefs)) {
             for (chunk in refs.chunked(400)) {
                 val batch = fs.batch()
                 for (ref in chunk) batch.delete(ref)

@@ -191,6 +191,9 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
     override suspend fun deleteGroupDocs(groupId: String, code: String?) {
         maybeThrow()
         items.remove(groupId)
+        // Sprint 5-4: the real cascade deletes notices too (the v1
+        // cascade left them orphaned); mirror it here.
+        notices.remove(groupId)
         val memberIds = members.remove(groupId)?.keys?.toList() ?: emptyList()
         for (uid in memberIds) mirrors[uid]?.remove(groupId)
         if (code != null) codes.remove(code)

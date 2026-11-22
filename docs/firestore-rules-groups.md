@@ -98,7 +98,7 @@ service cloud.firestore {
 
 ## Delete cascade order (Phase 3)
 
-The app deletes in this order: items → members → mirrors → code doc → group doc LAST. The code-doc and mirror delete rules read the group doc with get(), so deleting the group doc first would make the rest of the cascade fail. The published rules must match this doc before device-testing delete/leave — the older published rules deny all three deletes.
+The app deletes in this order: items → notices → members → mirrors → code doc → group doc LAST. The code-doc and mirror delete rules read the group doc with get(), so deleting the group doc first would make the rest of the cascade fail. The published rules must match this doc before device-testing delete/leave — the older published rules deny all three deletes.
 
 ## Honest limitation
 
@@ -127,7 +127,7 @@ in the privacy policy.
     batch → succeeds (minimization: reconcile gate signal). Non-creator
     member attempts the same → DENIED.
 8. Personal collections: existing per-user rules still pass (no regression).
-9. Creator delete: group doc + items + members + code doc + every mirror delete → all ALLOWED; a non-creator member attempting group delete → DENIED.
+9. Creator delete: group doc + items + notices + members + code doc + every mirror delete → all ALLOWED; a non-creator member attempting group delete → DENIED. (Sprint 5-4: the v1 cascade left notices orphaned — they are deleted with the group now.)
 10. Leave: member deletes own member doc + own mirror → ALLOWED; deleting another member's doc or mirror → DENIED.
 11. Cascade order: mirror/code deletes succeed only while the group doc still exists (their rules read it) — the app deletes the group doc last.
 12. Deleted group: a former member's group-doc listener/poll sees the missing doc and purges local rows; rejoin with the same code recreates membership (no stale local row, fresh poll baseline).

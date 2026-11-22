@@ -1,5 +1,6 @@
 package com.nextgentool.nudgy.data.repository
 
+import android.app.AlarmManager
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -10,6 +11,7 @@ import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
 import com.nextgentool.nudgy.data.model.TaskStatus
+import kotlin.math.abs
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -21,6 +23,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /**
@@ -609,5 +612,169 @@ class GroupRepositoryTest {
         repo.restoreGroupsFromMirror("user-1")
         checkNotNull(db.groupDao().getGroupById("g-1"))
         assertNull(db.groupDao().getGroupById("g-stale"))
+    }
+
+    // ---------------------------------------------------------------- S5-4: leave / rejoin + delete cascade + exact alarm (Q9)
+
+    @Test
+    fun `leaveGroup then rejoin with the same code succeeds and restores membership`() = runTest {
+        val group = createTestGroup()
+        repo.joinGroup("user-2", "Bob", group.code)
+        awaitCondition { fake.itemListenerCount(group.groupId) == 1 }
+        assertTrue(repo.leaveGroup("user-2", group.groupId) is GroupResult.Ok)
+        assertNull(fake.members[group.groupId]?.get("user-2"))
+        assertNull(fake.mirrors["user-2"]?.get(group.groupId))
+        assertNull(db.groupDao().getGroupById(group.groupId))
+
+        val rejoined = repo.joinGroup("user-2", "Bob", group.code)
+        assertTrue(rejoined is GroupResult.Ok)
+        assertEquals(group.groupId, (rejoined as GroupResult.Ok).value.groupId)
+        assertEquals("Bob", fake.members[group.groupId]?.get("user-2")?.get("displayName"))
+        assertEquals(group.groupId, fake.mirrors["user-2"]?.keys?.singleOrNull())
+        checkNotNull(db.groupDao().getGroupById(group.groupId))
+        awaitCondition { fake.itemListenerCount(group.groupId) == 1 }
+    }
+
+    @Test
+    fun `deleteGroup removes notices too`() = runTest {
+        val group = createTestGroup()
+        val notice = repo.createGroupNotice(group.groupId, "user-1", "Creator", "Exam on Friday")
+        assertTrue(notice is GroupResult.Ok)
+        assertEquals(1, fake.notices[group.groupId]?.size)
+        assertTrue(repo.deleteGroup("user-1", group.groupId) is GroupResult.Ok)
+        assertTrue(fake.notices[group.groupId].isNullOrEmpty())
+        assertTrue(fake.groups.isEmpty())
+        assertTrue(fake.codes.isEmpty())
+    }
+
+    /**
+     * Alarm assertions go through Robolectric's shadow AlarmManager —
+     * the repository builds its own ReminderManager on the application
+     * context, so the scheduled alarms are visible here. Each test uses
+     * a distinct due offset so its trigger can never collide with
+     * another test's alarm (±5s tolerance for the ms between the test
+     * and the repository computing the trigger).
+     */
+    private fun scheduledTriggers(): List<Long> {
+        val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        return shadowOf(am).scheduledAlarms.map { it.triggerAtMs }
+    }
+
+    private fun assertAlarmScheduled(expectedTrigger: Long) {
+        assertTrue(
+            "expected an alarm at ~$expectedTrigger, got ${scheduledTriggers()}",
+            scheduledTriggers().any { abs(it - expectedTrigger) < 5_000L }
+        )
+    }
+
+    private fun assertAlarmAbsent(expectedTrigger: Long) {
+        assertTrue(
+            "expected no alarm at ~$expectedTrigger, got ${scheduledTriggers()}",
+            scheduledTriggers().none { abs(it - expectedTrigger) < 5_000L }
+        )
+    }
+
+    @Test
+    fun `createGroupTask with a reminder arms an exact alarm on the creator phone`() = runTest {
+        val group = createTestGroup()
+        val now = System.currentTimeMillis()
+        val due = now + 10 * 3_600_000L
+        val created = repo.createGroupTask(
+            group.groupId, "user-1", "Homework", null,
+            due, Priority.MEDIUM, TaskCategory.WORK, true
+        )
+        assertTrue(created is GroupResult.Ok)
+        // The 2h-before-due lead: trigger = due - 2h.
+        assertAlarmScheduled(due - 2 * 3_600_000L)
+    }
+
+    @Test
+    fun `a group task arriving by poll arms its alarm`() = runTest {
+        val group = createTestGroup()
+        val now = System.currentTimeMillis()
+        val doc = GroupItemDoc(
+            id = "t-arrive", kind = "TASK", title = "Arrived",
+            dueDateEpochMillis = now + 11 * 3_600_000L,
+            reminderSet = true,
+            reminderEpochMillis = now + 9 * 3_600_000L
+        )
+        repo.applyPolledDocs("user-1", group.groupId, listOf(doc))
+        checkNotNull(db.taskDao().getTaskById("t-arrive"))
+        assertAlarmScheduled(now + 9 * 3_600_000L)
+    }
+
+    @Test
+    fun `turning a group task reminder off cancels its alarm`() = runTest {
+        val group = createTestGroup()
+        val now = System.currentTimeMillis()
+        val due = now + 12 * 3_600_000L
+        val created = repo.createGroupTask(
+            group.groupId, "user-1", "Homework", null,
+            due, Priority.MEDIUM, TaskCategory.WORK, true
+        )
+        val task = (created as GroupResult.Ok).value
+        assertAlarmScheduled(due - 2 * 3_600_000L)
+
+        val updated = repo.updateGroupTask(
+            group.groupId, "user-1", task.copy(reminderSet = false, reminderEpochMillis = null)
+        )
+        assertTrue(updated is GroupResult.Ok)
+        assertAlarmAbsent(due - 2 * 3_600_000L)
+    }
+
+    @Test
+    fun `a reminder-off arrival cancels the armed alarm`() = runTest {
+        val group = createTestGroup()
+        val now = System.currentTimeMillis()
+        val due = now + 13 * 3_600_000L
+        val created = repo.createGroupTask(
+            group.groupId, "user-1", "Homework", null,
+            due, Priority.MEDIUM, TaskCategory.WORK, true
+        )
+        val task = (created as GroupResult.Ok).value
+        assertAlarmScheduled(due - 2 * 3_600_000L)
+
+        val doc = GroupItemDoc(
+            id = task.id, kind = "TASK", title = "Homework",
+            dueDateEpochMillis = due, reminderSet = false, reminderEpochMillis = null
+        )
+        repo.applyPolledDocs("user-1", group.groupId, listOf(doc))
+        assertAlarmAbsent(due - 2 * 3_600_000L)
+    }
+
+    @Test
+    fun `completing a group task cancels its alarm and reopening re-arms it`() = runTest {
+        val group = createTestGroup()
+        val now = System.currentTimeMillis()
+        val due = now + 14 * 3_600_000L
+        val created = repo.createGroupTask(
+            group.groupId, "user-1", "Homework", null,
+            due, Priority.MEDIUM, TaskCategory.WORK, true
+        )
+        val task = (created as GroupResult.Ok).value
+        assertAlarmScheduled(due - 2 * 3_600_000L)
+
+        assertTrue(repo.setGroupTaskCompleted(group.groupId, task.id, "user-1", true) is GroupResult.Ok)
+        assertAlarmAbsent(due - 2 * 3_600_000L)
+
+        assertTrue(repo.setGroupTaskCompleted(group.groupId, task.id, "user-1", false) is GroupResult.Ok)
+        assertAlarmScheduled(due - 2 * 3_600_000L)
+    }
+
+    @Test
+    fun `reconcileGroupItems with an empty set cancels the group alarms`() = runTest {
+        val group = createTestGroup()
+        val now = System.currentTimeMillis()
+        val due = now + 15 * 3_600_000L
+        val created = repo.createGroupTask(
+            group.groupId, "user-1", "Homework", null,
+            due, Priority.MEDIUM, TaskCategory.WORK, true
+        )
+        assertTrue(created is GroupResult.Ok)
+        assertAlarmScheduled(due - 2 * 3_600_000L)
+
+        repo.reconcileGroupItems("user-1", group.groupId, emptySet())
+        assertNull(db.taskDao().getTaskById((created as GroupResult.Ok).value.id))
+        assertAlarmAbsent(due - 2 * 3_600_000L)
     }
 }

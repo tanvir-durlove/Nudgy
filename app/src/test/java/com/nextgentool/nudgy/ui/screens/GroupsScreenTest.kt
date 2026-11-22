@@ -46,6 +46,11 @@ import org.robolectric.annotation.Config
  * (feature 34): the same screen with groupNoticesEnabled=true — the
  * notices card (newest first), the creator-only Send notice sheet,
  * and openGroupId opening the detail (the tap entry point).
+ *
+ * Sprint 5-4 — delete/leave (spec §7, feature 33): the same screen
+ * with groupWorkEnabled=true — the creator sees Delete group, members
+ * see Leave group; both open a confirm dialog that fires the
+ * callback. The buttons are not rendered at all when the flag is off.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -78,8 +83,11 @@ class GroupsScreenTest {
         membersOverride: List<GroupMember>? = null,
         groupTasksEnabled: Boolean = false,
         groupNoticesEnabled: Boolean = false,
+        groupWorkEnabled: Boolean = false,
         noticesOverride: List<GroupNotice> = emptyList(),
         onSendNotice: (String, String) -> Unit = { _, _ -> },
+        onDeleteGroup: (String) -> Unit = {},
+        onLeaveGroup: (String) -> Unit = {},
         onToggleTask: (TaskEntity) -> Unit = {},
         onCreateGroup: suspend (String) -> GroupResult<GroupEntity> =
             { GroupResult.Ok(group()) },
@@ -105,6 +113,9 @@ class GroupsScreenTest {
                     completions = completions,
                     groupTasksEnabled = groupTasksEnabled,
                     groupNoticesEnabled = groupNoticesEnabled,
+                    groupWorkEnabled = groupWorkEnabled,
+                    onDeleteGroup = onDeleteGroup,
+                    onLeaveGroup = onLeaveGroup,
                     onObserveNotices = { flowOf(noticesOverride) },
                     onRefreshNotices = { noticesOverride },
                     onSendNotice = onSendNotice,
@@ -439,6 +450,50 @@ class GroupsScreenTest {
         composeRule.onNodeWithText("All groups").assertDoesNotExist()
         composeRule.onNodeWithText("DIU 41").assertExists()
     }
+
+    // ---- Sprint 5-4: delete / leave (feature 33, spec §7)
+
+    @Test
+    fun `creator sees Delete group and confirming fires the callback`() {
+        var deleted: String? = null
+        render(
+            user = creator,
+            groupWorkEnabled = true,
+            initialSelectedGroup = group(),
+            onDeleteGroup = { deleted = it }
+        )
+
+        composeRule.onNodeWithText("Delete group").performScrollTo().performClick()
+        composeRule.onNodeWithText("Delete this group?").assertIsDisplayed()
+        composeRule.onNodeWithText("Delete").performClick()
+
+        assertEquals("g-1", deleted)
+    }
+
+    @Test
+    fun `member sees Leave group and confirming fires the callback`() {
+        var left: String? = null
+        render(
+            groupWorkEnabled = true,
+            initialSelectedGroup = group(),
+            onLeaveGroup = { left = it }
+        )
+
+        composeRule.onNodeWithText("Leave group").performScrollTo().performClick()
+        composeRule.onNodeWithText("Leave this group?").assertIsDisplayed()
+        composeRule.onNodeWithText("Leave").performClick()
+
+        assertEquals("g-1", left)
+    }
+
+    @Test
+    fun `delete and leave buttons are hidden when groupWorkEnabled is off`() {
+        render(initialSelectedGroup = group())
+
+        composeRule.onNodeWithText("Delete group").assertDoesNotExist()
+        composeRule.onNodeWithText("Leave group").assertDoesNotExist()
+    }
+
 }
 
 /** Sprint 5-1 — the invite link format (pure, no Compose). */

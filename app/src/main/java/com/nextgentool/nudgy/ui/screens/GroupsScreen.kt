@@ -130,10 +130,13 @@ import kotlinx.coroutines.flow.flowOf
  *   are gated behind groupWorkEnabled and land in S5-2/S5-4; until then
  *   the detail shows members + a placeholder.
  * - Sprint 5-2: the task/schedule sections moved behind groupTasksEnabled
- *   (split from groupWorkEnabled, which still gates delete/leave for
- *   S5-4). Each group task row shows the shared completion count
+ *   (split from groupWorkEnabled, which gates delete/leave). Each group
+ *   task row shows the shared completion count
  *   ("৩/৫ করেছে", denominator = current members); tapping the count
  *   lists who completed it. The count is tasks-only (Q4=(a)).
+ * - Sprint 5-4: delete/leave land (feature 33) — the creator's Delete
+ *   group cascade and the member's Leave + rejoin, both confirmed, now
+ *   behind groupWorkEnabled (ON in the NavHost).
  * - Sprint 5-3: the notices card behind groupNoticesEnabled — text-only
  *   admin notices (Q2=(a)), newest first, live via the listener; only
  *   the creator sees Send notice. A notification tap opens the detail
@@ -147,10 +150,10 @@ fun GroupsScreen(
     allEvents: List<CalendarEventEntity>,
     onCreateGroup: suspend (name: String) -> GroupResult<GroupEntity>,
     onJoinGroup: suspend (code: String) -> GroupResult<GroupEntity>,
-    // Sprint 5-1 — the group-work callbacks (tasks, schedules,
-    // delete/leave) land in S5-2/S5-4, so they default to no-ops here:
-    // the S5-1 call site passes only the create/join/member wiring and
-    // the detail shows members + a placeholder, never dead buttons.
+    // The group-work callbacks (tasks, schedules, delete/leave) all
+    // landed by S5-4; they still default to no-ops here so the screen
+    // stays renderable in tests that pass only the create/join/member
+    // wiring, never dead buttons.
     onCreateGroupTask: (
         groupId: String, title: String, description: String?, dueEpochMillis: Long,
         priority: Priority, category: TaskCategory, reminderSet: Boolean
@@ -176,8 +179,9 @@ fun GroupsScreen(
     // Sprint 5-2 — task/schedule sections. Split from groupWorkEnabled
     // (S5-4: delete/leave) so the task UI lands without dead buttons.
     groupTasksEnabled: Boolean = false,
-    // Sprint 5-1 — group delete/leave lands in S5-4. Until then the
-    // buttons are not rendered at all.
+    // Sprint 5-4 — group delete/leave (feature 33, spec §7): the
+    // creator's Delete group cascade and the member's Leave + rejoin,
+    // both confirmed. ON in the NavHost.
     groupWorkEnabled: Boolean = false,
     // Sprint 5-3 — notices (feature 32, Q2=(a) text-only). Same
     // observe + refresh pattern as members; the list is live via the
@@ -1280,8 +1284,8 @@ fun GroupsScreen(
     val activeGroup = selectedGroup
     // Sprint 5-2 — the task/schedule/edit/detail sheets and the
     // item-delete dialogs live behind groupTasksEnabled (their buttons
-    // are gated above); the group delete/leave dialogs stay behind
-    // groupWorkEnabled for S5-4.
+    // are gated above); the group delete/leave dialogs live behind
+    // groupWorkEnabled (S5-4, ON in the NavHost).
     if (groupTasksEnabled) {
     if (showCreateTask && activeGroup != null) {
         CreateTaskSheet(
@@ -1455,9 +1459,8 @@ fun GroupsScreen(
         )
     }
     }
-    // Sprint 5-4 — the group delete/leave dialogs stay behind
-    // groupWorkEnabled; unreachable until then (their buttons are
-    // gated above).
+    // Sprint 5-4 — the group delete/leave dialogs, behind
+    // groupWorkEnabled (their buttons are gated above).
     if (groupWorkEnabled) {
     deleteGroupTarget?.let { target ->
         AlertDialog(

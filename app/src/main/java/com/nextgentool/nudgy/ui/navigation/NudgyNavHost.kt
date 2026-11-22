@@ -485,6 +485,13 @@ fun NudgyNavHost(
                 onToggleTask = { task -> groupsViewModel.toggleGroupTask(task) },
                 completions = completions,
                 groupTasksEnabled = true,
+                // Sprint 5-4 — delete/leave (feature 33, spec §7):
+                // creator delete cascade + member leave/rejoin, with
+                // confirm dialogs. The buttons live behind
+                // groupWorkEnabled in the screen.
+                groupWorkEnabled = true,
+                onDeleteGroup = { groupsViewModel.deleteGroup(it) },
+                onLeaveGroup = { groupsViewModel.leaveGroup(it) },
                 // Sprint 5-3 — notices (feature 32, Q2=(a) text-only)
                 // + the notification-tap entry point (feature 34).
                 groupNoticesEnabled = true,
