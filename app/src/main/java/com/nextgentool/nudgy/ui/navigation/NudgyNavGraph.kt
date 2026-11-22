@@ -11,8 +11,9 @@ package com.nextgentool.nudgy.ui.navigation
  *
  * The 5 destinations are the locked design (2026-11-15): Today |
  * Calendar | centre Quick Chat | Groups | Settings. Board lives inside
- * Today (List / Board toggle) and Stats lives behind the progress ring
- * + Settings — neither is a destination.
+ * Today (List / Board toggle) and the weekly review lives behind the
+ * progress ring + Settings as its own route — not a bottom destination
+ * (Sprint 4-4, spec §7/Q9).
  *
  * Plan is NOT a destination: it is the nested route "today/plan"
  * inside the Today graph (Sprint 1 spec §5). It stays out of `all`, so
@@ -32,6 +33,11 @@ sealed class NudgyRoute(val route: String) {
     /** Focus timer — NOT a bottom destination (reached from Today, S4-1). */
     data object Focus : NudgyRoute("focus")
 
+    /** Weekly review — NOT a bottom destination (reached from the Today
+     * progress ring and from Settings, S4-4). The one report: the
+     * week's lists + focus minutes + streaks (spec §7, Q9=(a)). */
+    data object WeeklyReview : NudgyRoute("weekly_review")
+
     /** Templates — NOT a bottom destination (reached from Tasks, S1-4). */
     data object Templates : NudgyRoute("templates")
 
@@ -46,9 +52,10 @@ sealed class NudgyRoute(val route: String) {
         // NudgyRoute.getRoute:22). A get() evaluates after init completes.
         val startDestination: NudgyRoute get() = Today
 
-        // Tasks, Templates and Focus are in `all` (so fromRoute resolves and no
-        // bottom tab is highlighted there) but NOT in bottomNavEntries.
-        val all: List<NudgyRoute> get() = listOf(Today, Calendar, Chat, Groups, Settings, Tasks, Templates, Focus)
+        // Tasks, Templates, Focus and WeeklyReview are in `all` (so
+        // fromRoute resolves and no bottom tab is highlighted there)
+        // but NOT in bottomNavEntries.
+        val all: List<NudgyRoute> get() = listOf(Today, Calendar, Chat, Groups, Settings, Tasks, Templates, Focus, WeeklyReview)
 
         fun fromRoute(route: String?): NudgyRoute =
             all.firstOrNull { it.route == route } ?: Today

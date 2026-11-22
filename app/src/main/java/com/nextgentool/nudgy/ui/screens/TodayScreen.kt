@@ -91,6 +91,10 @@ fun TodayScreen(
     // Sprint 4-1: entry point to the Focus timer (Q10=(a)). Defaults
     // to no-op so older call sites keep compiling.
     onFocusClick: () -> Unit = {},
+    // Sprint 4-4: entry point to the weekly review screen (Q9=(a)) —
+    // the progress ring opens the week's summary. Defaults to no-op
+    // so older call sites keep compiling.
+    onWeeklyReviewClick: () -> Unit = {},
     // Sprint 1-1 fix: the Today quick-add (Feature 1) shares TasksViewModel
     // with TasksScreen — a separate instance scoped to this destination,
     // same singleton repository, so the guards (empty title, double-tap)
@@ -138,14 +142,20 @@ fun TodayScreen(
                     color = NudgyCharcoal
                 )
                 Spacer(modifier = Modifier.height(12.dp))
+                // Sprint 4-4 — the progress ring opens the week's
+                // summary (spec §7, Q9=(a)): completed count, focus
+                // minutes and streaks on one screen.
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .size(64.dp)
+                        .clip(CircleShape)
                         .background(
                             color = colorResource(R.color.nudgy_cream),
                             shape = CircleShape
                         )
+                        .clickable { onWeeklyReviewClick() }
+                        .testTag("progress_ring")
                 ) {
                     Text(
                         text = "$percent%",
@@ -535,7 +545,7 @@ fun TodayScreen(
         // report — Sprint 4 owns numbers (feature 27).
         Spacer(modifier = Modifier.height(24.dp))
         uiState.weeklyReview?.let { review ->
-            WeeklyReviewCard(review = review)
+            WeeklyReviewCard(review = review, stats = uiState.weeklyReviewStats)
         }
         Spacer(modifier = Modifier.height(24.dp))
     }
@@ -548,9 +558,19 @@ fun TodayScreen(
  * only (no new table). A finished row shows the hand-written actual
  * time when one was logged (Feature 18) — list content, not a report.
  * Group rows carry the same "Group" badge as everywhere else.
+ *
+ * Sprint 4-4 — the card also carries the review's numbers (Feature
+ * 27): focus minutes this week + best streaks, from real session /
+ * check-in data ([stats]). Null when the FocusHabitRepository is not
+ * wired — the card then shows its lists only, exactly as before.
+ * The weekly review screen reuses this card, so the inline card and
+ * the screen can never disagree.
  */
 @Composable
-private fun WeeklyReviewCard(review: com.nextgentool.nudgy.domain.usecase.WeeklyReview) {
+fun WeeklyReviewCard(
+    review: com.nextgentool.nudgy.domain.usecase.WeeklyReview,
+    stats: com.nextgentool.nudgy.domain.usecase.WeeklyReviewStats? = null
+) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -581,6 +601,9 @@ private fun WeeklyReviewCard(review: com.nextgentool.nudgy.domain.usecase.Weekly
                 style = MaterialTheme.typography.bodySmall,
                 color = NudgyMuted
             )
+            if (stats != null) {
+                WeeklyReviewStatsBlock(stats = stats)
+            }
             WeeklyReviewSection(
                 title = "Finished",
                 tasks = review.finished,
@@ -602,6 +625,94 @@ private fun WeeklyReviewCard(review: com.nextgentool.nudgy.domain.usecase.Weekly
         }
     }
 }
+
+/**
+ * Sprint 4-4 — the review's numbers inside the card (spec §7).
+ *
+ * Focus minutes this week (completed FOCUS sessions only, breaks and
+ * cancelled sessions never count) + the best current streak and the
+ * best longest streak across all habits. All text uses the theme
+ * tokens (PR #86); the numbers are real data, never cached counters.
+ */
+@Composable
+private fun WeeklyReviewStatsBlock(
+    stats: com.nextgentool.nudgy.domain.usecase.WeeklyReviewStats
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = "This week",
+            style = MaterialTheme.typography.titleSmall,
+            color = NudgyCharcoal
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("weekly_review_focus_minutes")
+        ) {
+            Text(
+                text = "Focus",
+                style = MaterialTheme.typography.bodyMedium,
+                color = NudgyCharcoal,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                text = formatMinutes(stats.focusMinutesThisWeek),
+                style = MaterialTheme.typography.bodyMedium,
+                color = NudgyMuted
+            )
+        }
+        if (stats.habits.isEmpty()) {
+            Text(
+                text = "No habits yet — streaks start with your first habit",
+                style = MaterialTheme.typography.bodyMedium,
+                color = NudgyMuted,
+                modifier = Modifier.testTag("weekly_review_no_habits")
+            )
+        } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("weekly_review_current_streak")
+            ) {
+                Text(
+                    text = "Current streak",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = NudgyCharcoal,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = streakDays(stats.bestCurrentStreak),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = NudgyMuted
+                )
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("weekly_review_best_streak")
+            ) {
+                Text(
+                    text = "Best streak",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = NudgyCharcoal,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = streakDays(stats.bestLongestStreak),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = NudgyMuted
+                )
+            }
+        }
+    }
+}
+
+/** "3 days" / "1 day" / "0 days" — the streak value, plainly. */
+private fun streakDays(days: Int): String =
+    if (days == 1) "1 day" else "$days days"
 
 @Composable
 private fun WeeklyReviewSection(
