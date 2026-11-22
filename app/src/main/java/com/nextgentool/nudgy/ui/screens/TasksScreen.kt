@@ -268,10 +268,13 @@ fun TasksScreen(
                 )
             }
 
-            // Sprint 1-4 — List / Board toggle (Feature 5).
+            // Sprint 1-4 — List / Board toggle (Feature 5). The Matrix
+            // (Sprint 4-3) lives in Today's My Day section only — it is
+            // deliberately not offered here, so the toggle stays two
+            // modes even though TaskViewMode has a third entry.
             item(key = "view_mode") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TaskViewMode.entries.forEach { mode ->
+                    listOf(TaskViewMode.LIST, TaskViewMode.BOARD).forEach { mode ->
                         FilterChip(
                             selected = viewMode == mode,
                             onClick = { viewMode = mode },
