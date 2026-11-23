@@ -27,12 +27,15 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
     val mirrors = mutableMapOf<String, MutableMap<String, MutableMap<String, Any?>>>()
     val items = mutableMapOf<String, MutableMap<String, MutableMap<String, Any?>>>()
     val notices = mutableMapOf<String, MutableMap<String, MutableMap<String, Any?>>>()
+    val activity = mutableMapOf<String, MutableMap<String, MutableMap<String, Any?>>>()
 
     private val itemListeners =
         mutableMapOf<String, MutableList<(List<GroupItemChange>) -> Unit>>()
     private val groupDocListeners = mutableMapOf<String, MutableList<() -> Unit>>()
     private val noticeListeners =
         mutableMapOf<String, MutableList<(List<GroupNotice>) -> Unit>>()
+    private val activityListeners =
+        mutableMapOf<String, MutableList<(List<GroupActivityEntry>) -> Unit>>()
 
     var failNextWith: Exception? = null
     var collideFirstCodeCheck = false
@@ -44,6 +47,7 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
     fun itemListenerCount(groupId: String): Int = itemListeners[groupId]?.size ?: 0
     fun groupDocListenerCount(groupId: String): Int = groupDocListeners[groupId]?.size ?: 0
     fun noticeListenerCount(groupId: String): Int = noticeListeners[groupId]?.size ?: 0
+    fun activityListenerCount(groupId: String): Int = activityListeners[groupId]?.size ?: 0
 
     /** Delivers listener changes to every registered items listener for the group. */
     fun emitItemChanges(groupId: String, changes: List<GroupItemChange>) {
@@ -58,6 +62,11 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
     /** Delivers a notices snapshot to every registered notices listener for the group. */
     fun emitNotices(groupId: String, notices: List<GroupNotice>) {
         noticeListeners[groupId]?.toList()?.forEach { it(notices) }
+    }
+
+    /** Delivers an activity snapshot to every registered activity listener for the group. */
+    fun emitActivity(groupId: String, entries: List<GroupActivityEntry>) {
+        activityListeners[groupId]?.toList()?.forEach { it(entries) }
     }
 
     /** Seeds one notice doc (as the real gateway would have stored it). */
@@ -194,6 +203,8 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
         // Sprint 5-4: the real cascade deletes notices too (the v1
         // cascade left them orphaned); mirror it here.
         notices.remove(groupId)
+        // Sprint 5-5: same for the activity history.
+        activity.remove(groupId)
         val memberIds = members.remove(groupId)?.keys?.toList() ?: emptyList()
         for (uid in memberIds) mirrors[uid]?.remove(groupId)
         if (code != null) codes.remove(code)
@@ -250,6 +261,22 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
         }?.sortedBy { it.createdAtEpochMillis } ?: emptyList()
     }
 
+    override suspend fun addActivity(groupId: String, fields: Map<String, Any>): String {
+        maybeThrow()
+        val id = UUID.randomUUID().toString()
+        activity.getOrPut(groupId) { mutableMapOf() }[id] =
+            (fields + mapOf("createdAt" to System.currentTimeMillis())).toMutableMap()
+        return id
+    }
+
+    override suspend fun getActivity(groupId: String): List<Pair<String, Map<String, Any?>>> {
+        maybeThrow()
+        return activity[groupId]?.map { (id, fields) -> id to fields.toMap() }
+            ?.sortedByDescending { (_, fields) ->
+                (fields["createdAt"] as? Number)?.toLong() ?: 0L
+            } ?: emptyList()
+    }
+
     override fun addItemsListener(
         groupId: String,
         onChanges: (List<GroupItemChange>) -> Unit
@@ -263,6 +290,20 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
         val list = groupDocListeners.getOrPut(groupId) { mutableListOf() }
         list.add(onDeleted)
         return { list.remove(onDeleted) }
+    }
+
+    override fun addActivityListener(
+        groupId: String,
+        onActivity: (List<GroupActivityEntry>) -> Unit
+    ): () -> Unit {
+        val list = activityListeners.getOrPut(groupId) { mutableListOf() }
+        list.add(onActivity)
+        // The real listener fires its initial snapshot on attach.
+        onActivity(
+            activity[groupId]?.mapNotNull { (id, fields) -> activityFromDoc(id, groupId, fields) }
+                ?.sortedByDescending { it.createdAtEpochMillis } ?: emptyList()
+        )
+        return { list.remove(onActivity) }
     }
 
     override fun addNoticesListener(

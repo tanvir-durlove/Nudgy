@@ -10,6 +10,7 @@ import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
 import com.nextgentool.nudgy.data.repository.CalendarRepository
+import com.nextgentool.nudgy.data.repository.GroupActivityEntry
 import com.nextgentool.nudgy.data.repository.GroupCompletion
 import com.nextgentool.nudgy.data.repository.GroupMember
 import com.nextgentool.nudgy.data.repository.GroupNotice
@@ -94,6 +95,27 @@ class GroupsViewModel @Inject constructor(
      */
     private val _groupTaskError = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
     val groupTaskError: SharedFlow<String> = _groupTaskError
+
+    /** The activity history of one group, newest first (live — the listener feeds it). */
+    fun observeActivity(groupId: String): Flow<List<GroupActivityEntry>> =
+        groupRepository.observeActivity(groupId)
+
+    /** One-shot activity refresh for the detail (warms the flow before the listener fires). */
+    suspend fun refreshActivity(groupId: String): List<GroupActivityEntry> =
+        groupRepository.refreshActivity(groupId)
+
+    /**
+     * Sprint 5-5 — creator-only assign (feature 36, Q3=(b)). The repo
+     * enforces the creator check and the member check; a member
+     * calling this gets the Err on [groupTaskError] (the UI never
+     * shows them the button). A null assignee unassigns.
+     */
+    fun assignGroupTask(groupId: String, itemId: String, assigneeUid: String?) {
+        viewModelScope.launch {
+            val result = groupRepository.assignGroupTask(groupId, userId, itemId, assigneeUid)
+            if (result is GroupResult.Err) _groupTaskError.emit(result.message)
+        }
+    }
 
     /** The notices of one group, newest first (live — the listener feeds it). */
     fun observeNotices(groupId: String): Flow<List<GroupNotice>> =

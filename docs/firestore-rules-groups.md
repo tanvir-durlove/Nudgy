@@ -256,3 +256,50 @@ notices since a watermark) through the member's own membership, so
 the existing read rules cover it. The notification tap is local
 (MainActivity → NudgyApp → Groups detail) — no Firestore write.
 No new checklist items; items 1–20 still apply unchanged.
+
+## S5-5 additions (2026-11-22, spec §8 S5-5 — NOT deployed yet)
+
+## What changed and why
+
+1. **New `groups/{gid}/activity/{activityId}` match block (feature 36).**
+   The only rules change in S5-5. Read: any member. Create: the writer
+   must be a member, the entry's `actorUid` must be their own UID, the
+   `type` must be one of the 12 fixed types, and `createdAt` must be a
+   timestamp. The four member-action types (`member_joined`,
+   `member_left`, `task_completed`, `task_reopened`) pass on that alone;
+   the other eight (group/task/schedule/notice writes + assign) additionally
+   require the actor to be the group's creator — mirroring the action
+   rules, so a member can never record a task creation or an assignment
+   they did not (and could not) perform. Update: never (append-only).
+   Delete: creator only (the S5-4 cascade deletes the activity
+   subcollection with the group).
+2. **No items-rules change for assign.** Assign writes `assigneeUid` /
+   `assigneeName` on the item doc through the creator's unrestricted
+   update branch — no new rule needed. A member cannot smuggle an
+   assign through the completion path: `isCompletionOnlyUpdate`
+   allows exactly {completedBy, completedCount, updatedAt}. The item
+   create rule does not validate the assignee fields (assign-at-create
+   is not a UI flow; extra fields are unchecked on create, same as
+   `description`).
+
+## Backward compatibility with the 1.0.5 production app
+
+The 1.0.5 app never reads or writes `activity` — the new block is
+additive and invisible to it. The 1.0.5 app never writes `assigneeUid` /
+`assigneeName` — the items rules are unchanged, so its behaviour does
+not change.
+
+## S5-5 rules test checklist (emulator — run before deploying)
+
+21. Member records a completion entry (actorUid == own UID, type
+    `task_completed`, createdAt timestamp) → ALLOWED. Same entry with
+    another member's UID as actorUid → DENIED. Entry with a type
+    outside the 12 → DENIED. Entry with createdAt as a number, not a
+    timestamp → DENIED.
+22. Member records a `task_created` entry → DENIED (creator-only
+    type). Creator records it → ALLOWED. Member records
+    `task_assigned` → DENIED. Creator records it → ALLOWED.
+23. Non-member reads the activity subcollection → DENIED. Member
+    updates an activity doc → DENIED. Member deletes one → DENIED.
+    Creator deletes one → ALLOWED.
+24. All S5-0/S5-2 checklist items 1–20 still pass (no regression).

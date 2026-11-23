@@ -12,6 +12,8 @@ import androidx.compose.ui.test.performTextInput
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
+import com.nextgentool.nudgy.data.repository.GroupActivityEntry
+import com.nextgentool.nudgy.data.repository.GroupActivityType
 import com.nextgentool.nudgy.data.repository.GroupCompletion
 import com.nextgentool.nudgy.data.repository.GroupMember
 import com.nextgentool.nudgy.data.repository.GroupNotice
@@ -84,7 +86,10 @@ class GroupsScreenTest {
         groupTasksEnabled: Boolean = false,
         groupNoticesEnabled: Boolean = false,
         groupWorkEnabled: Boolean = false,
+        groupAssignEnabled: Boolean = false,
         noticesOverride: List<GroupNotice> = emptyList(),
+        activityOverride: List<GroupActivityEntry> = emptyList(),
+        onAssignGroupTask: (String, String, String?) -> Unit = { _, _, _ -> },
         onSendNotice: (String, String) -> Unit = { _, _ -> },
         onDeleteGroup: (String) -> Unit = {},
         onLeaveGroup: (String) -> Unit = {},
@@ -114,10 +119,14 @@ class GroupsScreenTest {
                     groupTasksEnabled = groupTasksEnabled,
                     groupNoticesEnabled = groupNoticesEnabled,
                     groupWorkEnabled = groupWorkEnabled,
+                    groupAssignEnabled = groupAssignEnabled,
+                    onAssignGroupTask = onAssignGroupTask,
                     onDeleteGroup = onDeleteGroup,
                     onLeaveGroup = onLeaveGroup,
                     onObserveNotices = { flowOf(noticesOverride) },
                     onRefreshNotices = { noticesOverride },
+                    onObserveActivity = { flowOf(activityOverride) },
+                    onRefreshActivity = { activityOverride },
                     onSendNotice = onSendNotice,
                     openGroupId = openGroupId,
                     prefillJoinCode = prefillJoinCode,
@@ -492,6 +501,139 @@ class GroupsScreenTest {
 
         composeRule.onNodeWithText("Delete group").assertDoesNotExist()
         composeRule.onNodeWithText("Leave group").assertDoesNotExist()
+    }
+
+    // ---- Sprint 5-5: assign + activity history (feature 36, Q10=(a))
+
+    private fun activity(
+        id: String = "a-1",
+        type: String = GroupActivityType.TASK_CREATED,
+        actorUid: String = "user-1",
+        actorName: String = "Ayesha",
+        itemTitle: String? = "Homework",
+        assigneeName: String? = null,
+        createdAt: Long = 2_000L
+    ) = GroupActivityEntry(
+        id, "g-1", actorUid, actorName, type,
+        itemId = "i-1", itemTitle = itemTitle,
+        assigneeName = assigneeName, createdAtEpochMillis = createdAt
+    )
+
+    @Test
+    fun `creator detail shows the assignee name on a task row`() {
+        render(
+            user = creator,
+            groupTasksEnabled = true,
+            groupAssignEnabled = true,
+            allTasks = listOf(
+                groupTask().copy(assigneeUid = "user-2", assigneeName = "Tanvir")
+            ),
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithText("Assigned to Tanvir").assertExists()
+    }
+
+    @Test
+    fun `creator assign button opens the dialog and picking a member fires the callback`() {
+        val assigned = mutableListOf<Triple<String, String, String?>>()
+        render(
+            user = creator,
+            groupTasksEnabled = true,
+            groupAssignEnabled = true,
+            allTasks = listOf(groupTask()),
+            onAssignGroupTask = { groupId, taskId, uid -> assigned += Triple(groupId, taskId, uid) },
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithTag("assign_task_open").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Assign task").assertIsDisplayed()
+        composeRule.onNodeWithTag("assign_member_row_user-2").performClick()
+        composeRule.waitForIdle()
+
+        assertEquals(listOf(Triple("g-1", "t-1", "user-2")), assigned)
+    }
+
+    @Test
+    fun `assign dialog marks the current assignee and Nobody unassigns`() {
+        val assigned = mutableListOf<Triple<String, String, String?>>()
+        render(
+            user = creator,
+            groupTasksEnabled = true,
+            groupAssignEnabled = true,
+            allTasks = listOf(
+                groupTask().copy(assigneeUid = "user-2", assigneeName = "Tanvir")
+            ),
+            onAssignGroupTask = { groupId, taskId, uid -> assigned += Triple(groupId, taskId, uid) },
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithTag("assign_task_open").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Tanvir (assigned)").assertExists()
+        composeRule.onNodeWithTag("assign_member_row_nobody").performClick()
+        composeRule.waitForIdle()
+
+        assertEquals(listOf(Triple("g-1", "t-1", null)), assigned)
+    }
+
+    @Test
+    fun `member detail shows the assignee but no assign button`() {
+        render(
+            user = memberUser,
+            groupTasksEnabled = true,
+            groupAssignEnabled = true,
+            allTasks = listOf(
+                groupTask().copy(assigneeUid = "user-2", assigneeName = "Tanvir")
+            ),
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithText("Assigned to Tanvir").assertExists()
+        composeRule.onNodeWithTag("assign_task_open").assertDoesNotExist()
+    }
+
+    @Test
+    fun `activity card lists entries with their sentence`() {
+        render(
+            user = creator,
+            groupTasksEnabled = true,
+            groupAssignEnabled = true,
+            activityOverride = listOf(
+                activity("a-2", GroupActivityType.TASK_ASSIGNED, assigneeName = "Tanvir", createdAt = 3_000L),
+                activity("a-1", GroupActivityType.TASK_CREATED, createdAt = 2_000L)
+            ),
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithTag("activity_card").assertExists()
+        composeRule.onNodeWithText("Ayesha assigned \u201CHomework\u201D to Tanvir").assertExists()
+        composeRule.onNodeWithText("Ayesha created task \u201CHomework\u201D").assertExists()
+    }
+
+    @Test
+    fun `activity card shows the empty state when there is no history`() {
+        render(
+            user = creator,
+            groupTasksEnabled = true,
+            groupAssignEnabled = true,
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithText("No activity yet.").assertExists()
+    }
+
+    @Test
+    fun `activity card is hidden when groupAssignEnabled is off`() {
+        render(
+            user = creator,
+            groupTasksEnabled = true,
+            activityOverride = listOf(activity()),
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithTag("activity_card").assertDoesNotExist()
     }
 
 }

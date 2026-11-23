@@ -189,6 +189,36 @@ service cloud.firestore {
         get(/databases/$(database)/documents/groups/$(gid)).data.creatorUid == request.auth.uid;
     }
 
+    // Sprint 5-5 (feature 36): activity history. Members read it;
+    // entries are written only by the member who did the action
+    // (actorUid == auth.uid) with a type from the fixed set —
+    // creator-only actions additionally require the actor to be the
+    // creator, mirroring the action rules (a member cannot record a
+    // task creation or an assignment). No update — history is
+    // append-only; only the creator deletes (the S5-4 cascade).
+    function isValidActivity(data) {
+      return data.actorUid == request.auth.uid &&
+        data.type is string &&
+        data.type in ['group_created', 'member_joined', 'member_left',
+          'task_created', 'schedule_created', 'task_edited',
+          'task_deleted', 'schedule_deleted', 'task_completed',
+          'task_reopened', 'task_assigned', 'task_unassigned',
+          'notice_sent'] &&
+        data.createdAt is timestamp;
+    }
+
+    match /groups/{gid}/activity/{activityId} {
+      allow read: if request.auth != null && isGroupMember(gid);
+      allow create: if request.auth != null && isGroupMember(gid) &&
+        isValidActivity(request.resource.data) &&
+        (request.resource.data.type in ['member_joined', 'member_left',
+           'task_completed', 'task_reopened'] ||
+         get(/databases/$(database)/documents/groups/$(gid)).data.creatorUid == request.auth.uid);
+      allow update: if false;
+      allow delete: if request.auth != null &&
+        get(/databases/$(database)/documents/groups/$(gid)).data.creatorUid == request.auth.uid;
+    }
+
     // B3: get only — `allow read` also granted `list`, letting any
     // signed-in user enumerate every join code. Nothing in the app
     // lists this collection (join does a single doc get).

@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -74,10 +75,12 @@ import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
+import com.nextgentool.nudgy.data.repository.GroupActivityEntry
 import com.nextgentool.nudgy.data.repository.GroupCompletion
 import com.nextgentool.nudgy.data.repository.GroupMember
 import com.nextgentool.nudgy.data.repository.GroupNotice
 import com.nextgentool.nudgy.data.repository.GroupResult
+import com.nextgentool.nudgy.data.repository.activityDisplayText
 import com.nextgentool.nudgy.data.repository.effectiveCompletion
 import com.nextgentool.nudgy.data.repository.formatCompletionCount
 import com.nextgentool.nudgy.ui.components.NudgyCheckbox
@@ -141,6 +144,11 @@ import kotlinx.coroutines.flow.flowOf
  *   admin notices (Q2=(a)), newest first, live via the listener; only
  *   the creator sees Send notice. A notification tap opens the detail
  *   for the notified group (openGroupId).
+ * - Sprint 5-5: assign + activity history (feature 36, Q10=(a)) behind
+ *   groupAssignEnabled — only the creator assigns (Q3=(b)); the
+ *   assignee's name shows on the task row (and in the member's own
+ *   list, from the denormalized name on the row); the Activity card
+ *   lists who did what, newest first, live via the listener.
  */
 @Composable
 fun GroupsScreen(
@@ -190,6 +198,14 @@ fun GroupsScreen(
     onObserveNotices: (groupId: String) -> Flow<List<GroupNotice>> = { flowOf(emptyList()) },
     onRefreshNotices: suspend (groupId: String) -> List<GroupNotice> = { emptyList() },
     onSendNotice: (groupId: String, text: String) -> Unit = { _, _ -> },
+    // Sprint 5-5 — assign + activity history (feature 36, Q10=(a)).
+    // Same observe + refresh pattern as notices; the assign dialog is
+    // creator-only (Q3=(b) — assigning is an edit). A null assignee
+    // unassigns.
+    groupAssignEnabled: Boolean = false,
+    onObserveActivity: (groupId: String) -> Flow<List<GroupActivityEntry>> = { flowOf(emptyList()) },
+    onRefreshActivity: suspend (groupId: String) -> List<GroupActivityEntry> = { emptyList() },
+    onAssignGroupTask: (groupId: String, itemId: String, assigneeUid: String?) -> Unit = { _, _, _ -> },
     // Sprint 5-3 — notification tap: opens the detail for this group
     // (the worker puts the group id in the launch intent; MainActivity
     // feeds it through NudgyApp → NavHost). Consumed once — even when
@@ -236,6 +252,8 @@ fun GroupsScreen(
     var detailTask by remember { mutableStateOf<TaskEntity?>(null) }
     // Sprint 5-2 — the task whose "who completed" list is open.
     var whoCompletedTask by remember { mutableStateOf<TaskEntity?>(null) }
+    // Sprint 5-5 — the task whose assign dialog is open (creator only).
+    var assignTask by remember { mutableStateOf<TaskEntity?>(null) }
     var schedulePendingDelete by remember { mutableStateOf<CalendarEventEntity?>(null) }
     var taskPendingDelete by remember { mutableStateOf<TaskEntity?>(null) }
     var deleteGroupTarget by remember { mutableStateOf<GroupEntity?>(null) }
@@ -284,6 +302,22 @@ fun GroupsScreen(
         val groupId = selectedGroupId ?: return@LaunchedEffect
         try {
             onRefreshNotices(groupId)
+        } catch (e: Exception) {
+            // Refresh is best-effort — the listener feeds the list.
+        }
+    }
+    // Sprint 5-5 — activity history for the selected group, observed
+    // declaratively (same pattern as notices). An empty list is a real
+    // state ("No activity yet."), not loading — no tri-state needed.
+    val activityFlow = remember(selectedGroupId) {
+        if (selectedGroupId == null) flowOf(emptyList())
+        else onObserveActivity(selectedGroupId)
+    }
+    val activity by activityFlow.collectAsState(initial = emptyList())
+    LaunchedEffect(selectedGroupId) {
+        val groupId = selectedGroupId ?: return@LaunchedEffect
+        try {
+            onRefreshActivity(groupId)
         } catch (e: Exception) {
             // Refresh is best-effort — the listener feeds the list.
         }
@@ -965,6 +999,20 @@ fun GroupsScreen(
                                             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
                                             color = NudgyMuted
                                         )
+                                        // Sprint 5-5 (feature 36): the
+                                        // assignee's name — denormalized
+                                        // on the row, so it shows in the
+                                        // member's own list too. Blank
+                                        // reads "Member" (the member-list
+                                        // convention). Shown only when
+                                        // the task is assigned.
+                                        if (task.assigneeUid != null) {
+                                            Text(
+                                                text = "Assigned to ${task.assigneeName?.ifBlank { "Member" } ?: "Member"}",
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                                color = NudgyMuted
+                                            )
+                                        }
                                         // Sprint 5-2 (feature 31): the shared
                                         // completion count — "৩/৫ করেছে",
                                         // denominator = current members.
@@ -992,6 +1040,23 @@ fun GroupsScreen(
                                         }
                                     }
                                     if (isCreator) {
+                                        // Sprint 5-5 (feature 36): assign
+                                        // is creator-only (Q3=(b)) — the
+                                        // button opens the assign dialog.
+                                        if (groupAssignEnabled) {
+                                            IconButton(
+                                                onClick = { assignTask = task },
+                                                modifier = Modifier.size(32.dp)
+                                                    .testTag("assign_task_open")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.PersonAdd,
+                                                    contentDescription = "Assign task",
+                                                    tint = NudgyMuted,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
                                         IconButton(
                                             onClick = { taskPendingDelete = task },
                                             modifier = Modifier.size(32.dp)
@@ -1232,6 +1297,77 @@ fun GroupsScreen(
                 }
             }
             }
+            // Sprint 5-5 — the Activity card (groupAssignEnabled).
+            // Who did what, newest first, live via the listener; every
+            // member reads it. The sentence is built by the pure
+            // activityDisplayText — the screen never invents wording.
+            if (groupAssignEnabled) {
+            Spacer(modifier = Modifier.height(20.dp))
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = NudgyCard,
+                shadowElevation = 2.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("activity_card")
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "ACTIVITY",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.sp
+                                ),
+                                color = NudgyAccent
+                            )
+                            Text(
+                                text = "Activity",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = NudgyCharcoal
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(color = NudgyBorder, thickness = 1.dp)
+                    if (activity.isEmpty()) {
+                        Text(
+                            text = "No activity yet.",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                            color = NudgyMuted,
+                            modifier = Modifier.padding(top = 12.dp)
+                        )
+                    } else {
+                        Column {
+                            activity.forEachIndexed { index, entry ->
+                                Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                                    Text(
+                                        text = activityDisplayText(entry),
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                                        color = NudgyCharcoal
+                                    )
+                                    if (entry.createdAtEpochMillis > 0L) {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = taskDateFormatter.format(entry.createdAtEpochMillis),
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                            color = NudgyMuted
+                                        )
+                                    }
+                                }
+                                if (index != activity.lastIndex) {
+                                    HorizontalDivider(
+                                        color = NudgyBorder,
+                                        thickness = 1.dp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            }
             Spacer(modifier = Modifier.height(20.dp))
             if (groupWorkEnabled) {
             if (isCreator) {
@@ -1388,6 +1524,73 @@ fun GroupsScreen(
                 }
             }
         )
+    }
+    // Sprint 5-5 (feature 36): assign this task — the creator-only
+    // button on the task row opens it. Members resolve against the
+    // member list (already observed for the detail); "Nobody"
+    // unassigns. The current assignee is marked in the list.
+    if (groupAssignEnabled) {
+    assignTask?.let { task ->
+        val groupId = task.groupId
+        val memberList = members
+        if (groupId != null) {
+            AlertDialog(
+                onDismissRequest = { assignTask = null },
+                title = { Text("Assign task") },
+                text = {
+                    Column(modifier = Modifier.testTag("assign_dialog")) {
+                        Text(
+                            text = task.title,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            color = NudgyCharcoal
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        if (task.assigneeUid != null) {
+                            Text(
+                                text = "Nobody",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                                color = NudgyCharcoal,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("assign_member_row_nobody")
+                                    .clickable {
+                                        onAssignGroupTask(groupId, task.id, null)
+                                        assignTask = null
+                                    }
+                                    .padding(vertical = 6.dp)
+                            )
+                        }
+                        memberList?.forEach { member ->
+                            Text(
+                                text = if (member.uid == task.assigneeUid) {
+                                    "${member.displayName} (assigned)"
+                                } else {
+                                    member.displayName
+                                },
+                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                                color = NudgyCharcoal,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("assign_member_row_${member.uid}")
+                                    .clickable {
+                                        onAssignGroupTask(groupId, task.id, member.uid)
+                                        assignTask = null
+                                    }
+                                    .padding(vertical = 6.dp)
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { assignTask = null }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+    }
     }
     taskPendingDelete?.let { task ->
         val groupId = task.groupId

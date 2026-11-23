@@ -777,4 +777,217 @@ class GroupRepositoryTest {
         assertNull(db.taskDao().getTaskById((created as GroupResult.Ok).value.id))
         assertAlarmAbsent(due - 2 * 3_600_000L)
     }
+
+    // ---------------------------------------------------------------- S5-5: assign + activity history (feature 36, Q10=(a))
+
+    private suspend fun createTaskWithMember(
+        group: GroupEntity,
+        title: String = "Homework"
+    ): TaskEntity {
+        repo.joinGroup("user-2", "Bob", group.code)
+        repo.refreshGroupMembers(group.groupId)
+        val created = repo.createGroupTask(
+            group.groupId, "user-1", title, null,
+            System.currentTimeMillis() + 10 * 3_600_000L,
+            Priority.MEDIUM, TaskCategory.WORK, false
+        )
+        return (created as GroupResult.Ok).value
+    }
+
+    @Test
+    fun `assignGroupTask as creator writes the remote doc and the local row and records history`() = runTest {
+        val group = createTestGroup()
+        val task = createTaskWithMember(group)
+        val result = repo.assignGroupTask(group.groupId, "user-1", task.id, "user-2")
+        assertTrue(result is GroupResult.Ok)
+        val remote = fake.items[group.groupId]?.get(task.id)
+        checkNotNull(remote)
+        assertEquals("user-2", remote["assigneeUid"])
+        assertEquals("Bob", remote["assigneeName"])
+        val local = db.taskDao().getTaskById(task.id)
+        checkNotNull(local)
+        assertEquals("user-2", local.assigneeUid)
+        assertEquals("Bob", local.assigneeName)
+        val history = repo.refreshActivity(group.groupId)
+        assertTrue(history.any {
+            it.type == GroupActivityType.TASK_ASSIGNED &&
+                it.itemId == task.id && it.assigneeUid == "user-2" &&
+                it.assigneeName == "Bob"
+        })
+    }
+
+    @Test
+    fun `assignGroupTask as a member is denied and nothing changes`() = runTest {
+        val group = createTestGroup()
+        val task = createTaskWithMember(group)
+        val result = repo.assignGroupTask(group.groupId, "user-2", task.id, "user-2")
+        assertTrue(result is GroupResult.Err)
+        assertNull(fake.items[group.groupId]?.get(task.id)?.get("assigneeUid"))
+        assertNull(db.taskDao().getTaskById(task.id)?.assigneeUid)
+    }
+
+    @Test
+    fun `assignGroupTask to a non-member is denied`() = runTest {
+        val group = createTestGroup()
+        val task = createTaskWithMember(group)
+        val result = repo.assignGroupTask(group.groupId, "user-1", task.id, "user-9")
+        assertTrue(result is GroupResult.Err)
+        assertNull(db.taskDao().getTaskById(task.id)?.assigneeUid)
+    }
+
+    @Test
+    fun `assignGroupTask on a missing task is denied`() = runTest {
+        val group = createTestGroup()
+        repo.joinGroup("user-2", "Bob", group.code)
+        val result = repo.assignGroupTask(group.groupId, "user-1", "no-such-task", "user-2")
+        assertTrue(result is GroupResult.Err)
+    }
+
+    @Test
+    fun `assignGroupTask with null unassigns and records TASK_UNASSIGNED`() = runTest {
+        val group = createTestGroup()
+        val task = createTaskWithMember(group)
+        assertTrue(repo.assignGroupTask(group.groupId, "user-1", task.id, "user-2") is GroupResult.Ok)
+        val unassigned = repo.assignGroupTask(group.groupId, "user-1", task.id, null)
+        assertTrue(unassigned is GroupResult.Ok)
+        val doc = groupItemDocFromFields(
+            task.id, fake.items[group.groupId]?.get(task.id) ?: emptyMap()
+        )
+        checkNotNull(doc)
+        assertNull(doc.assigneeUid)
+        assertNull(doc.assigneeName)
+        val local = db.taskDao().getTaskById(task.id)
+        checkNotNull(local)
+        assertNull(local.assigneeUid)
+        assertNull(local.assigneeName)
+        val history = repo.refreshActivity(group.groupId)
+        assertTrue(history.any { it.type == GroupActivityType.TASK_UNASSIGNED && it.itemId == task.id })
+    }
+
+    @Test
+    fun `assignGroupTask preserves the local completion and never re-arms the alarm`() = runTest {
+        val group = createTestGroup()
+        repo.joinGroup("user-2", "Bob", group.code)
+        repo.refreshGroupMembers(group.groupId)
+        val now = System.currentTimeMillis()
+        val due = now + 12 * 3_600_000L
+        val created = repo.createGroupTask(
+            group.groupId, "user-1", "Homework", null,
+            due, Priority.MEDIUM, TaskCategory.WORK, true
+        )
+        val task = (created as GroupResult.Ok).value
+        assertTrue(repo.setGroupTaskCompleted(group.groupId, task.id, "user-1", true) is GroupResult.Ok)
+        assertAlarmAbsent(due - 2 * 3_600_000L)
+        assertTrue(repo.assignGroupTask(group.groupId, "user-1", task.id, "user-2") is GroupResult.Ok)
+        val local = db.taskDao().getTaskById(task.id)
+        checkNotNull(local)
+        assertTrue(local.isCompleted)
+        assertEquals(TaskStatus.DONE, local.status)
+        assertEquals("user-2", local.assigneeUid)
+        assertAlarmAbsent(due - 2 * 3_600_000L)
+    }
+
+    @Test
+    fun `creating a group and joining record GROUP_CREATED and MEMBER_JOINED`() = runTest {
+        val group = createTestGroup()
+        repo.joinGroup("user-2", "Bob", group.code)
+        val history = repo.refreshActivity(group.groupId)
+        val types = history.map { it.type }.toSet()
+        assertTrue(types.contains(GroupActivityType.GROUP_CREATED))
+        assertTrue(types.contains(GroupActivityType.MEMBER_JOINED))
+        val joined = history.first { it.type == GroupActivityType.MEMBER_JOINED }
+        assertEquals("user-2", joined.actorUid)
+        assertEquals("Bob", joined.actorName)
+    }
+
+    @Test
+    fun `completing and reopening record TASK_COMPLETED and TASK_REOPENED`() = runTest {
+        val group = createTestGroup()
+        val task = createTaskWithMember(group)
+        assertTrue(repo.setGroupTaskCompleted(group.groupId, task.id, "user-2", true) is GroupResult.Ok)
+        assertTrue(repo.setGroupTaskCompleted(group.groupId, task.id, "user-2", false) is GroupResult.Ok)
+        val history = repo.refreshActivity(group.groupId)
+        assertTrue(history.any { it.type == GroupActivityType.TASK_COMPLETED && it.actorUid == "user-2" })
+        assertTrue(history.any { it.type == GroupActivityType.TASK_REOPENED && it.actorUid == "user-2" })
+    }
+
+    @Test
+    fun `sending a notice records NOTICE_SENT and creating a task records TASK_CREATED`() = runTest {
+        val group = createTestGroup()
+        val task = createTaskWithMember(group)
+        assertTrue(
+            repo.createGroupNotice(group.groupId, "user-1", "Creator", "Exam on Friday")
+                is GroupResult.Ok
+        )
+        val history = repo.refreshActivity(group.groupId)
+        assertTrue(history.any { it.type == GroupActivityType.TASK_CREATED && it.itemId == task.id })
+        assertTrue(history.any { it.type == GroupActivityType.NOTICE_SENT && it.itemTitle == "Exam on Friday" })
+    }
+
+    @Test
+    fun `leaving records MEMBER_LEFT and the entry survives the local purge`() = runTest {
+        val group = createTestGroup()
+        repo.joinGroup("user-2", "Bob", group.code)
+        assertTrue(repo.leaveGroup("user-2", group.groupId) is GroupResult.Ok)
+        val history = repo.refreshActivity(group.groupId)
+        assertTrue(history.any {
+            it.type == GroupActivityType.MEMBER_LEFT && it.actorUid == "user-2"
+        })
+    }
+
+    @Test
+    fun `deleteGroup removes the activity history too`() = runTest {
+        val group = createTestGroup()
+        createTaskWithMember(group)
+        assertTrue(repo.refreshActivity(group.groupId).isNotEmpty())
+        assertTrue(repo.deleteGroup("user-1", group.groupId) is GroupResult.Ok)
+        assertTrue(fake.activity[group.groupId].isNullOrEmpty())
+        assertTrue(repo.getGroupActivity(group.groupId).isEmpty())
+    }
+
+    @Test
+    fun `activity listener feeds the flow on attach and on emit`() = runTest {
+        val group = createTestGroup()
+        awaitCondition { fake.activityListenerCount(group.groupId) == 1 }
+        // The GROUP_CREATED entry recorded during createGroup arrives
+        // with the listener's initial snapshot.
+        val initial = repo.observeActivity(group.groupId).first()
+        assertTrue(initial.any { it.type == GroupActivityType.GROUP_CREATED })
+        val entry = GroupActivityEntry(
+            id = "a-live", groupId = group.groupId, actorUid = "user-2",
+            actorName = "Bob", type = GroupActivityType.TASK_COMPLETED,
+            itemId = "t-1", itemTitle = "Homework",
+            createdAtEpochMillis = System.currentTimeMillis()
+        )
+        fake.emitActivity(group.groupId, listOf(entry))
+        awaitCondition {
+            repo.observeActivity(group.groupId).first().any { it.id == "a-live" }
+        }
+    }
+
+    @Test
+    fun `purgeLocalGroup drops the activity flow entry`() = runTest {
+        val group = createTestGroup()
+        createTaskWithMember(group)
+        awaitCondition { fake.activityListenerCount(group.groupId) == 1 }
+        assertTrue(repo.observeActivity(group.groupId).first().isNotEmpty())
+        repo.purgeLocalGroup("user-1", group.groupId)
+        assertTrue(repo.observeActivity(group.groupId).first().isEmpty())
+    }
+
+    @Test
+    fun `a polled task doc carries the assignee onto the local row`() = runTest {
+        val group = createTestGroup()
+        val now = System.currentTimeMillis()
+        val doc = GroupItemDoc(
+            id = "t-arrive", kind = "TASK", title = "Arrived",
+            dueDateEpochMillis = now + 11 * 3_600_000L,
+            assigneeUid = "user-2", assigneeName = "Bob"
+        )
+        repo.applyPolledDocs("user-1", group.groupId, listOf(doc))
+        val local = db.taskDao().getTaskById("t-arrive")
+        checkNotNull(local)
+        assertEquals("user-2", local.assigneeUid)
+        assertEquals("Bob", local.assigneeName)
+    }
 }
