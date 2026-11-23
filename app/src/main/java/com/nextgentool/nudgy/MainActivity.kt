@@ -8,10 +8,13 @@ import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.lifecycleScope
+import com.nextgentool.nudgy.auth.GroupAuth
 import com.nextgentool.nudgy.ui.navigation.NudgyApp
 import com.nextgentool.nudgy.ui.viewmodel.ShareIntentViewModel
 import com.nextgentool.nudgy.work.GroupPollWorker
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 /**
  * Sprint 1-0 — the app root is now NudgyApp() (NavHost + bottom nav).
@@ -48,11 +51,21 @@ class MainActivity : ComponentActivity() {
 
     private val shareIntentViewModel: ShareIntentViewModel by viewModels()
 
+    // Sprint 5 fix round — the single auth seam (device test on ci-792:
+    // nothing ever constructed an AuthManager, so a returning session
+    // never restored and Groups had no sign-in). Hilt owns the
+    // @Singleton; the call below is the v1 one.
+    @Inject
+    lateinit var groupAuth: GroupAuth
+
     /** Sprint 5-3 — pending group-notification tap (group id, one-shot). */
     private var openGroupId by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Sprint 5 fix round — restore a returning Google session at
+        // startup (v1 MainActivity did the same); a guest stays guest.
+        groupAuth.attemptSilentSignIn(lifecycleScope)
         handleIncomingIntent(intent)
         setContent {
             NudgyApp(

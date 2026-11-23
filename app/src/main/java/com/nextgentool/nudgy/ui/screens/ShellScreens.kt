@@ -61,11 +61,11 @@ private fun ShellScaffold(
     ) {
         Text(text = title, color = NudgyCharcoal)
         Spacer(modifier = Modifier.height(16.dp))
-        NudgySkeletonRow()
+        NudgyStaticPlaceholderRow()
         Spacer(modifier = Modifier.height(12.dp))
-        NudgySkeletonRow()
+        NudgyStaticPlaceholderRow()
         Spacer(modifier = Modifier.height(12.dp))
-        NudgySkeletonRow()
+        NudgyStaticPlaceholderRow()
         Spacer(modifier = Modifier.height(16.dp))
         content?.invoke()
         Text(text = note, color = NudgyMuted)
@@ -90,6 +90,30 @@ fun NudgySkeletonRow() {
             .fillMaxWidth()
             .height(72.dp)
             .alpha(alpha)
+            .background(
+                color = colorResource(R.color.nudgy_cream),
+                shape = NudgyTokens.cardRadius
+            )
+    )
+}
+
+/**
+ * Sprint 5 fix round — STATIC placeholder row for the shell screens
+ * (device test on ci-792: the Settings placeholder's shimmer pulsed
+ * dim/bright forever, which reads as a blinking light). The real
+ * Settings screen lands in Sprint 6; until then the placeholder
+ * stands still. [NudgySkeletonRow] keeps its shimmer for REAL
+ * transient loading (Plan/Tasks/Today) — never use it for a
+ * permanent screen.
+ */
+@Composable
+fun NudgyStaticPlaceholderRow() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(72.dp)
+            .testTag("settings_placeholder_row")
+            .alpha(0.6f)
             .background(
                 color = colorResource(R.color.nudgy_cream),
                 shape = NudgyTokens.cardRadius

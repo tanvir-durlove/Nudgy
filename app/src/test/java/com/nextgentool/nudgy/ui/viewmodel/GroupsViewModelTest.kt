@@ -1,10 +1,14 @@
 package com.nextgentool.nudgy.ui.viewmodel
 
+import android.app.Activity
 import android.content.Context
+import androidx.activity.ComponentActivity
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.auth.AuthManager
+import com.nextgentool.nudgy.auth.GroupAuth
+import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.local.entity.GroupMemberEntity
 import com.nextgentool.nudgy.data.model.Priority
@@ -15,9 +19,12 @@ import com.nextgentool.nudgy.data.repository.GroupActivityType
 import com.nextgentool.nudgy.data.repository.GroupRepository
 import com.nextgentool.nudgy.data.repository.GroupResult
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -26,11 +33,13 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
@@ -94,8 +103,8 @@ class GroupsViewModelTest {
         }
     }
 
-    private fun buildViewModel(): GroupsViewModel {
-        val viewModel = GroupsViewModel(groupRepository, taskRepository, calendarRepository)
+    private fun buildViewModel(fakeAuth: GroupAuth = FakeGroupAuth()): GroupsViewModel {
+        val viewModel = GroupsViewModel(groupRepository, taskRepository, calendarRepository, fakeAuth)
         store.put("groups", viewModel)
         return viewModel
     }
@@ -538,5 +547,70 @@ class GroupsViewModelTest {
             .first { entries -> entries.any { it.type == GroupActivityType.GROUP_CREATED } }
 
         assertTrue(history.any { it.actorUid == userId })
+    }
+
+    // ---- Sign-in (Sprint 5 fix round) ----
+
+    @Test
+    fun `uiState user flips guest to signed-in when auth state changes`() = vmTest {
+        setActiveUser(AuthManager.GUEST_USER_ID)
+        val fakeAuth = FakeGroupAuth()
+        val viewModel = buildViewModel(fakeAuth)
+
+        val guestState = viewModel.uiState.first { it.user.isGuest }
+        assertEquals(AuthManager.GUEST_USER_ID, guestState.user.uid)
+        assertFalse(guestState.user.displayName.isNotBlank())
+
+        fakeAuth.userStateFlow.value =
+            NudgyUser(uid = userId, displayName = "Ayesha", email = "ayesha@example.com")
+        val signedIn = viewModel.uiState.first { !it.user.isGuest }
+
+        assertEquals(userId, signedIn.user.uid)
+        assertEquals("Ayesha", signedIn.user.displayName)
+        assertFalse(signedIn.user.isGuest)
+    }
+
+    @Test
+    fun `sign-in error surfaces on groupTaskError instead of failing silently`() = vmTest {
+        val fakeAuth = FakeGroupAuth().apply {
+            signInError = "No Google account found on this device."
+        }
+        val viewModel = buildViewModel(fakeAuth)
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
+        val error = async { viewModel.groupTaskError.first() }
+
+        viewModel.signIn(activity, this)
+
+        assertEquals("No Google account found on this device.", error.await())
+        assertEquals(1, fakeAuth.signInCalls)
+    }
+}
+
+/**
+ * Sprint 5 fix round — a [GroupAuth] the tests can drive: the real
+ * AuthManager's user state only moves on a real Firebase sign-in, so
+ * the guest→signed-in flip and the sign-in error path are proven
+ * here instead of on a device.
+ */
+private class FakeGroupAuth : GroupAuth {
+    val userStateFlow = MutableStateFlow<NudgyUser?>(null)
+    override val userState: StateFlow<NudgyUser?> = userStateFlow
+
+    var signInError: String? = null
+    var signInCalls = 0
+    var silentSignInCalls = 0
+
+    override fun signIn(
+        activity: Activity,
+        scope: CoroutineScope,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        signInCalls++
+        signInError?.let { onError(it) } ?: onSuccess()
+    }
+
+    override fun attemptSilentSignIn(scope: CoroutineScope) {
+        silentSignInCalls++
     }
 }
