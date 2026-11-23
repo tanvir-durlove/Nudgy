@@ -157,8 +157,8 @@ class GroupsViewModelTest {
         setActiveUser(null)
         val viewModel = buildViewModel()
 
-        assertTrue(viewModel.user.isGuest)
-        assertEquals(AuthManager.GUEST_USER_ID, viewModel.user.uid)
+        assertTrue(viewModel.user.value.isGuest)
+        assertEquals(AuthManager.GUEST_USER_ID, viewModel.user.value.uid)
         val result = viewModel.createGroup("DIU 41")
 
         assertTrue(result is GroupResult.Err)
