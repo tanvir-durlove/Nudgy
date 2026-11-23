@@ -41,6 +41,7 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
     var collideFirstCodeCheck = false
     var createGroupDocsCalls = 0
     var joinMemberDocsCalls = 0
+    var writeMembershipMirrorCalls = 0
 
     private var codeCheckCount = 0
 
@@ -135,6 +136,18 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
         mirrorFields: Map<String, Any>
     ) {
         maybeThrow()
+        // Sprint 5 fix round 3 — models the live Firestore rules: the
+        // members block has `allow create` + `allow delete` but NO
+        // `allow update`, and a batch.set() on an EXISTING member doc
+        // is evaluated as an update. So a rejoin that reaches this
+        // write is denied (the whole batch, mirror included, fails).
+        // The repository must check membership first and never call
+        // this for an existing member.
+        if (members[groupId]?.containsKey(userId) == true) {
+            throw IllegalStateException(
+                "PERMISSION_DENIED: member doc already exists (no allow update)"
+            )
+        }
         joinMemberDocsCalls++
         val now = System.currentTimeMillis()
         members.getOrPut(groupId) { mutableMapOf() }[userId] =
@@ -146,6 +159,22 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
     override suspend fun getMemberFields(groupId: String): List<Pair<String, Map<String, Any?>>> {
         maybeThrow()
         return members[groupId]?.map { (uid, fields) -> uid to fields.toMap() } ?: emptyList()
+    }
+
+    override suspend fun getMemberDoc(groupId: String, userId: String): Map<String, Any?>? {
+        maybeThrow()
+        return members[groupId]?.get(userId)?.toMap()
+    }
+
+    override suspend fun writeMembershipMirror(
+        userId: String,
+        groupId: String,
+        mirrorFields: Map<String, Any>
+    ) {
+        maybeThrow()
+        writeMembershipMirrorCalls++
+        mirrors.getOrPut(userId) { mutableMapOf() }[groupId] =
+            (mirrorFields + mapOf("joinedAt" to System.currentTimeMillis())).toMutableMap()
     }
 
     override suspend fun deleteMemberDocs(groupId: String, userId: String) {

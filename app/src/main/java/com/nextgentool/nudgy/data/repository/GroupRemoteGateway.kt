@@ -67,6 +67,26 @@ interface GroupRemoteGateway {
     /** Every member doc of a group as (doc id, fields) pairs. */
     suspend fun getMemberFields(groupId: String): List<Pair<String, Map<String, Any?>>>
 
+    /**
+     * One member doc's fields, or null when the user is not a member.
+     * A single-doc get of the caller's OWN doc is rules-safe even for a
+     * non-member (allow read when uid == auth.uid) — unlike
+     * [getMemberFields], whose collection get a non-member cannot run.
+     * Used by joinGroup to tell a first join from a rejoin.
+     */
+    suspend fun getMemberDoc(groupId: String, userId: String): Map<String, Any?>?
+
+    /**
+     * Writes only the membership-mirror doc (users/{uid}/
+     * groupMemberships/{gid}). The mirror is owner-writable, so a
+     * rejoin-restore can rewrite it without touching the member doc.
+     */
+    suspend fun writeMembershipMirror(
+        userId: String,
+        groupId: String,
+        mirrorFields: Map<String, Any>
+    )
+
     /** The leave writes: the member doc + the membership mirror in one batch. */
     suspend fun deleteMemberDocs(groupId: String, userId: String)
 
@@ -280,6 +300,23 @@ class FirestoreGroupRemoteGateway(
         firestore().collection("groups").document(groupId)
             .collection("members")
             .get().await().documents.map { it.id to normalizeFields(it.data ?: emptyMap()) }
+
+    override suspend fun getMemberDoc(groupId: String, userId: String): Map<String, Any?>? {
+        val doc = firestore().collection("groups").document(groupId)
+            .collection("members").document(userId)
+            .get().await()
+        return if (doc.exists()) normalizeFields(doc.data ?: emptyMap()) else null
+    }
+
+    override suspend fun writeMembershipMirror(
+        userId: String,
+        groupId: String,
+        mirrorFields: Map<String, Any>
+    ) {
+        firestore().collection("users").document(userId)
+            .collection("groupMemberships").document(groupId)
+            .set(mirrorFields + timestampFields("joinedAt")).await()
+    }
 
     override suspend fun deleteMemberDocs(groupId: String, userId: String) {
         val fs = firestore()

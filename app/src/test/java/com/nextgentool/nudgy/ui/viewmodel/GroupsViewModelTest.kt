@@ -227,6 +227,29 @@ class GroupsViewModelTest {
         assertEquals(joinsBefore, fake.joinMemberDocsCalls)
     }
 
+    // ---- Restore on sign-in ----
+
+    @Test
+    fun `signing in restores groups from the mirror after a fresh install`() = vmTest {
+        // Setup through the repository as user-1, then wipe the local
+        // row (fresh install) — the mirror in Firestore survives.
+        val created = groupRepository.createGroup(userId, "Creator", "DIU 41")
+        val entity = (created as GroupResult.Ok).value
+        db.groupDao().deleteGroupById(entity.groupId)
+        // The ViewModel starts as a guest (no active user in prefs)...
+        setActiveUser(null)
+        val auth = FakeGroupAuth()
+        val viewModel = buildViewModel(auth)
+        // ...then the auth flow emits the signed-in user, and the
+        // init collector restores from the mirror before syncing.
+        auth.userStateFlow.value = NudgyUser(
+            uid = userId, displayName = "Creator", email = "creator@example.com"
+        )
+
+        val state = viewModel.awaitGroup("DIU 41")
+        assertEquals(entity.groupId, state.groups.single().groupId)
+    }
+
     // ---- Prefill ----
 
     @Test
