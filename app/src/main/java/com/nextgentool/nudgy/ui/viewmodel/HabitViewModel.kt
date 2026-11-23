@@ -2,6 +2,9 @@ package com.nextgentool.nudgy.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.nextgentool.nudgy.auth.AuthManager
+import com.nextgentool.nudgy.auth.GroupAuth
+import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.repository.FocusHabitRepository
 import com.nextgentool.nudgy.data.repository.HabitStreak
 import com.nextgentool.nudgy.data.repository.TaskRepository
@@ -9,6 +12,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -58,10 +62,37 @@ data class HabitUiState(
 @HiltViewModel
 class HabitViewModel @Inject constructor(
     private val focusRepository: FocusHabitRepository,
-    private val taskRepository: TaskRepository
+    private val taskRepository: TaskRepository,
+    // Sprint 5 fix round 4 — the live-user seam (device test on
+    // ci-803: tab ViewModels froze the uid captured at construction).
+    // Nullable with a default on purpose (TodayViewModel precedent):
+    // Hilt always injects the real seam in production (AuthModule
+    // provides it); call sites that don't pass one keep the previous
+    // frozen-uid behaviour.
+    private val groupAuth: GroupAuth? = null
 ) : ViewModel() {
 
-    private val userId: String = taskRepository.currentUserId()
+    /**
+     * Sprint 5 fix round 4 — the LIVE user (GroupsViewModel pattern,
+     * PR #98). The fallback is the TaskRepository-derived user (blank
+     * display name); the auth flow overrides it the moment it emits a
+     * signed-in user. The equality guard cannot skip a real Google
+     * sign-in: the fallback has a blank email while a real sign-in
+     * always carries a non-blank one.
+     */
+    private val fallbackUser: NudgyUser = run {
+        val uid = taskRepository.currentUserId()
+        NudgyUser(
+            uid = uid,
+            displayName = "",
+            email = "",
+            isGuest = uid == AuthManager.GUEST_USER_ID
+        )
+    }
+    private val userFlow = MutableStateFlow(fallbackUser)
+
+    /** Live uid — read at call time so a sign-in flip is followed. */
+    private val currentUserId: String get() = userFlow.value.uid
 
     private val _uiState = MutableStateFlow(HabitUiState())
     val uiState: StateFlow<HabitUiState> = _uiState.asStateFlow()
@@ -72,8 +103,24 @@ class HabitViewModel @Inject constructor(
     private val refreshMutex = Mutex()
 
     init {
+        // Sprint 5 fix round 4 — the habits flow follows the LIVE
+        // user: a flip re-subscribes for the new uid, and the collect
+        // below refreshes (which reads the live uid through the
+        // getter), so the new user's habits appear with no restart.
+        groupAuth?.let { auth ->
+            viewModelScope.launch {
+                auth.userState.collect { authUser ->
+                    val newUser =
+                        if (authUser == null || authUser.isGuest) fallbackUser else authUser
+                    if (newUser == userFlow.value) return@collect
+                    userFlow.value = newUser
+                }
+            }
+        }
         viewModelScope.launch {
-            focusRepository.getHabitsFlow(userId).collect {
+            userFlow.flatMapLatest { user ->
+                focusRepository.getHabitsFlow(user.uid)
+            }.collect {
                 refresh()
             }
         }
@@ -82,7 +129,7 @@ class HabitViewModel @Inject constructor(
     /** Re-reads every habit with its streak state for [now]. */
     suspend fun refresh(now: Long = System.currentTimeMillis()) {
         refreshMutex.withLock {
-            val streaks = focusRepository.getHabitsWithStreaks(userId, now)
+            val streaks = focusRepository.getHabitsWithStreaks(currentUserId, now)
             _uiState.update { it.copy(habits = streaks, isLoading = false) }
         }
     }
@@ -98,7 +145,7 @@ class HabitViewModel @Inject constructor(
         val title = _uiState.value.newTitle.trim()
         if (title.isBlank()) return
         viewModelScope.launch {
-            focusRepository.createHabit(userId, title, now)
+            focusRepository.createHabit(currentUserId, title, now)
             _uiState.update { it.copy(newTitle = "") }
             refresh(now)
         }

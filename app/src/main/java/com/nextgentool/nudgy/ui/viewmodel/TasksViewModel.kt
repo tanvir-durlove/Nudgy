@@ -3,6 +3,9 @@ package com.nextgentool.nudgy.ui.viewmodel
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.nextgentool.nudgy.auth.AuthManager
+import com.nextgentool.nudgy.auth.GroupAuth
+import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.ProjectEntity
 import com.nextgentool.nudgy.data.local.entity.TaskAttachmentEntity
 import com.nextgentool.nudgy.data.local.entity.TaskTagCrossRef
@@ -28,6 +31,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.Calendar
@@ -116,10 +120,37 @@ class TasksViewModel @Inject constructor(
     private val updateTask: UpdateTaskUseCase,
     private val deleteTask: DeleteTaskUseCase,
     private val addSubtask: AddSubtaskUseCase,
-    private val saveView: SaveViewUseCase
+    private val saveView: SaveViewUseCase,
+    // Sprint 5 fix round 4 — the live-user seam (device test on
+    // ci-803: tab ViewModels froze the uid captured at construction).
+    // Nullable with a default on purpose (TodayViewModel precedent):
+    // Hilt always injects the real seam in production (AuthModule
+    // provides it); call sites that don't pass one keep the previous
+    // frozen-uid behaviour.
+    private val groupAuth: GroupAuth? = null
 ) : ViewModel() {
 
-    private val userId: String = repository.currentUserId()
+    /**
+     * Sprint 5 fix round 4 — the LIVE user (GroupsViewModel pattern,
+     * PR #98). The fallback is the TaskRepository-derived user (blank
+     * display name); the auth flow overrides it the moment it emits a
+     * signed-in user. The equality guard cannot skip a real Google
+     * sign-in: the fallback has a blank email while a real sign-in
+     * always carries a non-blank one.
+     */
+    private val fallbackUser: NudgyUser = run {
+        val uid = repository.currentUserId()
+        NudgyUser(
+            uid = uid,
+            displayName = "",
+            email = "",
+            isGuest = uid == AuthManager.GUEST_USER_ID
+        )
+    }
+    private val userFlow = MutableStateFlow(fallbackUser)
+
+    /** Live uid — read at call time so a sign-in flip is followed. */
+    private val currentUserId: String get() = userFlow.value.uid
 
     private val filterFlow = MutableStateFlow(SavedViewFilter.empty())
     private val activeViewIdFlow = MutableStateFlow<String?>(null)
@@ -150,26 +181,27 @@ class TasksViewModel @Inject constructor(
         val isCreating: Boolean
     )
 
-    val uiState: StateFlow<TasksUiState> = combine(
+    val uiState: StateFlow<TasksUiState> = userFlow.flatMapLatest { user ->
         combine(
-            repository.observeAllTasks(userId),
-            repository.observeTags(userId),
-            repository.observeAllTaskTags(),
-            repository.observeProjects(userId),
-            repository.observeSavedViews(userId)
-        ) { allTasks, tags, crossRefs, projects, savedViews ->
-            TasksData(allTasks, tags, crossRefs, projects, savedViews)
-        },
-        combine(
-            filterFlow,
-            activeViewIdFlow,
-            selectedTaskIdFlow,
-            lastCreatedTaskIdFlow,
-            isCreatingFlow
-        ) { filter, activeViewId, selectedTaskId, lastCreatedTaskId, isCreating ->
-            TasksUi(filter, activeViewId, selectedTaskId, lastCreatedTaskId, isCreating)
-        }
-    ) { data, ui ->
+            combine(
+                repository.observeAllTasks(user.uid),
+                repository.observeTags(user.uid),
+                repository.observeAllTaskTags(),
+                repository.observeProjects(user.uid),
+                repository.observeSavedViews(user.uid)
+            ) { allTasks, tags, crossRefs, projects, savedViews ->
+                TasksData(allTasks, tags, crossRefs, projects, savedViews)
+            },
+            combine(
+                filterFlow,
+                activeViewIdFlow,
+                selectedTaskIdFlow,
+                lastCreatedTaskIdFlow,
+                isCreatingFlow
+            ) { filter, activeViewId, selectedTaskId, lastCreatedTaskId, isCreating ->
+                TasksUi(filter, activeViewId, selectedTaskId, lastCreatedTaskId, isCreating)
+            }
+        ) { data, ui ->
         val (allTasks, tags, crossRefs, projects, savedViews) = data
         val (filter, activeViewId, selectedTaskId, lastCreatedTaskId, isCreating) = ui
         val tagsById = tags.associateBy { it.id }
@@ -229,7 +261,8 @@ class TasksViewModel @Inject constructor(
             lastCreatedTaskId = lastCreatedTaskId,
             isCreating = isCreating
         )
-        }.stateIn(
+        }
+    }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = TasksUiState()
@@ -368,8 +401,21 @@ class TasksViewModel @Inject constructor(
 
     init {
         // Sprint 1-4 — seeds the 3 approved built-in templates (Feature 13).
-        // Idempotent: a re-seed never duplicates them.
-        viewModelScope.launch { repository.seedBuiltInTemplates(userId) }
+        // Idempotent: a re-seed never duplicates them. Seeded for the
+        // fallback uid here, and again for the new uid on a flip
+        // (Sprint 5 fix round 4), so the new user's templates exist.
+        viewModelScope.launch { repository.seedBuiltInTemplates(fallbackUser.uid) }
+        groupAuth?.let { auth ->
+            viewModelScope.launch {
+                auth.userState.collect { authUser ->
+                    val newUser =
+                        if (authUser == null || authUser.isGuest) fallbackUser else authUser
+                    if (newUser == userFlow.value) return@collect
+                    userFlow.value = newUser
+                    repository.seedBuiltInTemplates(newUser.uid)
+                }
+            }
+        }
     }
 
     /** Sprint 1-4 — latest attachment rejection, shown in the detail sheet. */
@@ -420,7 +466,7 @@ class TasksViewModel @Inject constructor(
     // ------------------------------------------------------- tags / projects
 
     fun createTag(name: String, color: String) {
-        viewModelScope.launch { repository.createTag(userId, name, color) }
+        viewModelScope.launch { repository.createTag(currentUserId, name, color) }
     }
 
     fun renameTag(tag: TagEntity, name: String) {
@@ -429,7 +475,7 @@ class TasksViewModel @Inject constructor(
     }
 
     fun deleteTag(tagId: String) {
-        viewModelScope.launch { repository.deleteTag(userId, tagId) }
+        viewModelScope.launch { repository.deleteTag(currentUserId, tagId) }
     }
 
     fun setTaskTags(taskId: String, tagIds: List<String>) {
@@ -437,7 +483,7 @@ class TasksViewModel @Inject constructor(
     }
 
     fun createProject(name: String, color: String) {
-        viewModelScope.launch { repository.createProject(userId, name, color) }
+        viewModelScope.launch { repository.createProject(currentUserId, name, color) }
     }
 
     fun renameProject(project: ProjectEntity, name: String) {
@@ -446,7 +492,7 @@ class TasksViewModel @Inject constructor(
     }
 
     fun deleteProject(projectId: String) {
-        viewModelScope.launch { repository.deleteProject(userId, projectId) }
+        viewModelScope.launch { repository.deleteProject(currentUserId, projectId) }
     }
 
     // ------------------------------------------------------- filter / search
@@ -480,7 +526,7 @@ class TasksViewModel @Inject constructor(
 
     fun deleteSavedView(viewId: String) {
         viewModelScope.launch {
-            repository.deleteSavedView(userId, viewId)
+            repository.deleteSavedView(currentUserId, viewId)
             if (activeViewIdFlow.value == viewId) {
                 activeViewIdFlow.value = null
                 filterFlow.value = SavedViewFilter.empty()

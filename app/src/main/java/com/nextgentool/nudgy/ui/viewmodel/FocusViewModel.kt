@@ -3,6 +3,9 @@ package com.nextgentool.nudgy.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nextgentool.nudgy.ai.ReplySoundPlayer
+import com.nextgentool.nudgy.auth.AuthManager
+import com.nextgentool.nudgy.auth.GroupAuth
+import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.FocusSessionKind
 import com.nextgentool.nudgy.data.repository.FocusHabitRepository
@@ -16,6 +19,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -89,10 +93,37 @@ class FocusViewModel @Inject constructor(
     private val focusRepository: FocusHabitRepository,
     private val taskRepository: TaskRepository,
     private val pomodoroAlarm: PomodoroAlarm,
-    private val soundPlayer: ReplySoundPlayer
+    private val soundPlayer: ReplySoundPlayer,
+    // Sprint 5 fix round 4 — the live-user seam (device test on
+    // ci-803: tab ViewModels froze the uid captured at construction).
+    // Nullable with a default on purpose (TodayViewModel precedent):
+    // Hilt always injects the real seam in production (AuthModule
+    // provides it); call sites that don't pass one keep the previous
+    // frozen-uid behaviour.
+    private val groupAuth: GroupAuth? = null
 ) : ViewModel() {
 
-    private val userId: String = taskRepository.currentUserId()
+    /**
+     * Sprint 5 fix round 4 — the LIVE user (GroupsViewModel pattern,
+     * PR #98). The fallback is the TaskRepository-derived user (blank
+     * display name); the auth flow overrides it the moment it emits a
+     * signed-in user. The equality guard cannot skip a real Google
+     * sign-in: the fallback has a blank email while a real sign-in
+     * always carries a non-blank one.
+     */
+    private val fallbackUser: NudgyUser = run {
+        val uid = taskRepository.currentUserId()
+        NudgyUser(
+            uid = uid,
+            displayName = "",
+            email = "",
+            isGuest = uid == AuthManager.GUEST_USER_ID
+        )
+    }
+    private val userFlow = MutableStateFlow(fallbackUser)
+
+    /** Live uid — read at call time so a sign-in flip is followed. */
+    private val currentUserId: String get() = userFlow.value.uid
 
     private val _uiState = MutableStateFlow(FocusUiState())
     val uiState: StateFlow<FocusUiState> = _uiState.asStateFlow()
@@ -112,9 +143,28 @@ class FocusViewModel @Inject constructor(
             refreshStats()
         }
         viewModelScope.launch {
-            taskRepository.observeAllTasks(userId).collect { tasks ->
+            userFlow.flatMapLatest { user ->
+                taskRepository.observeAllTasks(user.uid)
+            }.collect { tasks ->
                 _uiState.update { state ->
                     state.copy(availableTasks = tasks.filter { !it.isCompleted })
+                }
+            }
+        }
+        // Sprint 5 fix round 4 — follow the LIVE user (same bug as
+        // TodayViewModel on ci-803). On a flip, the new user's
+        // running session is restored and stats refreshed, sequenced
+        // exactly like init above (S5-5 race fix: restore first,
+        // then refresh).
+        groupAuth?.let { auth ->
+            viewModelScope.launch {
+                auth.userState.collect { authUser ->
+                    val newUser =
+                        if (authUser == null || authUser.isGuest) fallbackUser else authUser
+                    if (newUser == userFlow.value) return@collect
+                    userFlow.value = newUser
+                    restoreRunningSession()
+                    refreshStats()
                 }
             }
         }
@@ -149,7 +199,7 @@ class FocusViewModel @Inject constructor(
             _uiState.value.sessionId?.let { pomodoroAlarm.cancel(it) }
             tickerJob?.cancel()
             val now = System.currentTimeMillis()
-            val session = focusRepository.startSession(userId, taskId, minutes, kind, now)
+            val session = focusRepository.startSession(currentUserId, taskId, minutes, kind, now)
             val title = taskTitle(taskId)
             pomodoroAlarm.scheduleEnd(session.id, kind, title, session.plannedEndEpochMillis)
             _uiState.update {
@@ -272,7 +322,7 @@ class FocusViewModel @Inject constructor(
      * persisted end, and its alarm is re-armed.
      */
     suspend fun restoreRunningSession(now: Long = System.currentTimeMillis()) {
-        val running = focusRepository.getRunningSession(userId) ?: return
+        val running = focusRepository.getRunningSession(currentUserId) ?: return
         if (PomodoroCycle.isFinished(running.plannedEndEpochMillis, now)) {
             focusRepository.completeSession(running.id, now)
             refreshStats(now)
@@ -312,8 +362,8 @@ class FocusViewModel @Inject constructor(
     }
 
     private suspend fun refreshStats(now: Long = System.currentTimeMillis()) {
-        val minutes = focusRepository.getFocusMinutesForDay(userId, now)
-        val count = focusRepository.getCompletedFocusCountSince(userId, startOfDayMillis(now))
+        val minutes = focusRepository.getFocusMinutesForDay(currentUserId, now)
+        val count = focusRepository.getCompletedFocusCountSince(currentUserId, startOfDayMillis(now))
         _uiState.update {
             it.copy(
                 todaysFocusMinutes = minutes,

@@ -21,6 +21,9 @@ import com.nextgentool.nudgy.ai.LlmUsageCounter
 import com.nextgentool.nudgy.ai.ReplySoundPlayer
 import com.nextgentool.nudgy.ai.VoiceInput
 import com.nextgentool.nudgy.ai.VoiceInputError
+import com.nextgentool.nudgy.auth.AuthManager
+import com.nextgentool.nudgy.auth.GroupAuth
+import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.model.Priority
@@ -32,6 +35,7 @@ import com.nextgentool.nudgy.domain.endOfDayMillis
 import com.nextgentool.nudgy.domain.startOfDayMillis
 import com.nextgentool.nudgy.domain.usecase.PlanDayUseCase
 import com.nextgentool.nudgy.ui.screens.ChatActionType
+import com.nextgentool.nudgy.ui.screens.ChatMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -271,7 +275,7 @@ class ChatViewModelTest {
         context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE).edit().clear().apply()
     }
 
-    private fun newViewModel() = ChatViewModel(
+    private fun newViewModel(fakeAuth: GroupAuth? = null) = ChatViewModel(
         chatRepository, preFilter, taskRepository, calendarRepository,
         fakeVoice, fakeSound,
         LlmFallbackHandler(
@@ -285,7 +289,8 @@ class ChatViewModelTest {
         context,
         LlmConfigProvider { config },
         fakeRewarded,
-        PlanDayUseCase()
+        PlanDayUseCase(),
+        fakeAuth
     ).also { viewModelStore.put("chat", it) }
 
     private fun setByokKey() {
@@ -2000,6 +2005,50 @@ class ChatViewModelTest {
             val created = taskRepository.getAllTasksOnce(userId)
             assertEquals(1, created.size)
             assertTrue(created.single().title.contains("বাজার"))
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    // ---- Sprint 5 fix round 4: live user ----
+
+    @Test
+    fun `messages follow the guest to signed-in flip`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            // setUp wrote test-user-1; this test starts as guest, like a
+            // fresh install before sign-in.
+            context.getSharedPreferences("nudgy_auth_prefs", Context.MODE_PRIVATE)
+                .edit().putString("active_user_id", AuthManager.GUEST_USER_ID).apply()
+            // A message on the signed-in uid's history, seeded before
+            // the ViewModel exists.
+            chatRepository.addMessage(
+                userId,
+                ChatMessage(id = "signed-in-note", senderIsUser = true, text = "Signed-in note")
+            )
+            val fakeAuth = FlipGroupAuth()
+            val viewModel = newViewModel(fakeAuth)
+
+            // Guest phase: only the guest's own welcome message.
+            val guestMessages = viewModel.messages.first { it.size == 1 }
+            assertEquals("Hi! What can I help you get done today?", guestMessages.single().text)
+
+            fakeAuth.userStateFlow.value =
+                NudgyUser(uid = userId, displayName = "Ayesha", email = "ayesha@example.com")
+
+            // After the flip the signed-in user's history appears (the
+            // welcome is NOT re-seeded: history already exists) and the
+            // guest's welcome disappears with the guest flow.
+            val signedInMessages = viewModel.messages.first { messages ->
+                messages.any { it.text == "Signed-in note" }
+            }
+            assertFalse(signedInMessages.any { it.text == "Hi! What can I help you get done today?" })
+
+            // The screen's user follows the flip too.
+            val signedInUser = viewModel.user.first { !it.isGuest }
+            assertEquals(userId, signedInUser.uid)
+            assertEquals("Ayesha", signedInUser.displayName)
         } finally {
             Dispatchers.resetMain()
         }
