@@ -237,19 +237,27 @@ class LiveUserViewModelFlipTest {
         ).also { store.put("plan", it) }
 
         // Guest phase: the draft seeds from the guest's today-due task.
+        // A today-due 60-min task is auto-picked by buildDraft (it fits
+        // the 480-min budget), so the assertion reads both sections —
+        // the section is the draft's choice, the flip is what this
+        // test proves.
         val guestState = viewModel.uiState.first { state ->
-            state.unpickedRows.any { it.task.title == "Guest task" }
+            (state.pickedRows + state.unpickedRows).any { it.task.title == "Guest task" }
         }
-        assertFalse(guestState.unpickedRows.any { it.task.title == "Signed-in task" })
+        assertFalse(
+            (guestState.pickedRows + guestState.unpickedRows).any { it.task.title == "Signed-in task" }
+        )
 
         flip(fakeAuth)
 
         // After the flip the draft re-seeds from the signed-in user's
         // tasks (the flip resets the pick state and re-seeds).
         val signedInState = viewModel.uiState.first { state ->
-            state.unpickedRows.any { it.task.title == "Signed-in task" }
+            (state.pickedRows + state.unpickedRows).any { it.task.title == "Signed-in task" }
         }
-        assertFalse(signedInState.unpickedRows.any { it.task.title == "Guest task" })
+        assertFalse(
+            (signedInState.pickedRows + signedInState.unpickedRows).any { it.task.title == "Guest task" }
+        )
     }
 
     // ---- Templates ----
