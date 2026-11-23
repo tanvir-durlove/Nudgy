@@ -588,6 +588,66 @@ class GroupRepositoryTest {
     }
 
     @Test
+    fun `reconciliation preserves a locally planned date and start`() = runTest {
+        val group = createTestGroup()
+        val doc = GroupItemDoc(
+            id = "i-plan", kind = "TASK", title = "Planned",
+            dueDateEpochMillis = 5000L
+        )
+        assertEquals(1, repo.applyPolledDocs("user-1", group.groupId, listOf(doc)))
+        // "Start my day" stamps the plan onto the local row only.
+        val planned = db.taskDao().getTaskById("i-plan")!!.copy(
+            plannedDate = "2026-11-23",
+            plannedStartEpochMillis = 9 * 3_600_000L,
+            carriedOverFromDate = "2026-11-22",
+            // The existing local-state preservation, asserted together
+            // so a future reconcile change cannot silently drop it.
+            isCompleted = true, status = TaskStatus.DONE, boardOrder = 7
+        )
+        db.taskDao().insertTask(planned)
+        // A later snapshot re-applies the doc (edited title still lands).
+        assertEquals(
+            0,
+            repo.applyPolledDocs(
+                "user-1", group.groupId,
+                listOf(doc.copy(title = "Planned (edited)"))
+            )
+        )
+        val kept = db.taskDao().getTaskById("i-plan")
+        checkNotNull(kept)
+        assertEquals("Planned (edited)", kept.title)
+        assertEquals("2026-11-23", kept.plannedDate)
+        assertEquals(9 * 3_600_000L, kept.plannedStartEpochMillis)
+        assertEquals("2026-11-22", kept.carriedOverFromDate)
+        assertTrue(kept.isCompleted)
+        assertEquals(TaskStatus.DONE, kept.status)
+        assertEquals(7, kept.boardOrder)
+    }
+
+    @Test
+    fun `reconciliation leaves planned fields null on a never-planned row`() = runTest {
+        val group = createTestGroup()
+        val doc = GroupItemDoc(
+            id = "i-unplanned", kind = "TASK", title = "Unplanned",
+            dueDateEpochMillis = 5000L
+        )
+        assertEquals(1, repo.applyPolledDocs("user-1", group.groupId, listOf(doc)))
+        assertEquals(
+            0,
+            repo.applyPolledDocs(
+                "user-1", group.groupId,
+                listOf(doc.copy(title = "Unplanned (edited)"))
+            )
+        )
+        val kept = db.taskDao().getTaskById("i-unplanned")
+        checkNotNull(kept)
+        assertEquals("Unplanned (edited)", kept.title)
+        assertNull(kept.plannedDate)
+        assertNull(kept.plannedStartEpochMillis)
+        assertNull(kept.carriedOverFromDate)
+    }
+
+    @Test
     fun `getGroupDeleteSignal returns the stored signal and false for a missing group`() = runTest {
         fake.seedGroup(
             "g-1",

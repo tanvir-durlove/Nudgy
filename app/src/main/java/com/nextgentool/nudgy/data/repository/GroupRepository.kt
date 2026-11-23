@@ -1271,7 +1271,18 @@ class GroupRepository(
             // appends at the END of TODO.
             status = existing?.status ?: TaskStatus.TODO,
             boardOrder = existing?.boardOrder
-                ?: ((taskDao.getMaxBoardOrder(userId, TaskStatus.TODO.name) ?: -1) + 1)
+                ?: ((taskDao.getMaxBoardOrder(userId, TaskStatus.TODO.name) ?: -1) + 1),
+            // Sprint 5 fix round 2 — the plan is LOCAL state too
+            // (device test on ci-797: a group task planned in Plan
+            // never reached Today). The doc carries no plannedDate,
+            // plannedStart or carriedOverFromDate, and this upsert
+            // rebuilds the row from the doc — without these, every
+            // listener event and poll tick wiped the "Start my day"
+            // stamp, so Today (plannedDate == today) never showed the
+            // group task. Same pattern as status/boardOrder above.
+            plannedDate = existing?.plannedDate,
+            plannedStartEpochMillis = existing?.plannedStartEpochMillis,
+            carriedOverFromDate = existing?.carriedOverFromDate
         )
         taskDao.insertTask(task)
         scheduleGroupTaskAlarm(task)
