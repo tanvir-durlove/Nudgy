@@ -290,12 +290,24 @@ class GroupsViewModel @Inject constructor(
         // guest→signed-in flip after the Groups "Sign in" button
         // starts it then, with no restart. startGroupSync stops the
         // old listeners first, so a second call is safe.
+        //
+        // Sprint 5 fix round 3 — restore FIRST (device test on
+        // ci-798: after reinstall the groups were gone because
+        // restoreGroupsFromMirror was never called anywhere, and
+        // startGroupSync only attaches listeners for LOCAL group
+        // ids). Restore reads the membership mirror, so a fresh
+        // install / new device gets its groups back before the
+        // listeners attach below. It is idempotent — existing local
+        // rows are never touched — so a second call is harmless.
         viewModelScope.launch {
             groupAuth.userState.collect { authUser ->
                 val newUser = if (authUser == null || authUser.isGuest) fallbackUser else authUser
                 if (newUser == userFlow.value) return@collect
                 userFlow.value = newUser
-                if (!newUser.isGuest) groupRepository.startGroupSync(newUser.uid)
+                if (!newUser.isGuest) {
+                    groupRepository.restoreGroupsFromMirror(newUser.uid)
+                    groupRepository.startGroupSync(newUser.uid)
+                }
             }
         }
     }

@@ -238,12 +238,32 @@ class GroupRepository(
                 val name = groupFields?.get("name") as? String
                     ?: return@withContext GroupResult.Err("That group is no longer available.")
                 val creatorUid = groupFields["creatorUid"] as? String ?: ""
-                remote.joinMemberDocs(
-                    groupId = groupId,
-                    userId = userId,
-                    memberFields = memberCreateFields(userId, displayName, code),
-                    mirrorFields = mirrorFields(groupId, name, code)
-                )
+                // Sprint 5 fix round 3 — rejoin by an existing member
+                // (device test on ci-798: after reinstall the admin
+                // could not rejoin by code). A batch.set() on the
+                // existing member doc is evaluated by the rules as an
+                // UPDATE, and the members block has no allow update —
+                // so joinMemberDocs is denied and the whole batch
+                // (mirror included) fails. Check membership first: an
+                // existing member restores locally instead (mirror +
+                // local row + listeners), with no member-doc write and
+                // no MEMBER_JOINED entry — this is a restore, not a
+                // new join. (A single-doc get of the caller's own doc
+                // is rules-safe even for a non-member, unlike the
+                // members collection read.)
+                val alreadyMember = remote.getMemberDoc(groupId, userId) != null
+                if (alreadyMember) {
+                    remote.writeMembershipMirror(
+                        userId, groupId, mirrorFields(groupId, name, code)
+                    )
+                } else {
+                    remote.joinMemberDocs(
+                        groupId = groupId,
+                        userId = userId,
+                        memberFields = memberCreateFields(userId, displayName, code),
+                        mirrorFields = mirrorFields(groupId, name, code)
+                    )
+                }
                 val entity = GroupEntity(
                     groupId = groupId,
                     name = name,
@@ -252,11 +272,15 @@ class GroupRepository(
                     joinedAtEpochMillis = System.currentTimeMillis()
                 )
                 groupDao.insertGroup(entity)
-                // Sprint 5-5: joining is history (the re-join no-op
-                // above returns before this — no duplicate entry).
-                recordActivity(
-                    groupId, GroupActivityType.MEMBER_JOINED, userId, displayName
-                )
+                if (!alreadyMember) {
+                    // Sprint 5-5: joining is history (the re-join
+                    // no-op above returns before this — no duplicate
+                    // entry) — but a restore is not a join, so it
+                    // records nothing.
+                    recordActivity(
+                        groupId, GroupActivityType.MEMBER_JOINED, userId, displayName
+                    )
+                }
                 startGroupSync(userId)
                 GroupResult.Ok(entity)
             } catch (e: Exception) {

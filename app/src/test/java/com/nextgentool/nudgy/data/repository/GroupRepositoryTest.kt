@@ -153,6 +153,72 @@ class GroupRepositoryTest {
         assertEquals(0, fake.joinMemberDocsCalls)
     }
 
+    @Test
+    fun `joinGroup restores locally when already a member remotely instead of rewriting the member doc`() = runTest {
+        val group = createTestGroup()
+        // Fresh install: the local row is gone, but the creator is
+        // still a member in Firestore (member doc + mirror present).
+        db.groupDao().deleteGroupById(group.groupId)
+        val joinCallsBefore = fake.joinMemberDocsCalls
+        val mirrorCallsBefore = fake.writeMembershipMirrorCalls
+        val activityBefore = fake.activity[group.groupId]?.size ?: 0
+
+        val result = repo.joinGroup("user-1", "Creator", group.code)
+
+        val entity = (result as GroupResult.Ok).value
+        assertEquals(group.groupId, entity.groupId)
+        // No member-doc write was attempted: the live rules deny a
+        // set on an existing member doc (no allow update), and the
+        // fake models that denial — the old code fails this test.
+        assertEquals(joinCallsBefore, fake.joinMemberDocsCalls)
+        // The mirror was rewritten so the restore survives.
+        assertEquals(mirrorCallsBefore + 1, fake.writeMembershipMirrorCalls)
+        checkNotNull(db.groupDao().getGroupById(group.groupId))
+        // A restore records no MEMBER_JOINED entry.
+        assertEquals(activityBefore, fake.activity[group.groupId]?.size ?: 0)
+        awaitCondition { fake.itemListenerCount(group.groupId) == 1 }
+    }
+
+    // ---------------------------------------------------------------- restore
+
+    @Test
+    fun `restoreGroupsFromMirror restores a group from its mirror after a fresh install`() = runTest {
+        val group = createTestGroup()
+        // Fresh install: Room is wiped, the mirror in Firestore survives.
+        db.groupDao().deleteGroupById(group.groupId)
+        assertNull(db.groupDao().getGroupById(group.groupId))
+
+        repo.restoreGroupsFromMirror("user-1")
+
+        val restored = db.groupDao().getGroupById(group.groupId)
+        checkNotNull(restored)
+        assertEquals("DIU 41", restored.name)
+        assertEquals(group.code, restored.code)
+        assertEquals("user-1", restored.creatorUid)
+        // A second restore never duplicates.
+        repo.restoreGroupsFromMirror("user-1")
+        assertEquals(1, db.groupDao().getGroupIdsOnce().size)
+    }
+
+    @Test
+    fun `restoreGroupsFromMirror purges a local group with no mirror entry but keeps mirrored ones`() = runTest {
+        val group = createTestGroup()
+        db.groupDao().insertGroup(
+            GroupEntity("g-orphan", "Orphan", "ORPHAN1", "user-9")
+        )
+
+        repo.restoreGroupsFromMirror("user-1")
+
+        assertNull(db.groupDao().getGroupById("g-orphan"))
+        checkNotNull(db.groupDao().getGroupById(group.groupId))
+    }
+
+    @Test
+    fun `restoreGroupsFromMirror is a no-op with no mirrors`() = runTest {
+        repo.restoreGroupsFromMirror("user-1")
+        assertTrue(db.groupDao().getGroupIdsOnce().isEmpty())
+    }
+
     // ---------------------------------------------------------------- members
 
     @Test
