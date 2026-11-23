@@ -11,6 +11,7 @@ import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
 import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.data.repository.FakeGroupRemoteGateway
+import com.nextgentool.nudgy.data.repository.GroupActivityType
 import com.nextgentool.nudgy.data.repository.GroupRepository
 import com.nextgentool.nudgy.data.repository.GroupResult
 import com.nextgentool.nudgy.data.repository.TaskRepository
@@ -461,5 +462,81 @@ class GroupsViewModelTest {
 
         assertEquals("The creator can't leave — delete the group instead.", errorDeferred.await())
         checkNotNull(fake.groups[entity.groupId])
+    }
+
+    // ---- Sprint 5-5: assign + activity history (feature 36, Q10=(a))
+
+    @Test
+    fun `assignGroupTask as creator shows the assignee name on the task`() = vmTest {
+        val viewModel = buildViewModel()
+        val created = viewModel.createGroup("DIU 41")
+        val entity = (created as GroupResult.Ok).value
+        // One repo instance plays both users: drop the local row so
+        // user-2's join takes the real remote path (otherwise the
+        // re-join no-op returns the cached row and user-2 never
+        // becomes a remote member — the S5-1 join-test pattern).
+        db.groupDao().deleteGroupById(entity.groupId)
+        groupRepository.joinGroup("user-2", "Bob", entity.code)
+        viewModel.refreshMembers(entity.groupId)
+        val taskResult = groupRepository.createGroupTask(
+            entity.groupId, userId, "Homework", null,
+            5000L, Priority.MEDIUM, TaskCategory.WORK, false
+        )
+        val task = (taskResult as GroupResult.Ok).value
+
+        viewModel.assignGroupTask(entity.groupId, task.id, "user-2")
+
+        val state = viewModel.uiState.first { state ->
+            state.allTasks.any { it.id == task.id && it.assigneeUid == "user-2" }
+        }
+        val assigned = state.allTasks.single { it.id == task.id }
+        assertEquals("Bob", assigned.assigneeName)
+    }
+
+    @Test
+    fun `assignGroupTask as a member emits the creator-only error`() = vmTest {
+        val created = groupRepository.createGroup(userId, "Creator", "DIU 41")
+        val entity = (created as GroupResult.Ok).value
+        val taskResult = groupRepository.createGroupTask(
+            entity.groupId, userId, "Homework", null,
+            5000L, Priority.MEDIUM, TaskCategory.WORK, false
+        )
+        val task = (taskResult as GroupResult.Ok).value
+        setActiveUser("user-2")
+        val viewModel = buildViewModel()
+        val errorDeferred = backgroundScope.async { viewModel.groupTaskError.first() }
+
+        viewModel.assignGroupTask(entity.groupId, task.id, "user-2")
+
+        assertEquals("Only the creator can change group tasks.", errorDeferred.await())
+        assertNull(fake.items[entity.groupId]?.get(task.id)?.get("assigneeUid"))
+    }
+
+    @Test
+    fun `refreshActivity returns the recorded history`() = vmTest {
+        val viewModel = buildViewModel()
+        val created = viewModel.createGroup("DIU 41")
+        val entity = (created as GroupResult.Ok).value
+        groupRepository.createGroupTask(
+            entity.groupId, userId, "Homework", null,
+            5000L, Priority.MEDIUM, TaskCategory.WORK, false
+        )
+
+        val history = viewModel.refreshActivity(entity.groupId)
+
+        assertTrue(history.any { it.type == GroupActivityType.GROUP_CREATED })
+        assertTrue(history.any { it.type == GroupActivityType.TASK_CREATED })
+    }
+
+    @Test
+    fun `observeActivity emits the history after attach`() = vmTest {
+        val viewModel = buildViewModel()
+        val created = viewModel.createGroup("DIU 41")
+        val entity = (created as GroupResult.Ok).value
+
+        val history = viewModel.observeActivity(entity.groupId)
+            .first { entries -> entries.any { it.type == GroupActivityType.GROUP_CREATED } }
+
+        assertTrue(history.any { it.actorUid == userId })
     }
 }

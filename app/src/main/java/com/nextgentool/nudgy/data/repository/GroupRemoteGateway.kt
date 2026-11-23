@@ -97,12 +97,13 @@ interface GroupRemoteGateway {
 
     /**
      * The creator delete cascade, in order: items, then notices, then
-     * members, then mirrors, then the code doc, then the group doc LAST
-     * (the code-doc and mirror delete rules read the group doc). Chunked
-     * at 400 writes per batch (Firestore caps a batch at 500).
-     * Sprint 5-4: notices are deleted too — the v1 cascade left the
-     * notices subcollection orphaned (subcollections survive their
-     * parent doc's deletion); spec §10 item 9 requires them gone.
+     * activity, then members, then mirrors, then the code doc, then the
+     * group doc LAST (the code-doc and mirror delete rules read the
+     * group doc). Chunked at 400 writes per batch (Firestore caps a
+     * batch at 500). Sprint 5-4: notices are deleted too — the v1
+     * cascade left the notices subcollection orphaned (subcollections
+     * survive their parent doc's deletion); spec §10 item 9 requires
+     * them gone. Sprint 5-5: same for the activity history.
      */
     suspend fun deleteGroupDocs(groupId: String, code: String?)
 
@@ -146,6 +147,14 @@ interface GroupRemoteGateway {
      */
     suspend fun queryNoticesSince(groupId: String, lastSeenMs: Long): List<GroupNotice>
 
+    // ---- activity history (Sprint 5-5, feature 36, Q10=(a)) ----
+
+    /** Adds an activity doc; returns its id. */
+    suspend fun addActivity(groupId: String, fields: Map<String, Any>): String
+
+    /** Every activity entry of a group as (doc id, fields) pairs, newest first. */
+    suspend fun getActivity(groupId: String): List<Pair<String, Map<String, Any?>>>
+
     // ---- listeners ----
 
     /** Watches a group's items; returns a remover. The callback receives only non-empty change lists. */
@@ -163,6 +172,15 @@ interface GroupRemoteGateway {
     fun addNoticesListener(
         groupId: String,
         onNotices: (List<GroupNotice>) -> Unit
+    ): () -> Unit
+
+    /**
+     * Sprint 5-5 — watches a group's activity history; returns a
+     * remover. Same full-list contract as the notices listener.
+     */
+    fun addActivityListener(
+        groupId: String,
+        onActivity: (List<GroupActivityEntry>) -> Unit
     ): () -> Unit
 
     /** Watches a group doc; fires when the doc vanishes (creator deleted the group). Returns a remover. */
@@ -347,14 +365,20 @@ class FirestoreGroupRemoteGateway(
             .limit(500).get().await().documents.map { it.id }
         val noticeIds = groupRef.collection("notices")
             .limit(500).get().await().documents.map { it.id }
+        // Sprint 5-5: the activity history lives under the group doc,
+        // so the cascade deletes it too — spec §7 item 9 (delete
+        // removes everything) covers history as well.
+        val activityIds = groupRef.collection("activity")
+            .limit(500).get().await().documents.map { it.id }
         val itemRefs = itemIds.map { groupRef.collection("items").document(it) }
         val noticeRefs = noticeIds.map { groupRef.collection("notices").document(it) }
+        val activityRefs = activityIds.map { groupRef.collection("activity").document(it) }
         val memberRefs = memberIds.map { groupRef.collection("members").document(it) }
         val mirrorRefs = memberIds.map { uid ->
             fs.collection("users").document(uid)
                 .collection("groupMemberships").document(groupId)
         }
-        for (refs in listOf(itemRefs, noticeRefs, memberRefs, mirrorRefs)) {
+        for (refs in listOf(itemRefs, noticeRefs, activityRefs, memberRefs, mirrorRefs)) {
             for (chunk in refs.chunked(400)) {
                 val batch = fs.batch()
                 for (ref in chunk) batch.delete(ref)
@@ -433,7 +457,44 @@ class FirestoreGroupRemoteGateway(
                 noticeFromDoc(doc.id, groupId, normalizeFields(doc.data ?: emptyMap()))
             }
 
+    // ---- activity history ----
+
+    override suspend fun addActivity(groupId: String, fields: Map<String, Any>): String =
+        firestore().collection("groups").document(groupId)
+            .collection("activity")
+            .add(fields + timestampFields("createdAt"))
+            .await().id
+
+    override suspend fun getActivity(groupId: String): List<Pair<String, Map<String, Any?>>> =
+        firestore().collection("groups").document(groupId)
+            .collection("activity")
+            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .limit(ACTIVITY_QUERY_LIMIT)
+            .get().await().documents.map { it.id to normalizeFields(it.data ?: emptyMap()) }
+
     // ---- listeners ----
+
+    override fun addActivityListener(
+        groupId: String,
+        onActivity: (List<GroupActivityEntry>) -> Unit
+    ): () -> Unit {
+        val registration = firestore().collection("groups").document(groupId)
+            .collection("activity")
+            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w(TAG, "Group activity listener error for $groupId: ${error.message}")
+                    return@addSnapshotListener
+                }
+                if (snapshot == null) return@addSnapshotListener
+                onActivity(
+                    snapshot.documents.mapNotNull { doc ->
+                        activityFromDoc(doc.id, groupId, normalizeFields(doc.data ?: emptyMap()))
+                    }
+                )
+            }
+        return { registration.remove() }
+    }
 
     override fun addNoticesListener(
         groupId: String,
@@ -503,5 +564,7 @@ class FirestoreGroupRemoteGateway(
         const val POLL_OVERLAP_MS = 60_000L
         const val POLL_QUERY_LIMIT = 50L
         const val NOTICE_QUERY_LIMIT = 100L
+        /** Activity history page: newest first, one screenful and a half. */
+        const val ACTIVITY_QUERY_LIMIT = 50L
     }
 }

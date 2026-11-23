@@ -333,4 +333,124 @@ class GroupModelsTest {
         assertEquals(0, doc.completedCount)
         assertEquals("SCHEDULE", doc.kind)
     }
+
+    // ---------------------------------------------------------------- S5-5: assign + activity history
+
+    @Test
+    fun `groupItemDocFromFields reads the assignee and defaults an unassigned doc to nulls`() {
+        val assigned = groupItemDocFromFields(
+            "i-1", mapOf(
+                "kind" to "TASK", "title" to "Homework",
+                "assigneeUid" to "u-2", "assigneeName" to "Ayesha"
+            )
+        )
+        checkNotNull(assigned)
+        assertEquals("u-2", assigned.assigneeUid)
+        assertEquals("Ayesha", assigned.assigneeName)
+        val unassigned = groupItemDocFromFields(
+            "i-2", mapOf("kind" to "TASK", "title" to "Homework")
+        )
+        checkNotNull(unassigned)
+        assertNull(unassigned.assigneeUid)
+        assertNull(unassigned.assigneeName)
+    }
+
+    private fun activityFields(
+        type: String,
+        actorUid: String = "u-1",
+        actorName: String = "Ayesha",
+        itemTitle: String? = "Homework",
+        assigneeName: String? = "Bob"
+    ): Map<String, Any?> = mutableMapOf<String, Any?>(
+        "actorUid" to actorUid,
+        "actorName" to actorName,
+        "type" to type,
+        "itemId" to "i-1",
+        "itemTitle" to itemTitle,
+        "assigneeUid" to "u-2",
+        "assigneeName" to assigneeName,
+        "createdAt" to 5_000L
+    )
+
+    private fun activityEntry(type: String): GroupActivityEntry {
+        val entry = activityFromDoc("a-1", "g-1", activityFields(type))
+        checkNotNull(entry)
+        return entry
+    }
+
+    @Test
+    fun `activityFromDoc maps every type and rejects an unknown type or a missing actor`() {
+        for (type in GroupActivityType.ALL) {
+            val entry = activityFromDoc("a-1", "g-1", activityFields(type))
+            checkNotNull(entry)
+            assertEquals(type, entry.type)
+            assertEquals("u-1", entry.actorUid)
+            assertEquals("Ayesha", entry.actorName)
+            assertEquals("Homework", entry.itemTitle)
+        }
+        assertNull(activityFromDoc("a-1", "g-1", activityFields("not_a_type")))
+        assertNull(
+            activityFromDoc("a-1", "g-1", activityFields("task_created") - "actorUid")
+        )
+        assertNull(
+            activityFromDoc("a-1", "g-1", activityFields("task_created") - "type")
+        )
+    }
+
+    @Test
+    fun `activityToFields round-trips through activityFromDoc`() {
+        val fields = activityToFields(
+            "u-1", "Ayesha", GroupActivityType.TASK_ASSIGNED,
+            itemId = "i-1", itemTitle = "Homework",
+            assigneeUid = "u-2", assigneeName = "Bob"
+        )
+        val entry = activityFromDoc("a-1", "g-1", fields + mapOf("createdAt" to 5_000L))
+        checkNotNull(entry)
+        assertEquals(GroupActivityType.TASK_ASSIGNED, entry.type)
+        assertEquals("u-2", entry.assigneeUid)
+        assertEquals("Bob", entry.assigneeName)
+        assertEquals(5_000L, entry.createdAtEpochMillis)
+    }
+
+    @Test
+    fun `activityDisplayText writes one sentence per type with a blank actor as Member`() {
+        assertEquals("Ayesha created this group", activityDisplayText(activityEntry(GroupActivityType.GROUP_CREATED)))
+        assertEquals("Ayesha joined the group", activityDisplayText(activityEntry(GroupActivityType.MEMBER_JOINED)))
+        assertEquals("Ayesha left the group", activityDisplayText(activityEntry(GroupActivityType.MEMBER_LEFT)))
+        assertEquals("Ayesha created task \u201CHomework\u201D", activityDisplayText(activityEntry(GroupActivityType.TASK_CREATED)))
+        assertEquals("Ayesha created schedule \u201CHomework\u201D", activityDisplayText(activityEntry(GroupActivityType.SCHEDULE_CREATED)))
+        assertEquals("Ayesha edited task \u201CHomework\u201D", activityDisplayText(activityEntry(GroupActivityType.TASK_EDITED)))
+        assertEquals("Ayesha deleted task \u201CHomework\u201D", activityDisplayText(activityEntry(GroupActivityType.TASK_DELETED)))
+        assertEquals("Ayesha deleted schedule \u201CHomework\u201D", activityDisplayText(activityEntry(GroupActivityType.SCHEDULE_DELETED)))
+        assertEquals("Ayesha completed \u201CHomework\u201D", activityDisplayText(activityEntry(GroupActivityType.TASK_COMPLETED)))
+        assertEquals("Ayesha reopened \u201CHomework\u201D", activityDisplayText(activityEntry(GroupActivityType.TASK_REOPENED)))
+        assertEquals("Ayesha assigned \u201CHomework\u201D to Bob", activityDisplayText(activityEntry(GroupActivityType.TASK_ASSIGNED)))
+        assertEquals("Ayesha unassigned \u201CHomework\u201D", activityDisplayText(activityEntry(GroupActivityType.TASK_UNASSIGNED)))
+        assertEquals("Ayesha sent a notice", activityDisplayText(activityEntry(GroupActivityType.NOTICE_SENT)))
+        val blankActor = activityFromDoc(
+            "a-1", "g-1", activityFields(GroupActivityType.TASK_COMPLETED, actorName = "")
+        )
+        checkNotNull(blankActor)
+        assertEquals("Member completed \u201CHomework\u201D", activityDisplayText(blankActor))
+        val blankAssignee = activityFromDoc(
+            "a-1", "g-1", activityFields(GroupActivityType.TASK_ASSIGNED, assigneeName = "")
+        )
+        checkNotNull(blankAssignee)
+        assertEquals("Ayesha assigned \u201CHomework\u201D to Member", activityDisplayText(blankAssignee))
+    }
+
+    @Test
+    fun `creator-only activity types are exactly the creator-only actions`() {
+        assertEquals(
+            setOf(
+                GroupActivityType.GROUP_CREATED, GroupActivityType.TASK_CREATED,
+                GroupActivityType.SCHEDULE_CREATED, GroupActivityType.TASK_EDITED,
+                GroupActivityType.TASK_DELETED, GroupActivityType.SCHEDULE_DELETED,
+                GroupActivityType.TASK_ASSIGNED, GroupActivityType.TASK_UNASSIGNED,
+                GroupActivityType.NOTICE_SENT
+            ),
+            GroupActivityType.CREATOR_ONLY
+        )
+        assertTrue(GroupActivityType.ALL.containsAll(GroupActivityType.CREATOR_ONLY))
+    }
 }

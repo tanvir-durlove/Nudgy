@@ -95,6 +95,16 @@ fun GroupTaskDetailSheet(
                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
                 color = NudgyMuted
             )
+            // Sprint 5-5 (feature 36): the assignee's name — blank
+            // reads "Member".
+            if (task.assigneeUid != null) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Assigned to ${task.assigneeName?.ifBlank { "Member" } ?: "Member"}",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    color = NudgyMuted
+                )
+            }
             if (!task.description.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(

@@ -114,6 +114,25 @@ class GroupRepository(
 
     private val noticeListeners = mutableMapOf<String, () -> Unit>()
 
+    /**
+     * Sprint 5-5 (feature 36, Q10=(a)): the activity history per
+     * group, newest first, as the listener last reported it.
+     * In-memory only — no new Room table: the listener re-fires the
+     * full snapshot on every attach, so the list repopulates on
+     * restart, and [refreshActivity] + the optimistic prepend in
+     * [recordActivity] feed the same map. [MutableStateFlow] is
+     * thread-safe: writers are the listener scope, the refresh path
+     * and [recordActivity].
+     */
+    private val activityFlow =
+        MutableStateFlow<Map<String, List<GroupActivityEntry>>>(emptyMap())
+
+    /** The activity history of one group, newest first (empty until the first snapshot). */
+    fun observeActivity(groupId: String): Flow<List<GroupActivityEntry>> =
+        activityFlow.map { it[groupId] ?: emptyList() }
+
+    private val activityListeners = mutableMapOf<String, () -> Unit>()
+
     companion object {
         private const val TAG = "GroupRepository"
         private const val CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -179,6 +198,11 @@ class GroupRepository(
                         joinedAtEpochMillis = System.currentTimeMillis()
                     )
                     groupDao.insertGroup(entity)
+                    // Sprint 5-5: the group itself is the first
+                    // history entry.
+                    recordActivity(
+                        groupId, GroupActivityType.GROUP_CREATED, userId, displayName
+                    )
                     startGroupSync(userId)
                     return@withContext GroupResult.Ok(entity)
                 } catch (e: Exception) {
@@ -228,6 +252,11 @@ class GroupRepository(
                     joinedAtEpochMillis = System.currentTimeMillis()
                 )
                 groupDao.insertGroup(entity)
+                // Sprint 5-5: joining is history (the re-join no-op
+                // above returns before this — no duplicate entry).
+                recordActivity(
+                    groupId, GroupActivityType.MEMBER_JOINED, userId, displayName
+                )
                 startGroupSync(userId)
                 GroupResult.Ok(entity)
             } catch (e: Exception) {
@@ -330,6 +359,14 @@ class GroupRepository(
         )
         taskDao.insertTask(task)
         scheduleGroupTaskAlarm(task)
+        recordActivity(
+            groupId,
+            GroupActivityType.TASK_CREATED,
+            creatorUid,
+            resolveMemberName(groupId, creatorUid),
+            itemId = itemId,
+            itemTitle = title
+        )
         GroupResult.Ok(task)
     }
 
@@ -382,6 +419,14 @@ class GroupRepository(
             groupId = groupId
         )
         calendarDao.insertEvent(event)
+        recordActivity(
+            groupId,
+            GroupActivityType.SCHEDULE_CREATED,
+            creatorUid,
+            resolveMemberName(groupId, creatorUid),
+            itemId = itemId,
+            itemTitle = title
+        )
         GroupResult.Ok(event)
     }
 
@@ -442,6 +487,14 @@ class GroupRepository(
             )
             taskDao.insertTask(merged)
             scheduleGroupTaskAlarm(merged)
+            recordActivity(
+                groupId,
+                GroupActivityType.TASK_EDITED,
+                actorUid,
+                resolveMemberName(groupId, actorUid),
+                itemId = task.id,
+                itemTitle = task.title
+            )
             GroupResult.Ok(Unit)
         }
     }
@@ -456,6 +509,10 @@ class GroupRepository(
         return withContext(Dispatchers.IO) {
             val creatorCheck = requireCreator(groupId, userId)
             if (creatorCheck is GroupResult.Err) return@withContext creatorCheck
+            // The title is needed for the history entry — read it
+            // before the local row is deleted below.
+            val title = if (isTask) taskDao.getTaskById(itemId)?.title
+            else calendarDao.getEventById(itemId)?.title
             try {
                 remote.deleteGroupItem(groupId, itemId)
             } catch (e: Exception) {
@@ -470,6 +527,14 @@ class GroupRepository(
             } else {
                 calendarDao.deleteEventByIdForUser(userId, itemId)
             }
+            recordActivity(
+                groupId,
+                if (isTask) GroupActivityType.TASK_DELETED else GroupActivityType.SCHEDULE_DELETED,
+                userId,
+                resolveMemberName(groupId, userId),
+                itemId = itemId,
+                itemTitle = title
+            )
             GroupResult.Ok(Unit)
         }
     }
@@ -520,6 +585,15 @@ class GroupRepository(
                     taskDao.insertTask(merged)
                     scheduleGroupTaskAlarm(merged)
                 }
+                recordActivity(
+                    groupId,
+                    if (completed) GroupActivityType.TASK_COMPLETED
+                    else GroupActivityType.TASK_REOPENED,
+                    userId,
+                    resolveMemberName(groupId, userId),
+                    itemId = itemId,
+                    itemTitle = local?.title
+                )
                 GroupResult.Ok(updated)
             } catch (e: Exception) {
                 Log.w(TAG, "setGroupTaskCompleted failed: ${e.message}")
@@ -574,6 +648,13 @@ class GroupRepository(
                     val existing = current[groupId] ?: emptyList()
                     current + (groupId to listOf(notice) + existing.filter { it.id != id })
                 }
+                recordActivity(
+                    groupId,
+                    GroupActivityType.NOTICE_SENT,
+                    authorUid,
+                    authorName,
+                    itemTitle = text
+                )
                 GroupResult.Ok(notice)
             } catch (e: Exception) {
                 Log.w(TAG, "createGroupNotice failed: ${e.message}")
@@ -617,6 +698,170 @@ class GroupRepository(
      */
     suspend fun queryGroupNoticesSince(groupId: String, lastSeenMs: Long): List<GroupNotice> =
         withContext(Dispatchers.IO) { remote.queryNoticesSince(groupId, lastSeenMs) }
+
+    // ---------------------------------------------------------------- Sprint 5-5: activity history + assign
+
+    /** Activity history of a group, newest first. A failed read returns empty — never throws. */
+    suspend fun getGroupActivity(groupId: String): List<GroupActivityEntry> =
+        withContext(Dispatchers.IO) {
+            try {
+                remote.getActivity(groupId).mapNotNull { (id, fields) ->
+                    activityFromDoc(id, groupId, fields)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "getGroupActivity failed: ${e.message}")
+                emptyList()
+            }
+        }
+
+    /**
+     * Sprint 5-5 — one-shot activity refresh for the detail: reads the
+     * list and feeds the flow, so the detail shows history even before
+     * the listener's first snapshot. Returns the fresh list (empty on
+     * failure — the previous list stays in the flow, never wiped).
+     */
+    suspend fun refreshActivity(groupId: String): List<GroupActivityEntry> =
+        withContext(Dispatchers.IO) {
+            val fresh = getGroupActivity(groupId)
+            if (fresh.isNotEmpty()) {
+                activityFlow.update { it + (groupId to fresh) }
+            }
+            fresh
+        }
+
+    /** A member's cached display name ("" when unknown — the UI reads blank as "Member"). */
+    private suspend fun resolveMemberName(groupId: String, uid: String): String =
+        try {
+            groupMemberDao.getMembersOnce(groupId)
+                .firstOrNull { it.uid == uid }?.displayName ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+
+    /**
+     * Sprint 5-5 — records one history entry. Best-effort by design:
+     * history must never fail the action it records, so a failure is
+     * logged, never thrown. Offline the write queues in Firestore's
+     * local cache and syncs on reconnect; the listener re-fires the
+     * full list on attach, so the optimistic prepend below is only
+     * for instant feedback (the snapshot replaces the whole list,
+     * never appends — idempotent).
+     */
+    private suspend fun recordActivity(
+        groupId: String,
+        type: String,
+        actorUid: String,
+        actorName: String,
+        itemId: String? = null,
+        itemTitle: String? = null,
+        assigneeUid: String? = null,
+        assigneeName: String? = null
+    ) {
+        try {
+            val id = remote.addActivity(
+                groupId,
+                activityToFields(actorUid, actorName, type, itemId, itemTitle, assigneeUid, assigneeName)
+            )
+            val entry = GroupActivityEntry(
+                id = id,
+                groupId = groupId,
+                actorUid = actorUid,
+                actorName = actorName,
+                type = type,
+                itemId = itemId,
+                itemTitle = itemTitle,
+                assigneeUid = assigneeUid,
+                assigneeName = assigneeName,
+                createdAtEpochMillis = System.currentTimeMillis()
+            )
+            activityFlow.update { current ->
+                val existing = current[groupId] ?: emptyList()
+                current + (groupId to listOf(entry) + existing.filter { it.id != id })
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "recordActivity $type failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Sprint 5-5 — creator-only assign (feature 36, Q3=(b): assigning
+     * is an edit, so only the creator assigns). The assignee must be a
+     * current member; null unassigns. Writes assigneeUid + the
+     * denormalized assigneeName to the item doc (merge) and the local
+     * row, so the name shows in the member's own list from the row
+     * alone. No alarm change — the assignee does not change the
+     * reminder. Records TASK_ASSIGNED / TASK_UNASSIGNED history.
+     */
+    suspend fun assignGroupTask(
+        groupId: String,
+        actorUid: String,
+        itemId: String,
+        assigneeUid: String?
+    ): GroupResult<Unit> = withContext(Dispatchers.IO) {
+        val creatorCheck = requireCreator(groupId, actorUid)
+        if (creatorCheck is GroupResult.Err) return@withContext creatorCheck
+        val local = taskDao.getTaskById(itemId)
+            ?: return@withContext GroupResult.Err("That task is no longer available.")
+        if (local.groupId != groupId) {
+            return@withContext GroupResult.Err("That task doesn't belong to this group.")
+        }
+        val assigneeName: String? = if (assigneeUid == null) {
+            null
+        } else {
+            var member = groupMemberDao.getMembersOnce(groupId)
+                .firstOrNull { it.uid == assigneeUid }
+            if (member == null) {
+                // Stale cache (a member joined on another device): one
+                // remote refresh before refusing.
+                try {
+                    refreshGroupMembers(groupId)
+                } catch (e: Exception) {
+                    Log.w(TAG, "assignGroupTask member refresh failed: ${e.message}")
+                }
+                member = groupMemberDao.getMembersOnce(groupId)
+                    .firstOrNull { it.uid == assigneeUid }
+            }
+            member?.displayName
+                ?: return@withContext GroupResult.Err("That member is not in the group.")
+        }
+        val payload = mutableMapOf<String, Any>(
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        if (assigneeUid == null) {
+            payload["assigneeUid"] = FieldValue.delete()
+            payload["assigneeName"] = FieldValue.delete()
+        } else {
+            payload["assigneeUid"] = assigneeUid
+            payload["assigneeName"] = assigneeName ?: ""
+        }
+        try {
+            updateGroupItem(groupId, itemId, payload)
+        } catch (e: Exception) {
+            Log.w(TAG, "assignGroupTask failed: ${e.message}")
+            return@withContext GroupResult.Err(
+                "Could not assign the task. Check your connection and try again."
+            )
+        }
+        taskDao.insertTask(
+            local.copy(
+                assigneeUid = assigneeUid,
+                assigneeName = assigneeName,
+                updatedAtEpochMillis = System.currentTimeMillis()
+            )
+        )
+        recordActivity(
+            groupId = groupId,
+            type = if (assigneeUid == null) GroupActivityType.TASK_UNASSIGNED
+            else GroupActivityType.TASK_ASSIGNED,
+            actorUid = actorUid,
+            actorName = resolveMemberName(groupId, actorUid),
+            itemId = itemId,
+            itemTitle = local.title,
+            assigneeUid = assigneeUid,
+            assigneeName = assigneeName
+        )
+        GroupResult.Ok(Unit)
+    }
 
     // ---------------------------------------------------------------- Phase 3: members / leave / delete
 
@@ -693,6 +938,9 @@ class GroupRepository(
             // S5-3: same for notices — a later rejoin re-fires the
             // notices snapshot and repopulates them.
             noticesFlow.update { current -> current - groupId }
+            // S5-5: same for activity — a later rejoin re-fires the
+            // activity snapshot and repopulates it.
+            activityFlow.update { current -> current - groupId }
             try {
                 reconcileGroupItems(userId, groupId, emptySet())
             } catch (e: Exception) {
@@ -731,6 +979,15 @@ class GroupRepository(
                 } catch (e: Exception) {
                     Log.w(TAG, "leaveGroup completion sweep failed: ${e.message}")
                 }
+                // Sprint 5-5: the leave stays in history (the entry
+                // keeps the leaver's name — it is denormalized at
+                // write time, so it still reads after they go).
+                recordActivity(
+                    groupId,
+                    GroupActivityType.MEMBER_LEFT,
+                    userId,
+                    resolveMemberName(groupId, userId)
+                )
                 purgeLocalGroup(userId, groupId)
                 GroupResult.Ok(Unit)
             } catch (e: Exception) {
@@ -860,6 +1117,7 @@ class GroupRepository(
                 attachGroupListener(userId, groupId)
                 attachGroupDocListener(userId, groupId)
                 attachNoticesListener(groupId)
+                attachActivityListener(groupId)
             }
         }
     }
@@ -871,13 +1129,16 @@ class GroupRepository(
         groupDocListeners.clear()
         noticeListeners.values.forEach { it() }
         noticeListeners.clear()
+        activityListeners.values.forEach { it() }
+        activityListeners.clear()
     }
 
-    /** Drops all three listeners for one group (leave/delete/purge path). */
+    /** Drops all four listeners for one group (leave/delete/purge path). */
     private fun stopGroupListener(groupId: String) {
         groupListeners.remove(groupId)?.invoke()
         groupDocListeners.remove(groupId)?.invoke()
         noticeListeners.remove(groupId)?.invoke()
+        activityListeners.remove(groupId)?.invoke()
     }
 
     /**
@@ -894,6 +1155,23 @@ class GroupRepository(
             noticeListeners[groupId] = remove
         } catch (e: Exception) {
             Log.w(TAG, "Failed to attach notices listener for $groupId: ${e.message}")
+        }
+    }
+
+    /**
+     * Sprint 5-5 — watches a group's activity history: every snapshot
+     * replaces the flow entry (newest first), so the detail list
+     * updates live while the app is open (spec §6) and the poll
+     * worker's baseline never needs a local copy.
+     */
+    private fun attachActivityListener(groupId: String) {
+        try {
+            val remove = remote.addActivityListener(groupId) { entries ->
+                activityFlow.update { it + (groupId to entries) }
+            }
+            activityListeners[groupId] = remove
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to attach activity listener for $groupId: ${e.message}")
         }
     }
 
@@ -980,6 +1258,11 @@ class GroupRepository(
             createdAtEpochMillis = existing?.createdAtEpochMillis ?: System.currentTimeMillis(),
             updatedAtEpochMillis = System.currentTimeMillis(),
             groupId = groupId,
+            // Sprint 5-5: the assignee rides on the doc — feed the
+            // local row so the member's own list shows the name from
+            // the row alone (no member lookup exists there).
+            assigneeUid = doc.assigneeUid,
+            assigneeName = doc.assigneeName,
             // S1-4g: the doc carries no status and no order — both are
             // LOCAL state. A member's local completion (status DONE) and
             // local Board order must survive reconciliation, or every

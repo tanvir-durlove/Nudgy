@@ -834,6 +834,15 @@ private fun BoardTaskCard(
                             color = NudgyAccent
                         )
                     }
+                    // Sprint 5-5 (feature 36): the assignee's name,
+                    // denormalized on the row — blank reads "Member".
+                    if (task.assigneeUid != null) {
+                        Text(
+                            text = "· ${task.assigneeName?.ifBlank { "Member" } ?: "Member"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = NudgyMuted
+                        )
+                    }
                 }
             }
         }

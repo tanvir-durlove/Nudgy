@@ -59,7 +59,17 @@ data class TaskEntity(
      * Room's expected column order. Subtasks keep 0 (they have no Board
      * presence); the Board only ever orders top-level tasks.
      */
-    val boardOrder: Int = 0
+    val boardOrder: Int = 0,
+    /**
+     * Sprint 5-5 (feature 36, Q10=(a)): the assigned member. UID is
+     * the source of truth; the name is denormalized display text (same
+     * pattern as creatorName/authorName on group/notice docs) so the
+     * member's own list can show the name from the local row alone.
+     * Both null = unassigned. Appended after boardOrder (same
+     * last-column convention).
+     */
+    val assigneeUid: String? = null,
+    val assigneeName: String? = null
 )
 
 @Entity(tableName = "calendar_events")

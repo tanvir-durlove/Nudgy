@@ -314,6 +314,21 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
     }
 }
 
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Sprint 5-5 (feature 36, Q10=(a)): the assigned member on a
+        // group task. Two nullable columns, appended last (the
+        // boardOrder convention): assigneeUid is the source of truth,
+        // assigneeName is denormalized display text so the member's
+        // own list can show the name from the local row alone (no
+        // member lookup exists in the Tasks/Today/Board/Matrix rows).
+        // Old rows migrate with both null = unassigned; personal
+        // tasks never carry an assignee.
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `assigneeUid` TEXT")
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `assigneeName` TEXT")
+    }
+}
+
 @Database(
     entities = [
         TaskEntity::class,
@@ -333,7 +348,7 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
         HabitEntity::class,
         HabitCheckInEntity::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -365,7 +380,7 @@ abstract class NudgyDatabase : RoomDatabase() {
                     NudgyDatabase::class.java,
                     "nudgy_local_db"
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                     // Public-launch policy (revisited from the pre-launch
                     // note): destructive fallback is RETIRED from v5.
                     // Every distributed install is v4 (1.0.2 was the first

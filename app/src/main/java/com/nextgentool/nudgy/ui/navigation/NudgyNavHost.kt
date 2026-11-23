@@ -498,6 +498,14 @@ fun NudgyNavHost(
                 onObserveNotices = { groupId -> groupsViewModel.observeNotices(groupId) },
                 onRefreshNotices = { groupId -> groupsViewModel.refreshNotices(groupId) },
                 onSendNotice = { groupId, text -> groupsViewModel.sendNotice(groupId, text) },
+                // Sprint 5-5 — assign + activity history (feature 36,
+                // Q10=(a)): creator-only assign + the Activity card.
+                groupAssignEnabled = true,
+                onObserveActivity = { groupId -> groupsViewModel.observeActivity(groupId) },
+                onRefreshActivity = { groupId -> groupsViewModel.refreshActivity(groupId) },
+                onAssignGroupTask = { groupId, itemId, assigneeUid ->
+                    groupsViewModel.assignGroupTask(groupId, itemId, assigneeUid)
+                },
                 openGroupId = pendingOpenGroupId,
                 onOpenGroupIdConsumed = onOpenGroupIdConsumed,
                 prefillJoinCode = groupsUiState.prefillJoinCode,

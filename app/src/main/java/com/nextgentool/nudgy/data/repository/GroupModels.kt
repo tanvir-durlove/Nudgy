@@ -194,6 +194,15 @@ data class GroupItemDoc(
     val eventType: String? = null,
     val completedBy: List<String> = emptyList(),
     val completedCount: Int = 0,
+    /**
+     * Sprint 5-5 (feature 36, Q10=(a)): the assigned member — UID is
+     * the source of truth, the name is denormalized display text (the
+     * same pattern as creatorName/authorName on group/notice docs), so
+     * the member's own list can show the name from the local row alone.
+     * Both null = unassigned.
+     */
+    val assigneeUid: String? = null,
+    val assigneeName: String? = null,
     val updatedAtEpochMillis: Long? = null
 )
 
@@ -218,6 +227,8 @@ fun groupItemDocFromFields(id: String, fields: Map<String, Any?>): GroupItemDoc?
         eventType = fields["eventType"] as? String,
         completedBy = completion.completedBy,
         completedCount = completion.completedCount,
+        assigneeUid = fields["assigneeUid"] as? String,
+        assigneeName = fields["assigneeName"] as? String,
         updatedAtEpochMillis = (fields["updatedAt"] as? Number)?.toLong()
     )
 }
@@ -279,3 +290,116 @@ fun mirrorFields(groupId: String, groupName: String, code: String): Map<String, 
     "groupName" to groupName,
     "code" to code
 )
+
+// ---------------------------------------------------------------- activity history (S5-5, feature 36, Q10=(a))
+
+/** Activity types — the full set the rules allow. Admin-only actions (creator writes) are marked; member actions are the ones any member can do as themselves (complete, join, leave). */
+object GroupActivityType {
+    const val GROUP_CREATED = "group_created"
+    const val MEMBER_JOINED = "member_joined"
+    const val MEMBER_LEFT = "member_left"
+    const val TASK_CREATED = "task_created"
+    const val SCHEDULE_CREATED = "schedule_created"
+    const val TASK_EDITED = "task_edited"
+    const val TASK_DELETED = "task_deleted"
+    const val SCHEDULE_DELETED = "schedule_deleted"
+    const val TASK_COMPLETED = "task_completed"
+    const val TASK_REOPENED = "task_reopened"
+    const val TASK_ASSIGNED = "task_assigned"
+    const val TASK_UNASSIGNED = "task_unassigned"
+    const val NOTICE_SENT = "notice_sent"
+
+    /** Every type the rules accept — the create rule rejects anything outside this set. */
+    val ALL: Set<String> = setOf(
+        GROUP_CREATED, MEMBER_JOINED, MEMBER_LEFT,
+        TASK_CREATED, SCHEDULE_CREATED, TASK_EDITED, TASK_DELETED,
+        SCHEDULE_DELETED, TASK_COMPLETED, TASK_REOPENED, TASK_ASSIGNED, TASK_UNASSIGNED,
+        NOTICE_SENT
+    )
+
+    /** Types only the creator may record (they mirror creator-only actions). */
+    val CREATOR_ONLY: Set<String> = setOf(
+        GROUP_CREATED, TASK_CREATED, SCHEDULE_CREATED, TASK_EDITED,
+        TASK_DELETED, SCHEDULE_DELETED, TASK_ASSIGNED, TASK_UNASSIGNED, NOTICE_SENT
+    )
+}
+
+/** One activity-history entry: who did what, in a group. Lives under the group doc (groups/{gid}/activity/{id}) so the S5-4 delete cascade removes it with the group. Actor/assignee names are denormalized at write time (same pattern as creatorName/authorName) so entries still read after a member leaves. */
+data class GroupActivityEntry(
+    val id: String,
+    val groupId: String,
+    val actorUid: String,
+    val actorName: String,
+    val type: String,
+    val itemId: String? = null,
+    val itemTitle: String? = null,
+    val assigneeUid: String? = null,
+    val assigneeName: String? = null,
+    val createdAtEpochMillis: Long
+)
+
+/** Pure: the activity fields to write (no id, no createdAt — the gateway stamps those). */
+fun activityToFields(
+    actorUid: String,
+    actorName: String,
+    type: String,
+    itemId: String? = null,
+    itemTitle: String? = null,
+    assigneeUid: String? = null,
+    assigneeName: String? = null
+): Map<String, Any> {
+    val fields = mutableMapOf<String, Any>(
+        "actorUid" to actorUid,
+        "actorName" to actorName,
+        "type" to type
+    )
+    if (itemId != null) fields["itemId"] = itemId
+    if (itemTitle != null) fields["itemTitle"] = itemTitle
+    if (assigneeUid != null) fields["assigneeUid"] = assigneeUid
+    if (assigneeName != null) fields["assigneeName"] = assigneeName
+    return fields
+}
+
+/** Pure: reads an activity doc's field map. Null when the actor or the type is missing or the type is outside [GroupActivityType.ALL] — a doc that cannot be read as an action is not history. */
+fun activityFromDoc(id: String, groupId: String, fields: Map<String, Any?>): GroupActivityEntry? {
+    val actorUid = fields["actorUid"] as? String ?: return null
+    val type = fields["type"] as? String ?: return null
+    if (type !in GroupActivityType.ALL) return null
+    return GroupActivityEntry(
+        id = id,
+        groupId = groupId,
+        actorUid = actorUid,
+        actorName = fields["actorName"] as? String ?: "",
+        type = type,
+        itemId = fields["itemId"] as? String,
+        itemTitle = fields["itemTitle"] as? String,
+        assigneeUid = fields["assigneeUid"] as? String,
+        assigneeName = fields["assigneeName"] as? String,
+        createdAtEpochMillis = (fields["createdAt"] as? Number)?.toLong() ?: 0L
+    )
+}
+
+/** Pure: one history sentence for an entry. A blank actor name reads "Member" (the member-list convention); a quoted title is the task/schedule/notice the action touched. */
+fun activityDisplayText(entry: GroupActivityEntry): String {
+    val actor = entry.actorName.ifBlank { "Member" }
+    val title = entry.itemTitle?.let { " \u201C$it\u201D" } ?: ""
+    return when (entry.type) {
+        GroupActivityType.GROUP_CREATED -> "$actor created this group"
+        GroupActivityType.MEMBER_JOINED -> "$actor joined the group"
+        GroupActivityType.MEMBER_LEFT -> "$actor left the group"
+        GroupActivityType.TASK_CREATED -> "$actor created task$title"
+        GroupActivityType.SCHEDULE_CREATED -> "$actor created schedule$title"
+        GroupActivityType.TASK_EDITED -> "$actor edited task$title"
+        GroupActivityType.TASK_DELETED -> "$actor deleted task$title"
+        GroupActivityType.SCHEDULE_DELETED -> "$actor deleted schedule$title"
+        GroupActivityType.TASK_COMPLETED -> "$actor completed$title"
+        GroupActivityType.TASK_REOPENED -> "$actor reopened$title"
+        GroupActivityType.TASK_ASSIGNED -> {
+            val assignee = entry.assigneeName?.ifBlank { "Member" } ?: "Member"
+            "$actor assigned$title to $assignee"
+        }
+        GroupActivityType.TASK_UNASSIGNED -> "$actor unassigned$title"
+        GroupActivityType.NOTICE_SENT -> "$actor sent a notice"
+        else -> "$actor did something"
+    }
+}
