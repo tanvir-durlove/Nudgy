@@ -471,6 +471,11 @@ class GroupsViewModelTest {
         val viewModel = buildViewModel()
         val created = viewModel.createGroup("DIU 41")
         val entity = (created as GroupResult.Ok).value
+        // One repo instance plays both users: drop the local row so
+        // user-2's join takes the real remote path (otherwise the
+        // re-join no-op returns the cached row and user-2 never
+        // becomes a remote member — the S5-1 join-test pattern).
+        db.groupDao().deleteGroupById(entity.groupId)
         groupRepository.joinGroup("user-2", "Bob", entity.code)
         viewModel.refreshMembers(entity.groupId)
         val taskResult = groupRepository.createGroupTask(

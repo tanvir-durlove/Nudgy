@@ -784,6 +784,14 @@ class GroupRepositoryTest {
         group: GroupEntity,
         title: String = "Homework"
     ): TaskEntity {
+        // One repo instance plays both users here: drop the local row
+        // first, so user-2's join exercises the real remote path —
+        // otherwise joinGroup's re-join no-op returns the cached row
+        // and user-2 never becomes a remote member (the S5-1 VM-test
+        // pattern). The join re-inserts the row (same groupId,
+        // creatorUid from the remote fields), so the creator checks
+        // below still see user-1 as creator.
+        db.groupDao().deleteGroupById(group.groupId)
         repo.joinGroup("user-2", "Bob", group.code)
         repo.refreshGroupMembers(group.groupId)
         val created = repo.createGroupTask(
@@ -867,6 +875,9 @@ class GroupRepositoryTest {
     @Test
     fun `assignGroupTask preserves the local completion and never re-arms the alarm`() = runTest {
         val group = createTestGroup()
+        // Real remote join (see createTaskWithMember): the local row
+        // from createTestGroup would make joinGroup no-op.
+        db.groupDao().deleteGroupById(group.groupId)
         repo.joinGroup("user-2", "Bob", group.code)
         repo.refreshGroupMembers(group.groupId)
         val now = System.currentTimeMillis()
@@ -890,6 +901,9 @@ class GroupRepositoryTest {
     @Test
     fun `creating a group and joining record GROUP_CREATED and MEMBER_JOINED`() = runTest {
         val group = createTestGroup()
+        // Same one-instance-two-users trap as createTaskWithMember:
+        // drop the local row so the join takes the real remote path.
+        db.groupDao().deleteGroupById(group.groupId)
         repo.joinGroup("user-2", "Bob", group.code)
         val history = repo.refreshActivity(group.groupId)
         val types = history.map { it.type }.toSet()

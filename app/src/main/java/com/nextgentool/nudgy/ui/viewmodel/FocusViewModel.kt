@@ -100,8 +100,17 @@ class FocusViewModel @Inject constructor(
     private var tickerJob: Job? = null
 
     init {
-        viewModelScope.launch { restoreRunningSession() }
-        viewModelScope.launch { refreshStats() }
+        viewModelScope.launch {
+            // S5-5 fix (FocusViewModelTest "planned end passed" flake —
+            // a real init race, diagnosed 2026-11-22, AGENTS.md):
+            // restoreRunningSession() completes a past-end session and
+            // refreshes stats; a concurrent refreshStats() could finish
+            // LAST after reading the DB before the completion and
+            // overwrite the correct stats with stale ones (0 minutes /
+            // 0 completed). Sequenced: restore first, then refresh.
+            restoreRunningSession()
+            refreshStats()
+        }
         viewModelScope.launch {
             taskRepository.observeAllTasks(userId).collect { tasks ->
                 _uiState.update { state ->
