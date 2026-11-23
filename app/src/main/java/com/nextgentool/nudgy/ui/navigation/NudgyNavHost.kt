@@ -29,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -454,6 +455,10 @@ fun NudgyNavHost(
                     Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                 }
             }
+            // Sprint 5 fix round — the Groups "Sign in" button was dead
+            // (onSignInClick defaulted to {}): the Activity + scope the
+            // Credential Manager flow needs.
+            val signInScope = rememberCoroutineScope()
             val groupsUiState by groupsViewModel.uiState.collectAsState()
             val completions by groupsViewModel.observeCompletions()
                 .collectAsState(initial = emptyMap())
@@ -464,6 +469,9 @@ fun NudgyNavHost(
                 allEvents = groupsUiState.allEvents,
                 onCreateGroup = { name -> groupsViewModel.createGroup(name) },
                 onJoinGroup = { code -> groupsViewModel.joinGroup(code) },
+                onSignInClick = {
+                    (context as? Activity)?.let { groupsViewModel.signIn(it, signInScope) }
+                },
                 onCreateGroupTask = { groupId, title, description, due, priority, category, reminderSet ->
                     groupsViewModel.createGroupTask(
                         groupId, title, description, due, priority, category, reminderSet

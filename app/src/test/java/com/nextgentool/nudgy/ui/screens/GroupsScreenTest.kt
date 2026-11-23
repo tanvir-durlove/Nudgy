@@ -21,6 +21,7 @@ import com.nextgentool.nudgy.data.repository.GroupResult
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
 import kotlinx.coroutines.flow.flowOf
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -94,6 +95,7 @@ class GroupsScreenTest {
         onDeleteGroup: (String) -> Unit = {},
         onLeaveGroup: (String) -> Unit = {},
         onToggleTask: (TaskEntity) -> Unit = {},
+        onSignInClick: () -> Unit = {},
         onCreateGroup: suspend (String) -> GroupResult<GroupEntity> =
             { GroupResult.Ok(group()) },
         onJoinGroup: suspend (String) -> GroupResult<GroupEntity> =
@@ -128,6 +130,7 @@ class GroupsScreenTest {
                     onObserveActivity = { flowOf(activityOverride) },
                     onRefreshActivity = { activityOverride },
                     onSendNotice = onSendNotice,
+                    onSignInClick = onSignInClick,
                     openGroupId = openGroupId,
                     prefillJoinCode = prefillJoinCode,
                     initialSelectedGroup = initialSelectedGroup
@@ -171,6 +174,19 @@ class GroupsScreenTest {
         composeRule.onNodeWithText("Sign in to use groups").assertIsDisplayed()
         composeRule.onNodeWithText("Create").assertDoesNotExist()
         composeRule.onNodeWithText("Join with code").assertDoesNotExist()
+    }
+
+    @Test
+    fun `guest sign-in button fires the sign-in callback`() {
+        // Sprint 5 fix round — the ci-792 device test found this button
+        // dead (the NavHost never passed onSignInClick, so it defaulted
+        // to {}): the screen must honour the callback it is given.
+        var clicked = false
+        render(user = guestUser, groups = emptyList(), onSignInClick = { clicked = true })
+
+        composeRule.onNodeWithText("Sign in").performClick()
+
+        assertTrue(clicked)
     }
 
     @Test

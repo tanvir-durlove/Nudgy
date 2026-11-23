@@ -1,8 +1,10 @@
 package com.nextgentool.nudgy.ui.viewmodel
 
+import android.app.Activity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nextgentool.nudgy.auth.AuthManager
+import com.nextgentool.nudgy.auth.GroupAuth
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
@@ -18,13 +20,16 @@ import com.nextgentool.nudgy.data.repository.GroupRepository
 import com.nextgentool.nudgy.data.repository.GroupResult
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -72,18 +77,36 @@ data class GroupsUiState(
 class GroupsViewModel @Inject constructor(
     private val groupRepository: GroupRepository,
     private val taskRepository: TaskRepository,
-    private val calendarRepository: CalendarRepository
+    private val calendarRepository: CalendarRepository,
+    private val groupAuth: GroupAuth
 ) : ViewModel() {
 
-    private val userId: String = taskRepository.currentUserId()
+    /**
+     * Sprint 5 fix round — the LIVE user (device test on ci-792: the
+     * guest prompt never left because the user was captured once at
+     * construction). The fallback is the TaskRepository-derived user
+     * (ChatViewModel precedent, prefs active_user_id, blank display
+     * name); the auth flow overrides it the moment it emits a
+     * signed-in user, so a sign-in flips the tab with no restart.
+     * A guest auth emission keeps the fallback (the S5-1 blank-name
+     * decision — a guest member doc reads back as "Member").
+     */
+    private val fallbackUser: NudgyUser = run {
+        val uid = taskRepository.currentUserId()
+        NudgyUser(
+            uid = uid,
+            displayName = "",
+            email = "",
+            isGuest = uid == AuthManager.GUEST_USER_ID
+        )
+    }
+    private val userFlow = MutableStateFlow(fallbackUser)
 
-    /** The screen's `user` param (ChatViewModel precedent). */
-    val user: NudgyUser = NudgyUser(
-        uid = userId,
-        displayName = "",
-        email = "",
-        isGuest = userId == AuthManager.GUEST_USER_ID
-    )
+    /** Live user for the screen (guest until the auth flow says otherwise). */
+    val user: StateFlow<NudgyUser> = userFlow.asStateFlow()
+
+    private val currentUser: NudgyUser get() = userFlow.value
+    private val userId: String get() = currentUser.uid
 
     private val prefillJoinCodeFlow = MutableStateFlow<String?>(null)
 
@@ -134,7 +157,7 @@ class GroupsViewModel @Inject constructor(
     fun sendNotice(groupId: String, text: String) {
         viewModelScope.launch {
             val result = groupRepository.createGroupNotice(
-                groupId, userId, user.displayName, text
+                groupId, userId, currentUser.displayName, text
             )
             if (result is GroupResult.Err) _groupTaskError.emit(result.message)
         }
@@ -246,10 +269,11 @@ class GroupsViewModel @Inject constructor(
 
     val uiState: StateFlow<GroupsUiState> = combine(
         groupRepository.observeGroups(),
-        taskRepository.observeAllTasks(userId),
-        calendarRepository.observeAllEvents(userId),
-        prefillJoinCodeFlow
-    ) { groups, tasks, events, prefill ->
+        userFlow.flatMapLatest { user -> taskRepository.observeAllTasks(user.uid) },
+        userFlow.flatMapLatest { user -> calendarRepository.observeAllEvents(user.uid) },
+        prefillJoinCodeFlow,
+        userFlow
+    ) { groups, tasks, events, prefill, user ->
         GroupsUiState(
             user = user,
             groups = groups,
@@ -257,25 +281,49 @@ class GroupsViewModel @Inject constructor(
             allEvents = events,
             prefillJoinCode = prefill
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GroupsUiState(user = user))
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GroupsUiState(user = fallbackUser))
 
     init {
-        // Attach the group listeners the first time the tab is used
-        // (nothing else starts group sync in the rebuild yet — the
-        // repository only starts it from create/join). Guests sync
-        // nothing.
-        if (!user.isGuest) {
-            groupRepository.startGroupSync(userId)
+        // Sprint 5 fix round — follow the LIVE user. The auth flow
+        // replays its current value at once, so a signed-in user
+        // starts group sync here (the old once-only init guard); a
+        // guest→signed-in flip after the Groups "Sign in" button
+        // starts it then, with no restart. startGroupSync stops the
+        // old listeners first, so a second call is safe.
+        viewModelScope.launch {
+            groupAuth.userState.collect { authUser ->
+                val newUser = if (authUser == null || authUser.isGuest) fallbackUser else authUser
+                if (newUser == userFlow.value) return@collect
+                userFlow.value = newUser
+                if (!newUser.isGuest) groupRepository.startGroupSync(newUser.uid)
+            }
         }
+    }
+
+    /**
+     * Sprint 5 fix round — the Groups "Sign in" button (device test
+     * on ci-792: the button did nothing because the NavHost never
+     * passed onSignInClick and nothing reachable called
+     * AuthManager.signInWithGoogle). Errors surface on
+     * [groupTaskError] — the NavHost toasts them — never silently.
+     */
+    fun signIn(activity: Activity, scope: CoroutineScope) {
+        groupAuth.signIn(
+            activity, scope,
+            onSuccess = {},
+            onError = { message ->
+                viewModelScope.launch { _groupTaskError.emit(message) }
+            }
+        )
     }
 
     /** Creates a group (name validation + guest guard live in the repo). */
     suspend fun createGroup(name: String): GroupResult<GroupEntity> =
-        groupRepository.createGroup(userId, user.displayName, name)
+        groupRepository.createGroup(userId, currentUser.displayName, name)
 
     /** Joins by code (wrong code → Err with the message the sheet shows). */
     suspend fun joinGroup(code: String): GroupResult<GroupEntity> =
-        groupRepository.joinGroup(userId, user.displayName, code)
+        groupRepository.joinGroup(userId, currentUser.displayName, code)
 
     /** Member list with the Room cache (instant) — blank names read as "Member". */
     fun observeMembers(groupId: String): Flow<List<GroupMember>> =
@@ -289,7 +337,7 @@ class GroupsViewModel @Inject constructor(
 
     /** Stores a one-shot deep-link join code (signed-in users only). */
     fun setPrefillJoinCode(rawCode: String) {
-        if (user.isGuest) return
+        if (currentUser.isGuest) return
         val code = rawCode.trim().uppercase().filter { it.isLetterOrDigit() }
         if (code.isNotEmpty()) prefillJoinCodeFlow.value = code
     }
