@@ -222,8 +222,12 @@ class ChatScreenSmokeTest {
             // Sprint 3-7 — the voice-language toggle wires exactly as
             // the NavHost does: the mic starts with the toggle's code.
             val voiceLanguage by viewModel.voiceLanguage.collectAsState()
+            // Sprint 5 fix round 4 — ChatViewModel.user is a StateFlow
+            // now, so the screen follows a sign-in flip (same as the
+            // NavHost).
+            val chatUser by viewModel.user.collectAsState()
             ChatScreen(
-                user = viewModel.user,
+                user = chatUser,
                 messages = messages,
                 isListening = isListening,
                 isSpeaking = isSpeaking,
@@ -475,8 +479,10 @@ class ChatScreenSmokeTest {
             ChatMessage(id = "a1", senderIsUser = false, text = "Done — I will remind you about the plants.")
         )
         composeRule.setContent {
+            // Sprint 5 fix round 4 — ChatViewModel.user is a StateFlow now.
+            val chatUser by viewModel.user.collectAsState()
             ChatScreen(
-                user = viewModel.user,
+                user = chatUser,
                 messages = messages,
                 isListening = false,
                 isSpeaking = false,
@@ -517,8 +523,10 @@ class ChatScreenSmokeTest {
         var discardClicks = 0
         composeRule.setContent {
             var remaining by remember { mutableStateOf(drafts) }
+            // Sprint 5 fix round 4 — ChatViewModel.user is a StateFlow now.
+            val chatUser by viewModel.user.collectAsState()
             ChatScreen(
-                user = viewModel.user,
+                user = chatUser,
                 messages = messages,
                 isListening = false,
                 isSpeaking = false,
@@ -566,8 +574,10 @@ class ChatScreenSmokeTest {
         var watchClicks = 0
         var retryClicks = 0
         composeRule.setContent {
+            // Sprint 5 fix round 4 — ChatViewModel.user is a StateFlow now.
+            val chatUser by viewModel.user.collectAsState()
             ChatScreen(
-                user = viewModel.user,
+                user = chatUser,
                 messages = messages,
                 isListening = false,
                 isSpeaking = false,
