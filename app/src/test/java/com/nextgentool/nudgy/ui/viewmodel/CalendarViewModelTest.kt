@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.nextgentool.nudgy.auth.AuthManager
+import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.data.repository.FakeCalendarEventSync
@@ -21,6 +23,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -151,6 +154,52 @@ class CalendarViewModelTest {
                 !it.isLoading && it.selectedDayMillis == startOfDayMillis(tomorrow) && it.events.size == 1
             }
             assertEquals("Team sync", state.events.single().title)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    // ---- Sprint 5 fix round 4: live user ----
+
+    @Test
+    fun `strip tasks follow the guest to signed-in flip`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            // setUp wrote test-user-1; this test starts as guest, like a
+            // fresh install before sign-in.
+            context.getSharedPreferences("nudgy_auth_prefs", Context.MODE_PRIVATE)
+                .edit().putString("active_user_id", AuthManager.GUEST_USER_ID).apply()
+            val guestUid = AuthManager.GUEST_USER_ID
+            val signedInUid = "test-user-1"
+            taskRepository.createTask(
+                userId = guestUid, title = "Guest task", dueEpochMillis = dayAt(0, 14)
+            )
+            taskRepository.createTask(
+                userId = signedInUid, title = "Signed-in task", dueEpochMillis = dayAt(0, 15)
+            )
+
+            val fakeAuth = FlipGroupAuth()
+            val viewModel = CalendarViewModel(calendarRepository, taskRepository, groupRepository, fakeAuth)
+                .also { viewModelStore.put("calendar", it) }
+
+            // Guest phase: the guest's today task is on the strip (this
+            // proves the guest subscription is live, not just the
+            // initial empty value); the signed-in user's task is not.
+            val guestState = viewModel.uiState.first { state ->
+                state.stripTasks.any { it.title == "Guest task" }
+            }
+            assertFalse(guestState.stripTasks.any { it.title == "Signed-in task" })
+
+            fakeAuth.userStateFlow.value =
+                NudgyUser(uid = signedInUid, displayName = "Ayesha", email = "ayesha@example.com")
+
+            // After the flip the signed-in user's task takes over the
+            // strip and the guest's disappears.
+            val signedInState = viewModel.uiState.first { state ->
+                state.stripTasks.any { it.title == "Signed-in task" }
+            }
+            assertFalse(signedInState.stripTasks.any { it.title == "Guest task" })
         } finally {
             Dispatchers.resetMain()
         }

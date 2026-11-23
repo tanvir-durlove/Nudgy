@@ -27,6 +27,7 @@ import com.nextgentool.nudgy.ai.SplitParent
 import com.nextgentool.nudgy.ai.VoiceInput
 import com.nextgentool.nudgy.ai.VoiceInputError
 import com.nextgentool.nudgy.auth.AuthManager
+import com.nextgentool.nudgy.auth.GroupAuth
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
@@ -48,6 +49,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -231,24 +233,50 @@ class ChatViewModel @Inject constructor(
     // Plan pick path ([PlanDayUseCase.assignPriorityStartTimes]);
     // Hilt provides it (it has an @Inject constructor), tests pass
     // a plain instance.
-    private val planDayUseCase: PlanDayUseCase
+    private val planDayUseCase: PlanDayUseCase,
+    // Sprint 5 fix round 4 — the live-user seam (device test on
+    // ci-803: tab ViewModels froze the uid captured at construction).
+    // Nullable with a default on purpose (TodayViewModel precedent):
+    // Hilt always injects the real seam in production (AuthModule
+    // provides it); call sites that don't pass one keep the previous
+    // frozen-uid behaviour.
+    private val groupAuth: GroupAuth? = null
 ) : ViewModel() {
 
-    private val userId: String = taskRepository.currentUserId()
+    /**
+     * Sprint 5 fix round 4 — the LIVE user (GroupsViewModel pattern,
+     * PR #98). The fallback is the TaskRepository-derived user (blank
+     * display name); the auth flow overrides it the moment it emits a
+     * signed-in user. The equality guard cannot skip a real Google
+     * sign-in: the fallback has a blank email while a real sign-in
+     * always carries a non-blank one.
+     */
+    private val fallbackUser: NudgyUser = run {
+        val uid = taskRepository.currentUserId()
+        NudgyUser(
+            uid = uid,
+            displayName = "",
+            email = "",
+            isGuest = uid == AuthManager.GUEST_USER_ID
+        )
+    }
+    private val userFlow = MutableStateFlow(fallbackUser)
+
+    /** Live uid — read at call time so a sign-in flip is followed. */
+    private val currentUserId: String get() = userFlow.value.uid
 
     /** The screen's `user` param. ChatScreen does not render it today;
-     *  the value is kept honest anyway: no display name is known before
-     *  the Sprint 6 auth flow, so no name is invented here. */
-    val user: NudgyUser = NudgyUser(
-        uid = userId,
-        displayName = "",
-        email = "",
-        isGuest = userId == AuthManager.GUEST_USER_ID
-    )
+     *  the value is kept honest anyway: the fallback carries no
+     *  display name, and a signed-in user carries their real Google
+     *  name — no name is ever invented here. It is a StateFlow now
+     *  (Sprint 5 fix round 4) so the screen follows a sign-in flip
+     *  instead of the uid frozen at construction. */
+    val user: StateFlow<NudgyUser> = userFlow.asStateFlow()
 
     val messages: StateFlow<List<ChatMessage>> =
-        chatRepository.observeMessages(userId)
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        userFlow.flatMapLatest { user ->
+            chatRepository.observeMessages(user.uid)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _isThinking = MutableStateFlow(false)
     val isThinking: StateFlow<Boolean> = _isThinking.asStateFlow()
@@ -376,12 +404,29 @@ class ChatViewModel @Inject constructor(
     val pendingDraftMessageId: StateFlow<String?> = _pendingDraftMessageId.asStateFlow()
 
     init {
+        // Sprint 5 fix round 4 — follow the LIVE user (same bug as
+        // TodayViewModel on ci-803). On a flip, the new user's
+        // welcome message is seeded (no-op when history exists) and
+        // the messages flow re-subscribes via flatMapLatest.
+        groupAuth?.let { auth ->
+            viewModelScope.launch {
+                auth.userState.collect { authUser ->
+                    val newUser =
+                        if (authUser == null || authUser.isGuest) fallbackUser else authUser
+                    if (newUser == userFlow.value) return@collect
+                    userFlow.value = newUser
+                    runCatching {
+                        chatRepository.checkAndSeedWelcomeMessage(newUser.uid, "")
+                    }
+                }
+            }
+        }
         // Seed the welcome message once (no-op when history exists).
         // displayName is "" until the Sprint 6 auth flow knows the
         // user's name — ChatRepository greets neutrally ("Hi! …") with
         // no name, never a hardcoded one.
         viewModelScope.launch {
-            runCatching { chatRepository.checkAndSeedWelcomeMessage(userId, "") }
+            runCatching { chatRepository.checkAndSeedWelcomeMessage(currentUserId, "") }
         }
         // Sprint 3-4 — the rewarded entry starts from a fresh snapshot.
         refreshCapState()
@@ -499,11 +544,11 @@ class ChatViewModel @Inject constructor(
     ) {
         val result = runCatching {
             val today = startOfDayMillis(System.currentTimeMillis())
-            val todayTasks = taskRepository.getAllTasksOnce(userId)
+            val todayTasks = taskRepository.getAllTasksOnce(currentUserId)
                 .filter { it.dueDateEpochMillis in today..endOfDayMillis(today) }
             val events = calendarRepository
-                .observeEventsForDay(userId, today).first()
-            preFilter.tryHandle(userId, trimmed, todayTasks, events)
+                .observeEventsForDay(currentUserId, today).first()
+            preFilter.tryHandle(currentUserId, trimmed, todayTasks, events)
         }.getOrNull()
         when (result) {
             // S3-2: a creation parsed but NOT saved — the draft waits
@@ -596,7 +641,7 @@ class ChatViewModel @Inject constructor(
             )
             return
         }
-        val allTasks = runCatching { taskRepository.getAllTasksOnce(userId) }
+        val allTasks = runCatching { taskRepository.getAllTasksOnce(currentUserId) }
             .getOrDefault(emptyList())
         val titled = matchSplitTitle(allTasks, title)
         val topLevel = titled.filter {
@@ -652,10 +697,10 @@ class ChatViewModel @Inject constructor(
             || parent.title.any { it in '\u0980'..'\u09FF' }
         _thinkingText.value = if (isBengali) "ভাবছি…" else "Thinking…"
         val memories = runCatching {
-            memoryRepository.getMemories(userId).map { it.content }
+            memoryRepository.getMemories(currentUserId).map { it.content }
         }.getOrDefault(emptyList())
         when (val llm = llmFallbackHandler.handleSplit(
-            userId = userId,
+            userId = currentUserId,
             parent = SplitParent(parent.id, parent.title, parent.dueDateEpochMillis),
             prompt = prompt,
             recentHistory = historyBefore,
@@ -787,9 +832,9 @@ class ChatViewModel @Inject constructor(
         val isBengali = prompt.any { it in '\u0980'..'\u09FF' }
         _thinkingText.value = if (isBengali) "ভাবছি…" else "Thinking…"
         val memories = runCatching {
-            memoryRepository.getMemories(userId).map { it.content }
+            memoryRepository.getMemories(currentUserId).map { it.content }
         }.getOrDefault(emptyList())
-        return llmFallbackHandler.handleUnhandled(userId, prompt, historyBefore, memories)
+        return llmFallbackHandler.handleUnhandled(currentUserId, prompt, historyBefore, memories)
     }
 
     /** Focus proposal "Block Time" button (ChatScreen action card 2).
@@ -799,7 +844,7 @@ class ChatViewModel @Inject constructor(
      *  confirm — no second confirmation is needed for it. */
     fun onBlockFocusTime(startMillis: Long, endMillis: Long, title: String, messageId: String) {
         viewModelScope.launch {
-            runCatching { calendarRepository.blockFocusTime(userId, startMillis, endMillis, title) }
+            runCatching { calendarRepository.blockFocusTime(currentUserId, startMillis, endMillis, title) }
             runCatching { chatRepository.markFocusActionCompleted(messageId) }
         }
     }
@@ -817,7 +862,7 @@ class ChatViewModel @Inject constructor(
         _pendingDraftMessageId.value = null
         viewModelScope.launch {
             try {
-                val result = runCatching { preFilter.confirmDraft(userId, draft) }.getOrNull()
+                val result = runCatching { preFilter.confirmDraft(currentUserId, draft) }.getOrNull()
                 if (result is PreFilterResult.Handled) {
                     postAssistantMessage(
                         text = result.responseText,
@@ -1016,11 +1061,11 @@ class ChatViewModel @Inject constructor(
             }
             val today = startOfDayMillis(System.currentTimeMillis())
             val todayTasks = runCatching {
-                taskRepository.getAllTasksOnce(userId)
+                taskRepository.getAllTasksOnce(currentUserId)
                     .filter { it.dueDateEpochMillis in today..endOfDayMillis(today) }
             }.getOrDefault(emptyList())
             val events = runCatching {
-                calendarRepository.observeEventsForDay(userId, today).first()
+                calendarRepository.observeEventsForDay(currentUserId, today).first()
             }.getOrDefault(emptyList())
 
             val drafts = mutableListOf<ChatDraft>()
@@ -1030,7 +1075,7 @@ class ChatViewModel @Inject constructor(
             var llmCapped = false
             for (piece in pieces) {
                 val result = runCatching {
-                    preFilter.tryHandle(userId, piece, todayTasks, events)
+                    preFilter.tryHandle(currentUserId, piece, todayTasks, events)
                 }.getOrNull()
                 when (result) {
                     is PreFilterResult.PendingDraft -> drafts += result.draft
@@ -1173,7 +1218,7 @@ class ChatViewModel @Inject constructor(
             var failed = 0
             val createdTitles = mutableListOf<String>()
             for (draft in drafts) {
-                val result = runCatching { preFilter.confirmDraft(userId, draft) }.getOrNull()
+                val result = runCatching { preFilter.confirmDraft(currentUserId, draft) }.getOrNull()
                 if (result is PreFilterResult.Handled) {
                     created++
                     createdTitles += draft.title
@@ -1277,7 +1322,7 @@ class ChatViewModel @Inject constructor(
         val now = System.currentTimeMillis()
         val todayStart = startOfDayMillis(now)
         val todayEnd = endOfDayMillis(now)
-        val allTasks = runCatching { taskRepository.getAllTasksOnce(userId) }
+        val allTasks = runCatching { taskRepository.getAllTasksOnce(currentUserId) }
             .getOrDefault(emptyList())
         val unplaced = DayPlanner.unplacedTasks(allTasks, todayStart, todayEnd)
         if (unplaced.isEmpty()) {
@@ -1302,7 +1347,7 @@ class ChatViewModel @Inject constructor(
         val unscheduled = mutableListOf<Pair<TaskEntity, String?>>()
         for (task in DayPlanner.scheduleOrder(unplaced)) {
             val slot = runCatching {
-                calendarRepository.findSuggestedFocusSlot(userId, now, busy)
+                calendarRepository.findSuggestedFocusSlot(currentUserId, now, busy)
             }.getOrNull()
             if (slot == null || slot.endEpochMillis > todayEnd) {
                 // No free slot today (the fallback can land past
@@ -1312,7 +1357,7 @@ class ChatViewModel @Inject constructor(
                 continue
             }
             val conflict = runCatching {
-                calendarRepository.checkConflict(userId, slot.startEpochMillis, slot.endEpochMillis)
+                calendarRepository.checkConflict(currentUserId, slot.startEpochMillis, slot.endEpochMillis)
             }.getOrNull()
             if (conflict?.hasConflict == true) {
                 // The suggestion came from the same busy timeline,
@@ -1323,7 +1368,7 @@ class ChatViewModel @Inject constructor(
                 val altFree = alt != null && alt.endEpochMillis <= todayEnd &&
                     busy.none { it.first < alt.endEpochMillis && it.second > alt.startEpochMillis } &&
                     runCatching {
-                        calendarRepository.checkConflict(userId, alt.startEpochMillis, alt.endEpochMillis)
+                        calendarRepository.checkConflict(currentUserId, alt.startEpochMillis, alt.endEpochMillis)
                     }.getOrNull()?.hasConflict == false
                 if (altFree && alt != null) {
                     drafts += focusDraft(task, alt.startEpochMillis, alt.endEpochMillis, alt.durationMinutes, isBengali)
@@ -1433,7 +1478,7 @@ class ChatViewModel @Inject constructor(
             val createdLines = mutableListOf<String>()
             val timeFormat = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault())
             for (draft in drafts) {
-                val result = runCatching { preFilter.confirmDraft(userId, draft) }.getOrNull()
+                val result = runCatching { preFilter.confirmDraft(currentUserId, draft) }.getOrNull()
                 if (result is PreFilterResult.Handled) {
                     created++
                     val end = draft.endEpochMillis
@@ -1514,7 +1559,7 @@ class ChatViewModel @Inject constructor(
         val now = System.currentTimeMillis()
         val todayStart = startOfDayMillis(now)
         val todayEnd = endOfDayMillis(now)
-        val allTasks = runCatching { taskRepository.getAllTasksOnce(userId) }
+        val allTasks = runCatching { taskRepository.getAllTasksOnce(currentUserId) }
             .getOrDefault(emptyList())
         val unplaced = DayPlanner.unplacedTasks(allTasks, todayStart, todayEnd)
         if (unplaced.isEmpty()) {
@@ -1530,7 +1575,7 @@ class ChatViewModel @Inject constructor(
             if (DayPlanner.hasRealTime(task) && due in now until todayEnd) {
                 val duration = (task.estimatedMinutes ?: 30) * 60 * 1000L
                 val conflict = runCatching {
-                    calendarRepository.checkConflict(userId, due, due + duration)
+                    calendarRepository.checkConflict(currentUserId, due, due + duration)
                 }.getOrNull()
                 if (conflict?.hasConflict == true) {
                     conflicts[task.id] = conflict.conflictingEvent?.title
@@ -1617,7 +1662,7 @@ class ChatViewModel @Inject constructor(
         _pendingPriorityIsBengali.value = false
         _pendingPriorityMessageId.value = null
         viewModelScope.launch {
-            val allTasks = runCatching { taskRepository.getAllTasksOnce(userId) }
+            val allTasks = runCatching { taskRepository.getAllTasksOnce(currentUserId) }
                 .getOrDefault(emptyList())
             val byId = allTasks.associateBy { it.id }
             val ordered = orderIds.mapNotNull { byId[it] }
@@ -1692,7 +1737,7 @@ class ChatViewModel @Inject constructor(
 
     private suspend fun addMessage(senderIsUser: Boolean, text: String) {
         chatRepository.addMessage(
-            userId,
+            currentUserId,
             ChatMessage(
                 id = UUID.randomUUID().toString(),
                 senderIsUser = senderIsUser,
@@ -1716,7 +1761,7 @@ class ChatViewModel @Inject constructor(
     ): String {
         val messageId = UUID.randomUUID().toString()
         chatRepository.addMessage(
-            userId,
+            currentUserId,
             ChatMessage(
                 id = messageId,
                 senderIsUser = false,

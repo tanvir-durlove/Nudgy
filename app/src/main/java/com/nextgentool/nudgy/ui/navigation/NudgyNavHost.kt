@@ -387,9 +387,12 @@ fun NudgyNavHost(
             val rewardedLoadError by viewModel.rewardedLoadError.collectAsState()
             // Sprint 3-7 — the EN/বাংলা voice toggle.
             val voiceLanguage by viewModel.voiceLanguage.collectAsState()
+            // Sprint 5 fix round 4 — ChatViewModel.user is a StateFlow
+            // now, so the screen follows a sign-in flip.
+            val chatUser by viewModel.user.collectAsState()
             val activity = LocalContext.current as? Activity
             ChatScreen(
-                user = viewModel.user,
+                user = chatUser,
                 messages = messages,
                 isListening = isListening,
                 isSpeaking = isSpeaking,

@@ -2,6 +2,9 @@ package com.nextgentool.nudgy.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.nextgentool.nudgy.auth.AuthManager
+import com.nextgentool.nudgy.auth.GroupAuth
+import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
@@ -71,10 +74,37 @@ data class CalendarUiState(
 class CalendarViewModel @Inject constructor(
     private val calendarRepository: CalendarRepository,
     private val taskRepository: TaskRepository,
-    private val groupRepository: GroupRepository
+    private val groupRepository: GroupRepository,
+    // Sprint 5 fix round 4 — the live-user seam (device test on
+    // ci-803: tab ViewModels froze the uid captured at construction).
+    // Nullable with a default on purpose (TodayViewModel precedent):
+    // Hilt always injects the real seam in production (AuthModule
+    // provides it); call sites that don't pass one keep the previous
+    // frozen-uid behaviour.
+    private val groupAuth: GroupAuth? = null
 ) : ViewModel() {
 
-    private val userId: String = taskRepository.currentUserId()
+    /**
+     * Sprint 5 fix round 4 — the LIVE user (GroupsViewModel pattern,
+     * PR #98). The fallback is the TaskRepository-derived user (blank
+     * display name); the auth flow overrides it the moment it emits a
+     * signed-in user. The equality guard cannot skip a real Google
+     * sign-in: the fallback has a blank email while a real sign-in
+     * always carries a non-blank one.
+     */
+    private val fallbackUser: NudgyUser = run {
+        val uid = taskRepository.currentUserId()
+        NudgyUser(
+            uid = uid,
+            displayName = "",
+            email = "",
+            isGuest = uid == AuthManager.GUEST_USER_ID
+        )
+    }
+    private val userFlow = MutableStateFlow(fallbackUser)
+
+    /** Live uid — read at call time so a sign-in flip is followed. */
+    private val currentUserId: String get() = userFlow.value.uid
 
     private val selectedDay = MutableStateFlow(startOfDayMillis(System.currentTimeMillis()))
     private val isSyncing = MutableStateFlow(false)
@@ -86,11 +116,14 @@ class CalendarViewModel @Inject constructor(
     private val pendingConflict = MutableStateFlow<PendingDropConflict?>(null)
 
     // The day's events, switching flow whenever the selected day
-    // changes. Kept out of the combine below so its arguments stay
-    // plain flows (the TasksViewModel nesting pattern).
+    // changes — and whenever the user flips (Sprint 5 fix round 4).
+    // Kept out of the combine below so its arguments stay plain flows
+    // (the TasksViewModel nesting pattern).
     private val dayEvents: kotlinx.coroutines.flow.Flow<List<CalendarEventEntity>> =
-        selectedDay.flatMapLatest { day ->
-            calendarRepository.observeEventsForDay(userId, day)
+        userFlow.flatMapLatest { user ->
+            selectedDay.flatMapLatest { day ->
+                calendarRepository.observeEventsForDay(user.uid, day)
+            }
         }
 
     // NOTE: a single 6-flow combine does NOT resolve in this codebase
@@ -99,50 +132,74 @@ class CalendarViewModel @Inject constructor(
     // TasksViewModel: an inner 5-flow combine builds the state, an
     // outer 4-flow combine fills in the suggested slot, the strip /
     // placed tasks and the pending conflict.
-    val uiState: StateFlow<CalendarUiState> = combine(
+    val uiState: StateFlow<CalendarUiState> = userFlow.flatMapLatest { user ->
         combine(
-            dayEvents,
-            groupRepository.observeGroups(),
-            selectedDay,
-            isSyncing,
-            errorMessage
-        ) { events: List<CalendarEventEntity>, groups: List<GroupEntity>, day: Long, syncing: Boolean, error: String? ->
-            CalendarUiState(
-                isLoading = false,
-                events = events,
-                suggestedSlot = null,
-                isCalendarConnected = calendarRepository.hasCalendarPermissions(),
-                isSyncing = syncing,
-                errorMessage = error,
-                selectedDayMillis = day,
-                groupNames = groups.associate { it.groupId to it.name }
+            combine(
+                dayEvents,
+                groupRepository.observeGroups(),
+                selectedDay,
+                isSyncing,
+                errorMessage
+            ) { events: List<CalendarEventEntity>, groups: List<GroupEntity>, day: Long, syncing: Boolean, error: String? ->
+                CalendarUiState(
+                    isLoading = false,
+                    events = events,
+                    suggestedSlot = null,
+                    isCalendarConnected = calendarRepository.hasCalendarPermissions(),
+                    isSyncing = syncing,
+                    errorMessage = error,
+                    selectedDayMillis = day,
+                    groupNames = groups.associate { it.groupId to it.name }
+                )
+            },
+            suggestedSlot,
+            taskRepository.observeAllTasks(user.uid),
+            pendingConflict
+        ) { state, slot, tasks, conflict ->
+            val dayEnd = endOfDayMillis(state.selectedDayMillis)
+            state.copy(
+                suggestedSlot = slot,
+                stripTasks = stripTasksForDay(tasks, state.selectedDayMillis, dayEnd),
+                placedTasks = placedTasksForDay(tasks, state.selectedDayMillis, dayEnd),
+                pendingConflict = conflict
             )
-        },
-        suggestedSlot,
-        taskRepository.observeAllTasks(userId),
-        pendingConflict
-    ) { state, slot, tasks, conflict ->
-        val dayEnd = endOfDayMillis(state.selectedDayMillis)
-        state.copy(
-            suggestedSlot = slot,
-            stripTasks = stripTasksForDay(tasks, state.selectedDayMillis, dayEnd),
-            placedTasks = placedTasksForDay(tasks, state.selectedDayMillis, dayEnd),
-            pendingConflict = conflict
-        )
+        }
     }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CalendarUiState())
 
     init {
+        // Sprint 5 fix round 4 — follow the LIVE user (same bug as
+        // TodayViewModel on ci-803). The auth flow overrides the
+        // fallback the moment it emits a signed-in user; a flip
+        // re-runs the suggested-slot collect and the sign-in sync
+        // below for the new uid.
+        groupAuth?.let { auth ->
+            viewModelScope.launch {
+                auth.userState.collect { authUser ->
+                    val newUser =
+                        if (authUser == null || authUser.isGuest) fallbackUser else authUser
+                    if (newUser == userFlow.value) return@collect
+                    userFlow.value = newUser
+                    // Sign-in trigger (see the class KDoc): the new
+                    // user's calendar syncs on sign-in, like the
+                    // first-open sync below. syncNow() has its own
+                    // isSyncing guard, so a double sync is harmless.
+                    if (calendarRepository.hasCalendarPermissions()) syncNow()
+                }
+            }
+        }
         // Recompute the suggested slot whenever the selected day, the
         // day's events, or the tasks change (timed tasks are busy
         // intervals for slot-finding, even though they never render on
         // the schedule).
         viewModelScope.launch {
-            combine(
-                calendarRepository.observeAllEvents(userId),
-                taskRepository.observeAllTasks(userId),
-                selectedDay
-            ) { _, tasks, day -> tasks to day }.collect { (tasks, day) ->
+            userFlow.flatMapLatest { user ->
+                combine(
+                    calendarRepository.observeAllEvents(user.uid),
+                    taskRepository.observeAllTasks(user.uid),
+                    selectedDay
+                ) { _, tasks, day -> tasks to day }
+            }.collect { (tasks, day) ->
                 refreshSuggestedSlot(day, tasks)
             }
         }
@@ -171,7 +228,7 @@ class CalendarViewModel @Inject constructor(
             if (isSyncing.value) return@launch
             isSyncing.value = true
             try {
-                calendarRepository.syncGoogleCalendar(userId)
+                calendarRepository.syncGoogleCalendar(currentUserId)
                 errorMessage.value = null
             } catch (e: Exception) {
                 errorMessage.value = "Calendar sync failed. Please try again."
@@ -190,7 +247,7 @@ class CalendarViewModel @Inject constructor(
         eventType: String = "EVENT"
     ) {
         viewModelScope.launch {
-            calendarRepository.addEvent(userId, title, startEpochMillis, endEpochMillis, locationOrLink, eventType)
+            calendarRepository.addEvent(currentUserId, title, startEpochMillis, endEpochMillis, locationOrLink, eventType)
         }
     }
 
@@ -209,7 +266,7 @@ class CalendarViewModel @Inject constructor(
     ) {
         viewModelScope.launch {
             val ok = calendarRepository.updateEvent(
-                userId, eventId, title, startEpochMillis, endEpochMillis, locationOrLink, eventType
+                currentUserId, eventId, title, startEpochMillis, endEpochMillis, locationOrLink, eventType
             )
             if (!ok) {
                 errorMessage.value = "Saved on this device — Google Calendar will update on the next sync."
@@ -219,13 +276,13 @@ class CalendarViewModel @Inject constructor(
 
     fun deleteEvent(eventId: String) {
         viewModelScope.launch {
-            calendarRepository.deleteEvent(eventId, userId)
+            calendarRepository.deleteEvent(eventId, currentUserId)
         }
     }
 
     fun blockFocusTime(title: String, startEpochMillis: Long, endEpochMillis: Long) {
         viewModelScope.launch {
-            calendarRepository.blockFocusTime(userId, startEpochMillis, endEpochMillis, title)
+            calendarRepository.blockFocusTime(currentUserId, startEpochMillis, endEpochMillis, title)
         }
     }
 
@@ -269,9 +326,9 @@ class CalendarViewModel @Inject constructor(
             val durationMs = duration * 60_000L
             val start = slotStartMillis.coerceIn(dayStart, (dayLimit - durationMs).coerceAtLeast(dayStart))
             val end = start + durationMs
-            val conflict = calendarRepository.checkConflict(userId, start, end)
-            val dayEvents = calendarRepository.observeEventsForDay(userId, dayStart).first()
-            val allTasks = taskRepository.getAllTasksOnce(userId)
+            val conflict = calendarRepository.checkConflict(currentUserId, start, end)
+            val dayEvents = calendarRepository.observeEventsForDay(currentUserId, dayStart).first()
+            val allTasks = taskRepository.getAllTasksOnce(currentUserId)
             val placed = placedTasksForDay(allTasks, dayStart, dayLimit - 1)
             // All-day events span 00:00–24:00 and occupy no time slot.
             val overlappingEvent = dayEvents.firstOrNull { event ->
@@ -350,6 +407,6 @@ class CalendarViewModel @Inject constructor(
         val busyIntervals = tasks
             .filter { it.dueDateEpochMillis in dayStart..dayEnd && !it.isCompleted }
             .map { it.dueDateEpochMillis to it.dueDateEpochMillis + 30 * 60 * 1000L }
-        suggestedSlot.value = calendarRepository.findSuggestedFocusSlot(userId, dayMillis, busyIntervals)
+        suggestedSlot.value = calendarRepository.findSuggestedFocusSlot(currentUserId, dayMillis, busyIntervals)
     }
 }

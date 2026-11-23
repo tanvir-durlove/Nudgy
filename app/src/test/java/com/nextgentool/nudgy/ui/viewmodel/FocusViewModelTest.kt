@@ -5,6 +5,9 @@ import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.ai.ReplySoundPlayer
+import com.nextgentool.nudgy.auth.AuthManager
+import com.nextgentool.nudgy.auth.GroupAuth
+import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.model.FocusSessionKind
 import com.nextgentool.nudgy.data.repository.FocusHabitRepository
@@ -20,6 +23,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -129,8 +133,8 @@ class FocusViewModelTest {
         db.close()
     }
 
-    private fun buildViewModel(): FocusViewModel {
-        val viewModel = FocusViewModel(focusRepository, taskRepository, fakeAlarm, fakeSound)
+    private fun buildViewModel(fakeAuth: GroupAuth? = null): FocusViewModel {
+        val viewModel = FocusViewModel(focusRepository, taskRepository, fakeAlarm, fakeSound, fakeAuth)
         store.put("focus", viewModel)
         return viewModel
     }
@@ -434,5 +438,39 @@ class FocusViewModelTest {
         assertEquals("Read a chapter", selected.selectedTaskTitle)
         viewModel.selectTask(null)
         viewModel.uiState.first { it.selectedTaskId == null }
+    }
+
+    // ---- Sprint 5 fix round 4: live user ----
+
+    @Test
+    fun `available tasks follow the guest to signed-in flip`() = vmTest {
+        // setUp wrote test-user-1; this test starts as guest, like a
+        // fresh install before sign-in.
+        context.getSharedPreferences("nudgy_auth_prefs", Context.MODE_PRIVATE)
+            .edit().putString("active_user_id", AuthManager.GUEST_USER_ID).apply()
+        val guestUid = AuthManager.GUEST_USER_ID
+        taskRepository.createTask(guestUid, "Guest task")
+        taskRepository.createTask(userId, "Signed-in task")
+
+        val fakeAuth = FlipGroupAuth()
+        val viewModel = buildViewModel(fakeAuth)
+
+        // Guest phase: the guest's task is listed (this proves the
+        // guest subscription is live, not just the initial empty
+        // value); the signed-in user's task is not.
+        val guestState = viewModel.uiState.first { state ->
+            state.availableTasks.any { it.title == "Guest task" }
+        }
+        assertFalse(guestState.availableTasks.any { it.title == "Signed-in task" })
+
+        fakeAuth.userStateFlow.value =
+            NudgyUser(uid = userId, displayName = "Ayesha", email = "ayesha@example.com")
+
+        // After the flip the signed-in user's task takes over the
+        // picker and the guest's disappears.
+        val signedInState = viewModel.uiState.first { state ->
+            state.availableTasks.any { it.title == "Signed-in task" }
+        }
+        assertFalse(signedInState.availableTasks.any { it.title == "Guest task" })
     }
 }

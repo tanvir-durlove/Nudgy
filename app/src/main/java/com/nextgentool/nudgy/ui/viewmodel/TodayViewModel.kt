@@ -2,6 +2,9 @@ package com.nextgentool.nudgy.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.nextgentool.nudgy.auth.AuthManager
+import com.nextgentool.nudgy.auth.GroupAuth
+import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.repository.CalendarRepository
@@ -23,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -111,10 +115,50 @@ class TodayViewModel @Inject constructor(
     // the existing tests construct this ViewModel without it and keep
     // working — the stats are simply absent then. Hilt injects the
     // real repository in production (TaskModule provides it).
-    private val focusHabitRepository: FocusHabitRepository? = null
+    private val focusHabitRepository: FocusHabitRepository? = null,
+    // Sprint 5 fix round 4 — the live-user seam (device test on
+    // ci-803: after reinstall + sign-in, Today stayed on the guest uid
+    // captured at construction while Plan, built later, had the real
+    // uid — so "Start my day" never showed on Today). Nullable with a
+    // default on purpose, like focusHabitRepository above: Hilt always
+    // injects the real seam in production (AuthModule provides it);
+    // call sites that don't pass one keep the previous frozen-uid
+    // behaviour. The GroupAuth seam itself is untouched (PR #98).
+    private val groupAuth: GroupAuth? = null
 ) : ViewModel() {
 
-    private val userId: String = repository.currentUserId()
+    /**
+     * Sprint 5 fix round 4 — the LIVE user (GroupsViewModel pattern,
+     * PR #98). The fallback is the TaskRepository-derived user (blank
+     * display name); the auth flow overrides it the moment it emits a
+     * signed-in user, so a sign-in flips the tab with no restart. A
+     * guest auth emission keeps the fallback. The equality guard
+     * cannot skip a real Google sign-in: the fallback has a blank
+     * email while a real sign-in always carries a non-blank one.
+     */
+    private val fallbackUser: NudgyUser = run {
+        val uid = repository.currentUserId()
+        NudgyUser(
+            uid = uid,
+            displayName = "",
+            email = "",
+            isGuest = uid == AuthManager.GUEST_USER_ID
+        )
+    }
+    private val userFlow = MutableStateFlow(fallbackUser)
+
+    init {
+        groupAuth?.let { auth ->
+            viewModelScope.launch {
+                auth.userState.collect { authUser ->
+                    val newUser =
+                        if (authUser == null || authUser.isGuest) fallbackUser else authUser
+                    if (newUser == userFlow.value) return@collect
+                    userFlow.value = newUser
+                }
+            }
+        }
+    }
 
     /** Local midnight boundaries for "today", captured at construction. */
     private val todayStart: Long = startOfTodayMillis()
@@ -138,12 +182,13 @@ class TodayViewModel @Inject constructor(
         statsRefreshFlow.value += 1
     }
 
-    val uiState: StateFlow<TodayUiState> = combine(
-        repository.observeAllTasks(userId),
-        calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()),
-        tabFlow,
-        statsRefreshFlow
-    ) { allTasks, events, tab, _ ->
+    val uiState: StateFlow<TodayUiState> = userFlow.flatMapLatest { user ->
+        combine(
+            repository.observeAllTasks(user.uid),
+            calendarRepository.observeEventsForDay(user.uid, System.currentTimeMillis()),
+            tabFlow,
+            statsRefreshFlow
+        ) { allTasks, events, tab, _ ->
         val now = System.currentTimeMillis()
         val topLevel = allTasks.filter { it.parentTaskId == null }
         val subtasksByParent = allTasks.filter { it.parentTaskId != null }
@@ -240,8 +285,8 @@ class TodayViewModel @Inject constructor(
         // Skipped when the repository is not wired (older call sites).
         val weeklyReviewStats = focusHabitRepository?.let { repo ->
             summarizeWeeklyStats(
-                focusMinutesThisWeek = repo.getFocusMinutesForWeek(userId, now),
-                habits = repo.getHabitsWithStreaks(userId, now)
+                focusMinutesThisWeek = repo.getFocusMinutesForWeek(user.uid, now),
+                habits = repo.getHabitsWithStreaks(user.uid, now)
             )
         }
 
@@ -260,6 +305,7 @@ class TodayViewModel @Inject constructor(
             weeklyReview = weeklyReview,
             weeklyReviewStats = weeklyReviewStats
         )
+        }
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),

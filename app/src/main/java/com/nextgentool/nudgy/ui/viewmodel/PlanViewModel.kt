@@ -2,6 +2,9 @@ package com.nextgentool.nudgy.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.nextgentool.nudgy.auth.AuthManager
+import com.nextgentool.nudgy.auth.GroupAuth
+import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.domain.todayDateString
@@ -12,6 +15,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -57,10 +62,37 @@ data class PlanUiState(
 class PlanViewModel @Inject constructor(
     private val repository: TaskRepository,
     private val planDayUseCase: PlanDayUseCase,
-    private val carryOverUseCase: CarryOverUseCase
+    private val carryOverUseCase: CarryOverUseCase,
+    // Sprint 5 fix round 4 — the live-user seam (device test on
+    // ci-803: tab ViewModels froze the uid captured at construction).
+    // Nullable with a default on purpose (TodayViewModel precedent):
+    // Hilt always injects the real seam in production (AuthModule
+    // provides it); call sites that don't pass one keep the previous
+    // frozen-uid behaviour.
+    private val groupAuth: GroupAuth? = null
 ) : ViewModel() {
 
-    private val userId: String = repository.currentUserId()
+    /**
+     * Sprint 5 fix round 4 — the LIVE user (GroupsViewModel pattern,
+     * PR #98). The fallback is the TaskRepository-derived user (blank
+     * display name); the auth flow overrides it the moment it emits a
+     * signed-in user. The equality guard cannot skip a real Google
+     * sign-in: the fallback has a blank email while a real sign-in
+     * always carries a non-blank one.
+     */
+    private val fallbackUser: NudgyUser = run {
+        val uid = repository.currentUserId()
+        NudgyUser(
+            uid = uid,
+            displayName = "",
+            email = "",
+            isGuest = uid == AuthManager.GUEST_USER_ID
+        )
+    }
+    private val userFlow = MutableStateFlow(fallbackUser)
+
+    /** Live uid — read at call time so a sign-in flip is followed. */
+    private val currentUserId: String get() = userFlow.value.uid
 
     private val todayStart: Long = startOfTodayMillis()
     private val todayString: String = todayDateString()
@@ -84,9 +116,26 @@ class PlanViewModel @Inject constructor(
      */
     private var userInteracted = false
 
+    /** The uid the draft was seeded for — a flip re-seeds from scratch. */
+    private var seededUid: String? = null
+
     init {
+        // Sprint 5 fix round 4 — the seed collector follows the LIVE
+        // user: a flip restarts the tasks flow for the new uid, and a
+        // new uid resets the draft (the old user's order and picks
+        // belong to the old user) before re-seeding from the new
+        // user's tasks. Reopening Plan without a flip keeps the
+        // previous picks (userInteracted stays true).
         viewModelScope.launch {
-            repository.observeAllTasks(userId).collect { tasks ->
+            userFlow.flatMapLatest { user ->
+                repository.observeAllTasks(user.uid).map { tasks -> user.uid to tasks }
+            }.collect { (uid, tasks) ->
+                if (uid != seededUid) {
+                    userInteracted = false
+                    orderFlow.value = null
+                    pickedFlow.value = null
+                    seededUid = uid
+                }
                 if (!userInteracted) {
                     val (order, picked) = seed(tasks)
                     orderFlow.value = order
@@ -94,14 +143,25 @@ class PlanViewModel @Inject constructor(
                 }
             }
         }
+        groupAuth?.let { auth ->
+            viewModelScope.launch {
+                auth.userState.collect { authUser ->
+                    val newUser =
+                        if (authUser == null || authUser.isGuest) fallbackUser else authUser
+                    if (newUser == userFlow.value) return@collect
+                    userFlow.value = newUser
+                }
+            }
+        }
     }
 
-    val uiState: StateFlow<PlanUiState> = combine(
-        repository.observeAllTasks(userId),
-        orderFlow,
-        pickedFlow,
-        appliedFlow
-    ) { allTasks, order, picked, applied ->
+    val uiState: StateFlow<PlanUiState> = userFlow.flatMapLatest { user ->
+        combine(
+            repository.observeAllTasks(user.uid),
+            orderFlow,
+            pickedFlow,
+            appliedFlow
+        ) { allTasks, order, picked, applied ->
         if (order == null || picked == null) {
             return@combine PlanUiState(isLoading = true, planApplied = applied)
         }
@@ -129,6 +189,7 @@ class PlanViewModel @Inject constructor(
             ),
             planApplied = applied
         )
+        }
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
@@ -201,7 +262,7 @@ class PlanViewModel @Inject constructor(
                 now = now
             )
             val pickedIds = state.pickedRows.map { it.task.id }.toSet()
-            val allTasks = repository.getAllTasksOnce(userId)
+            val allTasks = repository.getAllTasksOnce(currentUserId)
             for (task in allTasks) {
                 if (task.plannedDate == todayString && task.id !in pickedIds) {
                     repository.updateTask(

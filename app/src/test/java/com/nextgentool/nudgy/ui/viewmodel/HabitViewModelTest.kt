@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.nextgentool.nudgy.auth.AuthManager
+import com.nextgentool.nudgy.auth.GroupAuth
+import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.repository.FocusHabitRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
@@ -83,8 +86,8 @@ class HabitViewModelTest {
         db.close()
     }
 
-    private fun buildViewModel(): HabitViewModel {
-        val viewModel = HabitViewModel(focusRepository, taskRepository)
+    private fun buildViewModel(fakeAuth: GroupAuth? = null): HabitViewModel {
+        val viewModel = HabitViewModel(focusRepository, taskRepository, fakeAuth)
         store.put("habits", viewModel)
         return viewModel
     }
@@ -321,5 +324,35 @@ class HabitViewModelTest {
 
         assertNull(viewModel.uiState.value.confirmingDeleteHabitId)
         assertEquals(1, viewModel.uiState.value.habits.size)
+    }
+
+    // ---- Sprint 5 fix round 4: live user ----
+
+    @Test
+    fun `habits follow the guest to signed-in flip`() = vmTest {
+        // setUp wrote test-user-1; this test starts as guest, like a
+        // fresh install before sign-in.
+        context.getSharedPreferences("nudgy_auth_prefs", Context.MODE_PRIVATE)
+            .edit().putString("active_user_id", AuthManager.GUEST_USER_ID).apply()
+        val guestUid = AuthManager.GUEST_USER_ID
+        focusRepository.createHabit(guestUid, "Guest habit")
+        focusRepository.createHabit(userId, "Signed-in habit")
+
+        val fakeAuth = FlipGroupAuth()
+        val viewModel = buildViewModel(fakeAuth)
+
+        // Guest phase: the guest's habit is visible (this proves the
+        // guest subscription is live, not just the initial empty
+        // value); the signed-in user's habit is not.
+        val guestState = viewModel.awaitHabit("Guest habit")
+        assertFalse(guestState.habits.any { it.habit.title == "Signed-in habit" })
+
+        fakeAuth.userStateFlow.value =
+            NudgyUser(uid = userId, displayName = "Ayesha", email = "ayesha@example.com")
+
+        // After the flip the signed-in user's habit takes over and the
+        // guest's disappears.
+        val signedInState = viewModel.awaitHabit("Signed-in habit")
+        assertFalse(signedInState.habits.any { it.habit.title == "Guest habit" })
     }
 }
