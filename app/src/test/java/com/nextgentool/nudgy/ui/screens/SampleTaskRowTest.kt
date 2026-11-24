@@ -64,19 +64,20 @@ import org.robolectric.annotation.Config
  * index (runs 867/868 — after performScrollToIndex(6) the chip
  * never composed within 10 s); TasksScreen in board mode (run 870 —
  * after the S14-proven performScrollTo + click on view_mode_board
- * the chip still never appeared, most likely the tap landing on
- * stale bounds after the programmatic scroll — the repo's
- * documented lesson that semantics bounds do not update after a
- * programmatic scroll). The direct board render has no LazyColumn,
- * no toggle and no scrolling of any kind: the board's cards live in
- * plain Columns, so every card is composed eagerly, and the delete
- * path is identical (the same SampleDeleteButton component, the
- * same viewModel.deleteTask, items from the same ViewModel flow —
- * so the chip disappearing after the tap proves the flow-driven
- * refresh too). What this version does NOT prove is the
- * TasksScreen wiring of onDeleteSample into the board/list rows —
- * that is verified by code trace and by the sprint-end device
- * test (§10), not by this test.
+ * the chip still never appeared). The direct board render (run 872)
+ * finally named the real mechanism: the chip wait timed out even
+ * with the cards composed eagerly and "Real task" found — because
+ * Modifier.clickable merges descendants, so a testTag inside a
+ * clickable row is invisible in the merged semantics tree. The
+ * board card and the Tasks list row are clickable (TaskRow /
+ * BoardTaskCard Surface), while TodayTaskRow has NO clickable —
+ * which is why the chip test below finds the chip on TodayScreen
+ * without any flag. The fix is useUnmergedTree = true on the chip
+ * and delete-button lookups (the merged title text needs no flag).
+ * The same merging also hides the delete button from TalkBack as a
+ * separate element (the card announces as one button) — a real
+ * product-side follow-up (move chip + delete outside the clickable),
+ * not fixed here.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -172,24 +173,31 @@ class SampleTaskRowTest {
         }
         // The sample chip lands exactly once (the sample card);
         // the ordinary task next to it carries no chip.
+        // useUnmergedTree: the board card is clickable, and clickable
+        // merges descendants — the chip tag (and the delete button
+        // tag) are invisible in the merged tree. TodayTaskRow has no
+        // clickable, which is why the chip test below finds the chip
+        // without it. The title text IS findable merged, so the
+        // "Real task" wait above needs no flag.
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithTag("sample_chip")
+            composeRule.onAllNodesWithTag("sample_chip", useUnmergedTree = true)
                 .fetchSemanticsNodes().isNotEmpty()
         }
         assertEquals(
             1,
-            composeRule.onAllNodesWithTag("sample_chip")
+            composeRule.onAllNodesWithTag("sample_chip", useUnmergedTree = true)
                 .fetchSemanticsNodes().size
         )
         // One tap on the card's own delete button removes the sample.
         // No waitForIdle: the chip-disappearance waitUntil below is
         // the synchronisation, and it gives the delete coroutine time
         // to run.
-        composeRule.onNodeWithTag("sample_delete_${sample.id}").assertIsDisplayed()
-        composeRule.onNodeWithTag("sample_delete_${sample.id}")
+        composeRule.onNodeWithTag("sample_delete_${sample.id}", useUnmergedTree = true)
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("sample_delete_${sample.id}", useUnmergedTree = true)
             .performClick()
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithTag("sample_chip")
+            composeRule.onAllNodesWithTag("sample_chip", useUnmergedTree = true)
                 .fetchSemanticsNodes().isEmpty()
         }
         // The delete must have reached the DB — if this fails, the tap
@@ -197,7 +205,8 @@ class SampleTaskRowTest {
         assertEquals(1, runBlocking { repository.getAllTasksOnce(repository.currentUserId()).size })
         // The ordinary task is untouched, and the sample never returns.
         composeRule.onNodeWithText("Real task").assertExists()
-        composeRule.onNodeWithTag("sample_delete_${sample.id}").assertDoesNotExist()
+        composeRule.onNodeWithTag("sample_delete_${sample.id}", useUnmergedTree = true)
+            .assertDoesNotExist()
     }
 
     @Test
