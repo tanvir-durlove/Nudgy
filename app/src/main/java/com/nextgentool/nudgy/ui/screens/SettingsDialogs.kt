@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -18,6 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -30,10 +32,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.data.local.entity.NudgyMemoryEntity
+import com.nextgentool.nudgy.settings.SettingsPreferences
 import com.nextgentool.nudgy.ui.theme.NudgyBorder
 import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
 import com.nextgentool.nudgy.ui.theme.NudgyMuted
@@ -77,7 +83,7 @@ fun ByokKeyDialog(
         modifier = Modifier.testTag("settings_byok_dialog"),
         onDismissRequest = onDismiss,
         title = {
-            Text("Gemini API Key (BYOK)", fontWeight = FontWeight.Bold, color = NudgyCharcoal)
+            Text(stringResource(R.string.settings_byok_title), fontWeight = FontWeight.Bold, color = NudgyCharcoal)
         },
         text = {
             Column(
@@ -87,7 +93,7 @@ fun ByokKeyDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "Bring Your Own Key: Enter your personal Gemini API key from Google AI Studio. Stored privately on this device to protect developer quota.",
+                    text = stringResource(R.string.settings_byok_body),
                     style = MaterialTheme.typography.bodySmall,
                     color = NudgyMuted
                 )
@@ -95,7 +101,7 @@ fun ByokKeyDialog(
                     value = input,
                     onValueChange = { input = it },
                     placeholder = { Text("AIzaSy...", color = NudgyMuted) },
-                    label = { Text("API Key") },
+                    label = { Text(stringResource(R.string.settings_byok_label)) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("settings_byok_input"),
@@ -108,12 +114,12 @@ fun ByokKeyDialog(
                 onClick = { onSave(input.trim()) },
                 colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary)
             ) {
-                Text("Save", color = Color.White)
+                Text(stringResource(R.string.settings_byok_save), color = Color.White)
             }
         },
         dismissButton = {
             TextButton(onClick = onReset) {
-                Text("Reset")
+                Text(stringResource(R.string.settings_byok_reset))
             }
         }
     )
@@ -136,7 +142,7 @@ fun MemoriesDialog(
         modifier = Modifier.testTag("settings_memories_dialog"),
         onDismissRequest = onDismiss,
         title = {
-            Text("Nudgy Memories & Knowledge", fontWeight = FontWeight.Bold, color = NudgyCharcoal)
+            Text(stringResource(R.string.settings_memories_title), fontWeight = FontWeight.Bold, color = NudgyCharcoal)
         },
         text = {
             Column(
@@ -144,7 +150,7 @@ fun MemoriesDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    text = "Things Nudgy has learned about your routine, preferences, and focus habits:",
+                    text = stringResource(R.string.settings_memories_body),
                     style = MaterialTheme.typography.bodyMedium,
                     color = NudgyMuted
                 )
@@ -156,7 +162,7 @@ fun MemoriesDialog(
                     OutlinedTextField(
                         value = newMemoryInput,
                         onValueChange = { newMemoryInput = it },
-                        placeholder = { Text("Teach Nudgy a preference...", fontSize = 12.sp) },
+                        placeholder = { Text(stringResource(R.string.settings_memories_hint), fontSize = 12.sp) },
                         modifier = Modifier
                             .weight(1f)
                             .testTag("settings_memory_input"),
@@ -172,7 +178,7 @@ fun MemoriesDialog(
                         colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary),
                         enabled = newMemoryInput.isNotBlank()
                     ) {
-                        Text("Add")
+                        Text(stringResource(R.string.settings_memories_add))
                     }
                 }
                 Column(
@@ -183,7 +189,7 @@ fun MemoriesDialog(
                 ) {
                     if (memories.isEmpty()) {
                         Text(
-                            text = "No memories stored yet. Add one above or tell Nudgy in chat: 'Remember that...'",
+                            text = stringResource(R.string.settings_memories_empty_dialog),
                             style = MaterialTheme.typography.bodyMedium,
                             color = NudgyMuted,
                             modifier = Modifier
@@ -234,7 +240,7 @@ fun MemoriesDialog(
                 onClick = onDismiss,
                 colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary)
             ) {
-                Text("Done", color = Color.White)
+                Text(stringResource(R.string.settings_memories_done), color = Color.White)
             }
         }
     )
@@ -255,9 +261,9 @@ fun DeleteAccountDialog(
     AlertDialog(
         modifier = Modifier.testTag("settings_delete_dialog"),
         onDismissRequest = { if (!isDeleting) onDismiss() },
-        title = { Text("Delete Account?") },
+        title = { Text(stringResource(R.string.settings_delete_title)) },
         text = {
-            Text("This will permanently remove your account, tasks, and Nudgy memory. This action cannot be undone.")
+            Text(stringResource(R.string.settings_delete_body))
         },
         confirmButton = {
             Button(
@@ -265,7 +271,10 @@ fun DeleteAccountDialog(
                 enabled = !isDeleting,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
             ) {
-                Text(if (isDeleting) "Deleting…" else "Delete Forever")
+                Text(
+                    if (isDeleting) stringResource(R.string.settings_delete_deleting)
+                    else stringResource(R.string.settings_delete_confirm)
+                )
             }
         },
         dismissButton = {
@@ -273,7 +282,131 @@ fun DeleteAccountDialog(
                 onClick = onDismiss,
                 enabled = !isDeleting
             ) {
-                Text("Cancel")
+                Text(stringResource(R.string.settings_delete_cancel))
+            }
+        }
+    )
+}
+
+/**
+ * Sprint 6-2 — the Appearance dialog (spec §2 Q9=(a)).
+ *
+ * v1's radio rows (YourNudgySheet "Appearance" dialog): System
+ * default / Light / Dark. Selecting one writes theme_mode at once
+ * (the app recomposes with no restart — the MainActivity theme
+ * flow); the dialog closes on selection.
+ */
+@Composable
+fun AppearanceDialog(
+    currentMode: String,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val options = listOf(
+        SettingsPreferences.THEME_SYSTEM to stringResource(R.string.settings_theme_system),
+        SettingsPreferences.THEME_LIGHT to stringResource(R.string.settings_theme_light),
+        SettingsPreferences.THEME_DARK to stringResource(R.string.settings_theme_dark)
+    )
+    AlertDialog(
+        modifier = Modifier.testTag("settings_appearance_dialog"),
+        onDismissRequest = onDismiss,
+        title = {
+            Text(stringResource(R.string.settings_section_appearance), fontWeight = FontWeight.Bold, color = NudgyCharcoal)
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                options.forEach { (mode, label) ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = currentMode == mode,
+                                onClick = { onSelect(mode) },
+                                role = Role.RadioButton
+                            )
+                            .padding(vertical = 8.dp)
+                            .testTag("settings_theme_$mode")
+                    ) {
+                        RadioButton(
+                            selected = currentMode == mode,
+                            onClick = { onSelect(mode) }
+                        )
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = NudgyCharcoal,
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.settings_memories_done))
+            }
+        }
+    )
+}
+
+/**
+ * Sprint 6-2 — the Language dialog (spec §2 Q10=(a)).
+ *
+ * English / বাংলা. Selecting one writes the preference and the
+ * NavHost restarts the Activity (AppLocale.applyAndRecreate), so
+ * the whole app re-renders in the chosen language. Bengali
+ * strings cover the Settings screen + the main screens
+ * (Today/Tasks/navigation) this sprint; the rest follows later.
+ */
+@Composable
+fun LanguageDialog(
+    currentLanguage: String,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val options = listOf(
+        SettingsPreferences.LANGUAGE_ENGLISH to stringResource(R.string.settings_language_english),
+        SettingsPreferences.LANGUAGE_BENGALI to stringResource(R.string.settings_language_bengali)
+    )
+    AlertDialog(
+        modifier = Modifier.testTag("settings_language_dialog"),
+        onDismissRequest = onDismiss,
+        title = {
+            Text(stringResource(R.string.settings_section_language), fontWeight = FontWeight.Bold, color = NudgyCharcoal)
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                options.forEach { (code, label) ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = currentLanguage == code,
+                                onClick = { onSelect(code) },
+                                role = Role.RadioButton
+                            )
+                            .padding(vertical = 8.dp)
+                            .testTag("settings_language_$code")
+                    ) {
+                        RadioButton(
+                            selected = currentLanguage == code,
+                            onClick = { onSelect(code) }
+                        )
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = NudgyCharcoal,
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.settings_memories_done))
             }
         }
     )

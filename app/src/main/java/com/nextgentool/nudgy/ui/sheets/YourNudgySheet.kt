@@ -366,7 +366,7 @@ fun YourNudgySheet(
             // "Nudgy remembers" Highlight Card
             NudgyInsightCard(
                 title = "Nudgy remembers",
-                subtitle = memories.firstOrNull()?.content ?: "You prefer focus time in the morning and studying at 7 PM.",
+                subtitle = memories.firstOrNull()?.content ?: "No memories stored yet",
                 trailingContent = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(

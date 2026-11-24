@@ -254,13 +254,12 @@ class SettingsRowsTest {
     }
 
     @Test
-    fun `notifications appearance and language rows stay inert stubs for S6-2`() {
+    fun `notifications appearance and language rows are wired, no Soon remains`() {
         setGuestShell()
-        // Exactly the three S6-2 rows still say "Soon" — the eight
-        // S6-1 rows no longer do. (assertCountEquals does not exist
-        // in Compose 1.7 — count the semantics nodes instead.)
+        // Sprint 6-2 — the three rows are real now: no "Soon" text
+        // anywhere on the screen, and all three row tags exist.
         assertEquals(
-            3,
+            0,
             composeRule.onAllNodesWithText("Soon").fetchSemanticsNodes().size
         )
         for (slug in listOf("notifications", "appearance", "language")) {
@@ -269,5 +268,84 @@ class SettingsRowsTest {
                 composeRule.onAllNodesWithTag("settings_row_$slug").fetchSemanticsNodes().size
             )
         }
+        composeRule.onNodeWithTag("settings_row_notifications").performScrollTo()
+        composeRule.onNodeWithText("Morning Brief Alert").assertIsDisplayed()
+        composeRule.onNodeWithText("Sound & Haptics").assertIsDisplayed()
+    }
+
+    @Test
+    fun `notification toggles fire their callbacks with the flipped value`() {
+        val briefChanges = mutableListOf<Boolean>()
+        val soundChanges = mutableListOf<Boolean>()
+        composeRule.setContent {
+            NudgyTheme {
+                SettingsShell(
+                    onMorningBriefChange = { briefChanges += it },
+                    onSoundChange = { soundChanges += it }
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_morning_brief_switch").performScrollTo().performClick()
+        composeRule.onNodeWithTag("settings_sound_switch").performScrollTo().performClick()
+        assertEquals(listOf(false), briefChanges)
+        assertEquals(listOf(false), soundChanges)
+    }
+
+    @Test
+    fun `appearance dialog opens and picking Dark calls back`() {
+        val modes = mutableListOf<String>()
+        composeRule.setContent {
+            NudgyTheme {
+                SettingsShell(onThemeModeChange = { modes += it })
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_row_appearance").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_appearance_dialog").assertIsDisplayed()
+        composeRule.onNodeWithText("System default").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_theme_dark").performClick()
+        assertEquals(listOf("dark"), modes)
+    }
+
+    @Test
+    fun `language dialog opens and picking Bengali calls back`() {
+        val codes = mutableListOf<String>()
+        composeRule.setContent {
+            NudgyTheme {
+                SettingsShell(onLanguageChange = { codes += it })
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_row_language").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_language_dialog").assertIsDisplayed()
+        composeRule.onNodeWithText("বাংলা").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_language_bn").performClick()
+        assertEquals(listOf("bn"), codes)
+    }
+
+    @Test
+    fun `settings screen re-renders in Bengali when the locale context is Bengali`() {
+        val context: android.content.Context =
+            androidx.test.core.app.ApplicationProvider.getApplicationContext()
+        val bnContext = com.nextgentool.nudgy.settings.AppLocale.wrap(
+            context,
+            com.nextgentool.nudgy.settings.SettingsPreferences.LANGUAGE_BENGALI
+        )
+        composeRule.setContent {
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalContext provides bnContext
+            ) {
+                NudgyTheme { SettingsShell() }
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("সেটিংস").assertIsDisplayed()
+        composeRule.onNodeWithText("নোটিফিকেশন").assertIsDisplayed()
+        composeRule.onNodeWithText("থিম").assertIsDisplayed()
+        composeRule.onNodeWithText("ভাষা").assertIsDisplayed()
+        composeRule.onNodeWithText("সকালের সারাংশ").assertIsDisplayed()
     }
 }

@@ -34,11 +34,13 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.NudgyMemoryEntity
 import kotlinx.coroutines.flow.SharedFlow
+import com.nextgentool.nudgy.settings.SettingsPreferences
 import com.nextgentool.nudgy.ui.theme.NudgyAccent
 import com.nextgentool.nudgy.ui.theme.NudgyCanvas
 import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
@@ -140,32 +142,36 @@ fun CalendarShell() = ShellScaffold(
 /**
  * Sprint 6-0 — the Settings sections (foundation shell, spec §4).
  *
- * One section per spec §4 entry, in the v1 sheet's order. The rows
- * are inert stubs in this sub-PR ("Soon" — no behaviour): S6-1
- * wires profile/sign-in, Memories, BYOK, Privacy, Help & feedback
- * and calendar; S6-2 wires notifications, Appearance and language.
+ * One section per spec §4 entry, in the v1 sheet's order. S6-1
+ * wired profile/sign-in, Memories, BYOK, Privacy, Help & feedback
+ * and calendar; S6-2 wired notifications, Appearance and language
+ * — no stub row remains on this screen (SettingsStubRow stays
+ * only as the `else` fallback in the shell's `when`).
  * The section headers + rows are the contract the later sub-PRs
  * fill in — a later PR replaces a stub row's onClick/behaviour, it
  * never re-lays-out the screen.
+ *
+ * Sprint 6-2 — the titles/subtitles are string resources (the
+ * language setting renders them in বাংলা when "bn" is chosen).
  */
 private data class SettingsSection(
     val slug: String,
-    val title: String,
-    val subtitle: String
+    val titleRes: Int,
+    val subtitleRes: Int
 )
 
 private val SETTINGS_SECTIONS = listOf(
-    SettingsSection("profile", "Profile", "Your name, email and photo"),
-    SettingsSection("sign_in", "Sign in", "Google sign-in and guest mode"),
-    SettingsSection("notifications", "Notifications", "Morning brief, sound and haptics"),
-    SettingsSection("appearance", "Appearance", "System, light or dark theme"),
-    SettingsSection("language", "Language", "English or বাংলা"),
-    SettingsSection("calendar", "Calendar connections", "Google Calendar sync"),
-    SettingsSection("gemini_key", "Gemini API key", "Your own key (BYOK)"),
-    SettingsSection("privacy", "Privacy Policy", "How your data is handled"),
-    SettingsSection("help_feedback", "Help & feedback", "Get help or send feedback"),
-    SettingsSection("memories", "Memories", "Things Nudgy remembers about you"),
-    SettingsSection("delete_account", "Delete account", "Erase your account and data")
+    SettingsSection("profile", R.string.settings_section_profile, R.string.settings_section_profile_sub),
+    SettingsSection("sign_in", R.string.settings_section_sign_in, R.string.settings_section_sign_in_sub),
+    SettingsSection("notifications", R.string.settings_section_notifications, R.string.settings_section_notifications_sub),
+    SettingsSection("appearance", R.string.settings_section_appearance, R.string.settings_section_appearance_sub),
+    SettingsSection("language", R.string.settings_section_language, R.string.settings_section_language_sub),
+    SettingsSection("calendar", R.string.settings_section_calendar, R.string.settings_section_calendar_sub),
+    SettingsSection("gemini_key", R.string.settings_section_gemini_key, R.string.settings_section_gemini_key_sub),
+    SettingsSection("privacy", R.string.settings_section_privacy, R.string.settings_section_privacy_sub),
+    SettingsSection("help_feedback", R.string.settings_section_help_feedback, R.string.settings_section_help_feedback_sub),
+    SettingsSection("memories", R.string.settings_section_memories, R.string.settings_section_memories_sub),
+    SettingsSection("delete_account", R.string.settings_section_delete_account, R.string.settings_section_delete_account_sub)
 )
 
 @Composable
@@ -200,12 +206,12 @@ private fun SettingsStubRow(section: SettingsSection) {
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = section.title,
+                    text = stringResource(section.titleRes),
                     style = MaterialTheme.typography.titleMedium,
                     color = NudgyCharcoal
                 )
                 Text(
-                    text = section.subtitle,
+                    text = stringResource(section.subtitleRes),
                     style = MaterialTheme.typography.bodySmall,
                     color = NudgyMuted
                 )
@@ -245,13 +251,27 @@ fun SettingsShell(
     onPrivacyClick: () -> Unit = {},
     onHelpFeedbackClick: () -> Unit = {},
     onAddMemory: (String) -> Unit = {},
-    onDeleteMemory: (String) -> Unit = {}
+    onDeleteMemory: (String) -> Unit = {},
+    // Sprint 6-2 — the notifications / appearance / language state
+    // (spec §2 Q8/Q9/Q10). Defaults keep the S6-0 shell test (no
+    // params) rendering: both toggles ON, system theme, English.
+    morningBriefEnabled: Boolean = true,
+    soundEnabled: Boolean = true,
+    themeMode: String = SettingsPreferences.THEME_SYSTEM,
+    language: String = SettingsPreferences.LANGUAGE_ENGLISH,
+    onMorningBriefChange: (Boolean) -> Unit = {},
+    onSoundChange: (Boolean) -> Unit = {},
+    onThemeModeChange: (String) -> Unit = {},
+    onLanguageChange: (String) -> Unit = {}
 ) {
     // Sprint 6-1 — dialog state lives in the shell; the dialogs
     // themselves are in SettingsDialogs.kt (v1 texts verbatim).
     var showByokDialog by remember { mutableStateOf(false) }
     var showMemoriesDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    // Sprint 6-2 — the Appearance + Language dialogs.
+    var showAppearanceDialog by remember { mutableStateOf(false) }
+    var showLanguageDialog by remember { mutableStateOf(false) }
     // The delete dialog closes on success (v1 C7: it stays up while
     // the deletion runs, and a failure keeps it open for a retry).
     LaunchedEffect(deleteCompleted) {
@@ -271,18 +291,33 @@ fun SettingsShell(
             .padding(NudgyTokens.screenPadding)
             .verticalScroll(rememberScrollState())
     ) {
-        Text(text = "Settings", color = NudgyCharcoal)
+        Text(text = stringResource(R.string.settings_title), color = NudgyCharcoal)
         for (section in SETTINGS_SECTIONS) {
-            SettingsSectionHeader(title = section.title, slug = section.slug)
+            SettingsSectionHeader(title = stringResource(section.titleRes), slug = section.slug)
             // Sprint 6-1 — the wired sections replace their stub row
-            // with the real row (same `settings_row_<slug>` testTag);
-            // notifications/appearance/language stay stubs for S6-2.
+            // with the real row (same `settings_row_<slug>` testTag).
+            // Sprint 6-2 — notifications/appearance/language are wired
+            // now; no stub row remains on this screen.
             when (section.slug) {
                 "profile" -> SettingsProfileRow(user = user)
                 "sign_in" -> SettingsSignInRow(
                     isGuest = isGuest,
                     onSignInClick = onSignInClick,
                     onSignOutClick = onSignOutClick
+                )
+                "notifications" -> SettingsNotificationsRow(
+                    morningBriefEnabled = morningBriefEnabled,
+                    soundEnabled = soundEnabled,
+                    onMorningBriefChange = onMorningBriefChange,
+                    onSoundChange = onSoundChange
+                )
+                "appearance" -> SettingsAppearanceRow(
+                    themeMode = themeMode,
+                    onClick = { showAppearanceDialog = true }
+                )
+                "language" -> SettingsLanguageRow(
+                    language = language,
+                    onClick = { showLanguageDialog = true }
                 )
                 "calendar" -> SettingsCalendarRow(
                     connected = calendarConnected,
@@ -292,41 +327,41 @@ fun SettingsShell(
                 )
                 "gemini_key" -> SettingsActionRow(
                     slug = "gemini_key",
-                    title = "Gemini API key",
-                    subtitle = if (byokKey.isNotBlank()) "Custom key saved"
-                    else "Using Nudgy's built-in AI",
+                    title = stringResource(R.string.settings_section_gemini_key),
+                    subtitle = if (byokKey.isNotBlank()) stringResource(R.string.settings_gemini_custom_key)
+                    else stringResource(R.string.settings_gemini_builtin),
                     onClick = { showByokDialog = true }
                 )
                 "privacy" -> SettingsActionRow(
                     slug = "privacy",
-                    title = "Privacy Policy",
-                    subtitle = "How your data is handled",
+                    title = stringResource(R.string.settings_section_privacy),
+                    subtitle = stringResource(R.string.settings_section_privacy_sub),
                     onClick = onPrivacyClick
                 )
                 "help_feedback" -> SettingsActionRow(
                     slug = "help_feedback",
-                    title = "Help & feedback",
-                    subtitle = "Get help or send feedback",
+                    title = stringResource(R.string.settings_section_help_feedback),
+                    subtitle = stringResource(R.string.settings_section_help_feedback_sub),
                     onClick = onHelpFeedbackClick
                 )
                 "memories" -> SettingsActionRow(
                     slug = "memories",
-                    title = "Memories",
-                    subtitle = if (memories.isEmpty()) "Nothing remembered yet"
-                    else "${memories.size} facts",
+                    title = stringResource(R.string.settings_section_memories),
+                    subtitle = if (memories.isEmpty()) stringResource(R.string.settings_memories_empty)
+                    else stringResource(R.string.settings_memories_facts, memories.size),
                     onClick = { showMemoriesDialog = true }
                 )
                 "delete_account" -> SettingsActionRow(
                     slug = "delete_account",
-                    title = "Delete account",
-                    subtitle = "Erase your account and data",
+                    title = stringResource(R.string.settings_section_delete_account),
+                    subtitle = stringResource(R.string.settings_section_delete_account_sub),
                     titleColor = Color(0xFFD32F2F),
                     onClick = { showDeleteDialog = true }
                 )
                 else -> SettingsStubRow(section = section)
             }
         }
-        SettingsSectionHeader(title = "Weekly review", slug = "weekly_review")
+        SettingsSectionHeader(title = stringResource(R.string.settings_section_weekly_review), slug = "weekly_review")
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -344,12 +379,12 @@ fun SettingsShell(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Weekly review",
+                        text = stringResource(R.string.settings_section_weekly_review),
                         style = MaterialTheme.typography.titleMedium,
                         color = NudgyCharcoal
                     )
                     Text(
-                        text = "This week's finished, focus minutes and streaks",
+                        text = stringResource(R.string.settings_weekly_review_sub),
                         style = MaterialTheme.typography.bodySmall,
                         color = NudgyMuted
                     )
@@ -391,6 +426,27 @@ fun SettingsShell(
             isDeleting = isDeleting,
             onConfirm = onDeleteAccountClick,
             onDismiss = { showDeleteDialog = false }
+        )
+    }
+    // Sprint 6-2 — the Appearance + Language dialogs (SettingsDialogs.kt).
+    if (showAppearanceDialog) {
+        AppearanceDialog(
+            currentMode = themeMode,
+            onSelect = { mode ->
+                onThemeModeChange(mode)
+                showAppearanceDialog = false
+            },
+            onDismiss = { showAppearanceDialog = false }
+        )
+    }
+    if (showLanguageDialog) {
+        LanguageDialog(
+            currentLanguage = language,
+            onSelect = { code ->
+                onLanguageChange(code)
+                showLanguageDialog = false
+            },
+            onDismiss = { showLanguageDialog = false }
         )
     }
 }

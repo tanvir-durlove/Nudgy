@@ -12,6 +12,7 @@ import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.settings.ByokKeyStore
 import com.nextgentool.nudgy.settings.CalendarConnection
 import com.nextgentool.nudgy.settings.SettingsAccountActions
+import com.nextgentool.nudgy.settings.SettingsPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -64,7 +65,14 @@ class SettingsViewModel @Inject constructor(
     private val groupAuth: GroupAuth? = null,
     private val accountActions: SettingsAccountActions? = null,
     private val byokKeyStore: ByokKeyStore? = null,
-    private val calendarConnection: CalendarConnection? = null
+    private val calendarConnection: CalendarConnection? = null,
+    // Sprint 6-2 — the Settings store (S6-0 @Singleton, Hilt
+    // injects it in production): the notification toggles, the
+    // theme mode and the language all read/write through it, so a
+    // change recomposes every collector with no restart. Nullable
+    // with a default on purpose (the S6-1 seams' pattern): call
+    // sites that don't pass one keep the previous defaults.
+    private val settingsPreferences: SettingsPreferences? = null
 ) : ViewModel() {
 
     /**
@@ -221,6 +229,50 @@ class SettingsViewModel @Inject constructor(
     fun resetByokKey() {
         byokKeyStore?.setKey(null)
         _byokKey.value = ""
+    }
+
+    // ---- Notifications / Appearance / Language (Sprint 6-2, spec §2 Q8/Q9/Q10) ----
+
+    /**
+     * The persisted notification toggles (v1's were `remember`
+     * only — these survive a restart). Defaults (true/true) match
+     * the store's defaults when no store is injected (older tests).
+     */
+    val morningBriefEnabled: StateFlow<Boolean> =
+        settingsPreferences?.morningBriefEnabled ?: MutableStateFlow(true)
+    val soundEnabled: StateFlow<Boolean> =
+        settingsPreferences?.soundEnabled ?: MutableStateFlow(true)
+
+    /** The theme mode ("system" | "light" | "dark") — MainActivity collects it live. */
+    val themeMode: StateFlow<String> =
+        settingsPreferences?.themeMode ?: MutableStateFlow(SettingsPreferences.THEME_SYSTEM)
+
+    /** The UI language ("en" | "bn"). */
+    val language: StateFlow<String> =
+        settingsPreferences?.language ?: MutableStateFlow(SettingsPreferences.LANGUAGE_ENGLISH)
+
+    /** Morning Brief ON/OFF — the worker no-ops while OFF (no re-schedule needed). */
+    fun setMorningBriefEnabled(enabled: Boolean) {
+        settingsPreferences?.setMorningBriefEnabled(enabled)
+    }
+
+    /** Sound & Haptics ON/OFF — the reminder channel follows it on the next fire. */
+    fun setSoundEnabled(enabled: Boolean) {
+        settingsPreferences?.setSoundEnabled(enabled)
+    }
+
+    /** Writes theme_mode — the app recomposes with no restart (MainActivity flow). */
+    fun setThemeMode(mode: String) {
+        settingsPreferences?.setThemeMode(mode)
+    }
+
+    /**
+     * Writes the language preference. The NavHost restarts the
+     * Activity after this (AppLocale.applyAndRecreate), so the whole
+     * app re-renders in the chosen language.
+     */
+    fun setLanguage(code: String) {
+        settingsPreferences?.setLanguage(code)
     }
 
     // ---- Calendar connection (v1: device permission + Sync Now) ----

@@ -1,3 +1,120 @@
 <resources>
     <string name="app_name">Nudgy</string>
+
+    <!-- Sprint 6-2 — Settings screen + main screens (Today/Tasks/navigation).
+         The Bengali translations live in values-bn/strings.xml; any string
+         added here MUST have a Bengali twin, or the bn UI falls back to
+         English for it (acceptable only for proper nouns). -->
+
+    <!-- Bottom navigation -->
+    <string name="nav_today">Today</string>
+    <string name="nav_calendar">Calendar</string>
+    <string name="nav_chat">Chat</string>
+    <string name="nav_groups">Groups</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Settings screen -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_section_profile">Profile</string>
+    <string name="settings_section_profile_sub">Your name, email and photo</string>
+    <string name="settings_section_sign_in">Sign in</string>
+    <string name="settings_section_sign_in_sub">Google sign-in and guest mode</string>
+    <string name="settings_section_notifications">Notifications</string>
+    <string name="settings_section_notifications_sub">Morning brief, sound and haptics</string>
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_section_appearance_sub">System, light or dark theme</string>
+    <string name="settings_section_language">Language</string>
+    <string name="settings_section_language_sub">English or বাংলা</string>
+    <string name="settings_section_calendar">Calendar connections</string>
+    <string name="settings_section_calendar_sub">Google Calendar sync</string>
+    <string name="settings_section_gemini_key">Gemini API key</string>
+    <string name="settings_section_gemini_key_sub">Your own key (BYOK)</string>
+    <string name="settings_section_privacy">Privacy Policy</string>
+    <string name="settings_section_privacy_sub">How your data is handled</string>
+    <string name="settings_section_help_feedback">Help &amp; feedback</string>
+    <string name="settings_section_help_feedback_sub">Get help or send feedback</string>
+    <string name="settings_section_memories">Memories</string>
+    <string name="settings_section_memories_sub">Things Nudgy remembers about you</string>
+    <string name="settings_section_delete_account">Delete account</string>
+    <string name="settings_section_delete_account_sub">Erase your account and data</string>
+    <string name="settings_section_weekly_review">Weekly review</string>
+
+    <string name="settings_guest_user">Guest User</string>
+    <string name="settings_guest_subtitle">Sign in with Google to sync your data</string>
+    <string name="settings_sign_in_button">Sign in with Google</string>
+    <string name="settings_sign_out">Sign out</string>
+    <string name="settings_sign_out_sub">Switch to guest mode on this device</string>
+    <string name="settings_calendar_synced">Calendar synced</string>
+    <string name="settings_calendar_synced_sub">Events from your device calendar stay in sync.</string>
+    <string name="settings_calendar_connect">Bring your calendar in</string>
+    <string name="settings_calendar_connect_sub">Allow calendar access to spot conflicts and find open time.</string>
+    <string name="settings_calendar_sync_now">Sync now</string>
+    <string name="settings_calendar_syncing">Syncing…</string>
+    <string name="settings_calendar_connect_button">Connect</string>
+    <string name="settings_gemini_custom_key">Custom key saved</string>
+    <string name="settings_gemini_builtin">Using Nudgy\'s built-in AI</string>
+    <string name="settings_memories_empty">Nothing remembered yet</string>
+    <string name="settings_memories_facts">%1$d facts</string>
+    <string name="settings_weekly_review_sub">This week\'s finished, focus minutes and streaks</string>
+
+    <!-- Sprint 6-2 — notifications row (v1 texts) -->
+    <string name="settings_morning_brief_title">Morning Brief Alert</string>
+    <string name="settings_morning_brief_sub">Receive schedule summary at 8:00 AM</string>
+    <string name="settings_sound_title">Sound &amp; Haptics</string>
+    <string name="settings_sound_sub">Play sound when a reminder triggers</string>
+
+    <!-- Sprint 6-2 — appearance (v1 radio rows) -->
+    <string name="settings_theme_system">System default</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_theme_system_sub">Follow system theme</string>
+    <string name="settings_theme_light_sub">Light theme</string>
+    <string name="settings_theme_dark_sub">Dark theme</string>
+
+    <!-- Sprint 6-2 — language -->
+    <string name="settings_language_english">English</string>
+    <string name="settings_language_bengali">বাংলা</string>
+
+    <!-- BYOK dialog (v1 texts) -->
+    <string name="settings_byok_title">Gemini API Key (BYOK)</string>
+    <string name="settings_byok_body">Bring Your Own Key: Enter your personal Gemini API key from Google AI Studio. Stored privately on this device to protect developer quota.</string>
+    <string name="settings_byok_label">API Key</string>
+    <string name="settings_byok_save">Save</string>
+    <string name="settings_byok_reset">Reset</string>
+
+    <!-- Memories dialog (v1 texts) -->
+    <string name="settings_memories_title">Nudgy Memories &amp; Knowledge</string>
+    <string name="settings_memories_body">Things Nudgy has learned about your routine, preferences, and focus habits:</string>
+    <string name="settings_memories_hint">Teach Nudgy a preference...</string>
+    <string name="settings_memories_add">Add</string>
+    <string name="settings_memories_empty_dialog">No memories stored yet. Add one above or tell Nudgy in chat: \'Remember that...\'</string>
+    <string name="settings_memories_done">Done</string>
+
+    <!-- Delete account dialog (v1 texts) -->
+    <string name="settings_delete_title">Delete Account?</string>
+    <string name="settings_delete_body">This will permanently remove your account, tasks, and Nudgy memory. This action cannot be undone.</string>
+    <string name="settings_delete_confirm">Delete Forever</string>
+    <string name="settings_delete_deleting">Deleting…</string>
+    <string name="settings_delete_cancel">Cancel</string>
+
+    <!-- Today screen headers -->
+    <string name="today_tab_today">Today</string>
+    <string name="today_tab_upcoming">Upcoming</string>
+    <string name="today_my_day">My Day</string>
+    <string name="today_view_list">List</string>
+    <string name="today_view_board">Board</string>
+    <string name="today_view_matrix">Matrix</string>
+    <string name="today_nothing_planned">Nothing planned for today yet</string>
+    <string name="today_all_tasks">All tasks</string>
+    <string name="today_tasks_count">%1$d tasks</string>
+    <string name="today_time_label">Today</string>
+    <string name="today_anytime">Anytime</string>
+    <string name="today_no_due_date">No due date</string>
+    <string name="today_no_date">No date</string>
+
+    <!-- Tasks screen headers -->
+    <string name="tasks_search_hint">Search tasks</string>
+    <string name="tasks_completed">Completed (%1$d)</string>
+    <string name="tasks_filter_all">All</string>
+    <string name="tasks_filter_group">Group</string>
 </resources>

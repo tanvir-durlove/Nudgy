@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -323,13 +324,13 @@ fun TodayScreen(
             modifier = Modifier.fillMaxWidth()
         ) {
             TodayTabButton(
-                label = "Today",
+                label = stringResource(R.string.today_tab_today),
                 selected = uiState.tab == TodayTab.TODAY,
                 onClick = { todayViewModel.setTab(TodayTab.TODAY) },
                 modifier = Modifier.weight(1f).testTag("tab_today")
             )
             TodayTabButton(
-                label = "Upcoming",
+                label = stringResource(R.string.today_tab_upcoming),
                 selected = uiState.tab == TodayTab.UPCOMING,
                 onClick = { todayViewModel.setTab(TodayTab.UPCOMING) },
                 modifier = Modifier.weight(1f).testTag("tab_upcoming")
@@ -340,7 +341,7 @@ fun TodayScreen(
             // My Day — Plan-picked tasks only (Q3), top section.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "My Day",
+                    text = stringResource(R.string.today_my_day),
                     style = MaterialTheme.typography.titleMedium,
                     color = NudgyCharcoal,
                     modifier = Modifier.weight(1f)
@@ -354,9 +355,9 @@ fun TodayScreen(
                         label = {
                             Text(
                                 when (mode) {
-                                    TaskViewMode.LIST -> "List"
-                                    TaskViewMode.BOARD -> "Board"
-                                    TaskViewMode.MATRIX -> "Matrix"
+                                    TaskViewMode.LIST -> stringResource(R.string.today_view_list)
+                                    TaskViewMode.BOARD -> stringResource(R.string.today_view_board)
+                                    TaskViewMode.MATRIX -> stringResource(R.string.today_view_matrix)
                                 }
                             )
                         },
@@ -383,7 +384,7 @@ fun TodayScreen(
                 NudgySkeletonRow()
             } else if (uiState.myDayItems.isEmpty()) {
                 Text(
-                    text = "Nothing planned for today yet",
+                    text = stringResource(R.string.today_nothing_planned),
                     style = MaterialTheme.typography.bodyMedium,
                     color = NudgyMuted,
                     modifier = Modifier.padding(vertical = 8.dp)
@@ -427,7 +428,7 @@ fun TodayScreen(
                     uiState.myDayItems.forEach { item ->
                         TodayTaskRow(
                             item = item,
-                            timeLabel = myDayTimeLabel(item),
+                            timeLabel = myDayTimeLabel(item, stringResource(R.string.today_time_label)),
                             onToggle = { todayViewModel.toggleTask(item.task) }
                         )
                     }
@@ -465,7 +466,7 @@ fun TodayScreen(
                     }
                     if (uiState.untimedTodayItems.isNotEmpty()) {
                         Text(
-                            text = "Anytime",
+                            text = stringResource(R.string.today_anytime),
                             style = MaterialTheme.typography.titleSmall,
                             color = NudgyMuted
                         )
@@ -476,7 +477,7 @@ fun TodayScreen(
                                 // already says Anytime (S1-1 showed
                                 // "Today" here; repeating the header text
                                 // on every row is redundant).
-                                timeLabel = "Today",
+                                timeLabel = stringResource(R.string.today_time_label),
                                 onToggle = { todayViewModel.toggleTask(item.task) }
                             )
                         }
@@ -506,7 +507,7 @@ fun TodayScreen(
                             day.items.forEach { item ->
                                 TodayTaskRow(
                                     item = item,
-                                    timeLabel = upcomingTimeLabel(item),
+                                    timeLabel = upcomingTimeLabel(item, stringResource(R.string.today_anytime)),
                                     onToggle = { todayViewModel.toggleTask(item.task) }
                                 )
                             }
@@ -515,7 +516,7 @@ fun TodayScreen(
                     if (uiState.noDateItems.isNotEmpty()) {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text(
-                                text = "No date",
+                                text = stringResource(R.string.today_no_date),
                                 style = MaterialTheme.typography.titleMedium,
                                 color = NudgyCharcoal
                             )
@@ -524,7 +525,7 @@ fun TodayScreen(
                                     item = item,
                                     // "No due date", not "No date": the
                                     // section header already says No date.
-                                    timeLabel = "No due date",
+                                    timeLabel = stringResource(R.string.today_no_due_date),
                                     onToggle = { todayViewModel.toggleTask(item.task) }
                                 )
                             }
@@ -857,13 +858,13 @@ private fun AllTasksRow(
                 .padding(16.dp)
         ) {
             Text(
-                text = "All tasks",
+                text = stringResource(R.string.today_all_tasks),
                 style = MaterialTheme.typography.titleMedium,
                 color = NudgyCharcoal,
                 modifier = Modifier.weight(1f)
             )
             Text(
-                text = "$count tasks",
+                text = stringResource(R.string.today_tasks_count, count),
                 style = MaterialTheme.typography.bodyMedium,
                 color = NudgyMuted
             )
@@ -1048,18 +1049,18 @@ private fun todayPriorityDotColor(priority: Priority) = when (priority) {
     Priority.LOW -> colorResource(R.color.nudgy_muted)
 }
 
-/** My Day: the planned start time, else the due time, else "Today". */
-private fun myDayTimeLabel(item: TaskListItem): String {
+/** My Day: the planned start time, else the due time, else the "Today" label. */
+private fun myDayTimeLabel(item: TaskListItem, todayLabel: String): String {
     val task = item.task
     return when {
         task.plannedStartEpochMillis != null -> timeLabel(task.plannedStartEpochMillis)
         task.dueDateEpochMillis != startOfTodayMillis() -> timeLabel(task.dueDateEpochMillis)
-        else -> "Today"
+        else -> todayLabel
     }
 }
 
-/** Upcoming: the due time, or "Anytime" for a date-only task. */
-private fun upcomingTimeLabel(item: TaskListItem): String {
+/** Upcoming: the due time, or the "Anytime" label for a date-only task. */
+private fun upcomingTimeLabel(item: TaskListItem, anytimeLabel: String): String {
     val due = item.task.dueDateEpochMillis
-    return if (due == startOfDayMillis(due)) "Anytime" else timeLabel(due)
+    return if (due == startOfDayMillis(due)) anytimeLabel else timeLabel(due)
 }

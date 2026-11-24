@@ -17,6 +17,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -24,9 +25,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.auth.NudgyUser
+import com.nextgentool.nudgy.settings.SettingsPreferences
 import com.nextgentool.nudgy.ui.theme.NudgyAccent
 import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
 import com.nextgentool.nudgy.ui.theme.NudgyMuted
@@ -112,8 +116,8 @@ fun SettingsProfileRow(user: NudgyUser?) {
         Spacer(modifier = Modifier.width(14.dp))
         if (isGuest) {
             SettingsRowTexts(
-                title = "Guest User",
-                subtitle = "Sign in with Google to sync your data"
+                title = stringResource(R.string.settings_guest_user),
+                subtitle = stringResource(R.string.settings_guest_subtitle)
             )
         } else {
             SettingsRowTexts(
@@ -148,14 +152,14 @@ fun SettingsSignInRow(
                     .testTag("settings_sign_in_button"),
                 colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary)
             ) {
-                Text("Sign in with Google", color = Color.White)
+                Text(stringResource(R.string.settings_sign_in_button), color = Color.White)
             }
         }
     } else {
         SettingsRowCard(slug = "sign_in", onClick = onSignOutClick) {
             SettingsRowTexts(
-                title = "Sign out",
-                subtitle = "Switch to guest mode on this device"
+                title = stringResource(R.string.settings_sign_out),
+                subtitle = stringResource(R.string.settings_sign_out_sub)
             )
             Text(
                 text = "›",
@@ -177,13 +181,14 @@ fun SettingsCalendarRow(
     SettingsRowCard(slug = "calendar") {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = if (connected) "Calendar synced" else "Bring your calendar in",
+                text = if (connected) stringResource(R.string.settings_calendar_synced)
+                else stringResource(R.string.settings_calendar_connect),
                 style = MaterialTheme.typography.titleMedium,
                 color = NudgyCharcoal
             )
             Text(
-                text = if (connected) "Events from your device calendar stay in sync."
-                else "Allow calendar access to spot conflicts and find open time.",
+                text = if (connected) stringResource(R.string.settings_calendar_synced_sub)
+                else stringResource(R.string.settings_calendar_connect_sub),
                 style = MaterialTheme.typography.bodySmall,
                 color = NudgyMuted
             )
@@ -196,7 +201,11 @@ fun SettingsCalendarRow(
                 modifier = Modifier.testTag("settings_calendar_sync_button"),
                 colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary)
             ) {
-                Text(if (isSyncing) "Syncing…" else "Sync now", color = Color.White)
+                Text(
+                    if (isSyncing) stringResource(R.string.settings_calendar_syncing)
+                    else stringResource(R.string.settings_calendar_sync_now),
+                    color = Color.White
+                )
             }
         } else {
             Button(
@@ -204,7 +213,7 @@ fun SettingsCalendarRow(
                 modifier = Modifier.testTag("settings_calendar_connect_button"),
                 colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary)
             ) {
-                Text("Connect", color = Color.White)
+                Text(stringResource(R.string.settings_calendar_connect_button), color = Color.White)
             }
         }
     }
@@ -221,6 +230,118 @@ fun SettingsActionRow(
 ) {
     SettingsRowCard(slug = slug, onClick = onClick) {
         SettingsRowTexts(title = title, subtitle = subtitle, titleColor = titleColor)
+        Text(
+            text = "›",
+            style = MaterialTheme.typography.titleLarge,
+            color = NudgyAccent
+        )
+    }
+}
+
+/**
+ * Sprint 6-2 — the notifications row (spec §2 Q8=(a), §8).
+ *
+ * The two v1 toggles, now PERSISTED (v1's were `remember` only and
+ * reset to ON every time the sheet opened): Morning Brief (the 8:00
+ * AM daily summary — MorningBriefWorker) and Sound & Haptics (the
+ * reminder notification channel — ReminderNotification). Same
+ * `settings_row_notifications` testTag as the S6-0 stub, so the
+ * shell contract holds; the "Soon" text is gone.
+ */
+@Composable
+fun SettingsNotificationsRow(
+    morningBriefEnabled: Boolean,
+    soundEnabled: Boolean,
+    onMorningBriefChange: (Boolean) -> Unit,
+    onSoundChange: (Boolean) -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("settings_row_notifications"),
+        shape = NudgyTokens.cardRadius,
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = NudgyTokens.cardElevation
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SettingsRowTexts(
+                    title = stringResource(R.string.settings_morning_brief_title),
+                    subtitle = stringResource(R.string.settings_morning_brief_sub)
+                )
+                Switch(
+                    checked = morningBriefEnabled,
+                    onCheckedChange = onMorningBriefChange,
+                    modifier = Modifier.testTag("settings_morning_brief_switch")
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SettingsRowTexts(
+                    title = stringResource(R.string.settings_sound_title),
+                    subtitle = stringResource(R.string.settings_sound_sub)
+                )
+                Switch(
+                    checked = soundEnabled,
+                    onCheckedChange = onSoundChange,
+                    modifier = Modifier.testTag("settings_sound_switch")
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Sprint 6-2 — the Appearance row (spec §2 Q9=(a)).
+ *
+ * Shows the current mode; tapping opens the Appearance dialog
+ * (v1's radio rows: System default / Light / Dark). The subtitle
+ * names the effective mode — never a bare code string.
+ */
+@Composable
+fun SettingsAppearanceRow(
+    themeMode: String,
+    onClick: () -> Unit
+) {
+    SettingsRowCard(slug = "appearance", onClick = onClick) {
+        SettingsRowTexts(
+            title = stringResource(R.string.settings_section_appearance),
+            subtitle = when (themeMode) {
+                SettingsPreferences.THEME_LIGHT -> stringResource(R.string.settings_theme_light_sub)
+                SettingsPreferences.THEME_DARK -> stringResource(R.string.settings_theme_dark_sub)
+                else -> stringResource(R.string.settings_theme_system_sub)
+            }
+        )
+        Text(
+            text = "›",
+            style = MaterialTheme.typography.titleLarge,
+            color = NudgyAccent
+        )
+    }
+}
+
+/**
+ * Sprint 6-2 — the Language row (spec §2 Q10=(a)).
+ *
+ * Shows the current UI language; tapping opens the Language
+ * dialog (English / বাংলা). Bengali strings cover the Settings
+ * screen + the main screens (Today/Tasks/navigation) this sprint;
+ * the rest of the app follows later.
+ */
+@Composable
+fun SettingsLanguageRow(
+    language: String,
+    onClick: () -> Unit
+) {
+    SettingsRowCard(slug = "language", onClick = onClick) {
+        SettingsRowTexts(
+            title = stringResource(R.string.settings_section_language),
+            subtitle = if (language == SettingsPreferences.LANGUAGE_BENGALI) {
+                stringResource(R.string.settings_language_bengali)
+            } else {
+                stringResource(R.string.settings_language_english)
+            }
+        )
         Text(
             text = "›",
             style = MaterialTheme.typography.titleLarge,

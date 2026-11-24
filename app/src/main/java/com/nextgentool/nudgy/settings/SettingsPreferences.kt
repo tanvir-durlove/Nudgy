@@ -20,7 +20,16 @@ import kotlinx.coroutines.flow.asStateFlow
  * the Appearance UI). What it only exposes: the language preference
  * (English default; S6-2 adds the Bengali strings + UI) and the
  * onboarding flag (S6-3 reads it to show the tutorial once).
- * No Bengali strings, no language switching, no tutorial UI here.
+ *
+ * Sprint 6-2 — the notification toggles (spec §2 Q8=(a)): v1's
+ * "Notification Preferences" dialog had exactly two Switches
+ * ("Morning Brief Alert" + "Sound & Haptics") but NEITHER was
+ * persisted — both were `remember { mutableStateOf(true) }` only,
+ * resetting to ON every time the sheet opened. Here both persist
+ * in the same "nudgy_settings" file, default ON (v1's initial
+ * state). The Morning Brief worker and the reminder notification
+ * path read them through the static readers below (a receiver /
+ * worker has only a Context, not the @Singleton store).
  */
 class SettingsPreferences(private val prefs: SharedPreferences) {
 
@@ -48,6 +57,32 @@ class SettingsPreferences(private val prefs: SharedPreferences) {
 
     /** False until the S6-3 tutorial is shown once. */
     val hasSeenOnboarding: StateFlow<Boolean> = _hasSeenOnboarding.asStateFlow()
+
+    private val _morningBriefEnabled = MutableStateFlow(
+        prefs.getBoolean(KEY_MORNING_BRIEF, true)
+    )
+
+    /** Sprint 6-2 — the 8:00 AM daily summary. Default ON (v1's initial state). */
+    val morningBriefEnabled: StateFlow<Boolean> = _morningBriefEnabled.asStateFlow()
+
+    private val _soundEnabled = MutableStateFlow(
+        prefs.getBoolean(KEY_SOUND_ENABLED, true)
+    )
+
+    /** Sprint 6-2 — reminder sound + vibration. Default ON (v1's initial state). */
+    val soundEnabled: StateFlow<Boolean> = _soundEnabled.asStateFlow()
+
+    fun setMorningBriefEnabled(enabled: Boolean) {
+        if (enabled == _morningBriefEnabled.value) return
+        _morningBriefEnabled.value = enabled
+        prefs.edit().putBoolean(KEY_MORNING_BRIEF, enabled).apply()
+    }
+
+    fun setSoundEnabled(enabled: Boolean) {
+        if (enabled == _soundEnabled.value) return
+        _soundEnabled.value = enabled
+        prefs.edit().putBoolean(KEY_SOUND_ENABLED, enabled).apply()
+    }
 
     /**
      * Unknown values fall back to "system" (never a crash, never
@@ -79,6 +114,21 @@ class SettingsPreferences(private val prefs: SharedPreferences) {
         const val KEY_THEME_MODE = "theme_mode"
         const val KEY_LANGUAGE = "language"
         const val KEY_HAS_SEEN_ONBOARDING = "has_seen_onboarding"
+        const val KEY_MORNING_BRIEF = "morning_brief_enabled"
+        const val KEY_SOUND_ENABLED = "sound_enabled"
+
+        /**
+         * Static readers for Context-only callers (ReminderReceiver,
+         * MorningBriefWorker): the same keys, the same defaults —
+         * never a second source of truth.
+         */
+        fun isMorningBriefEnabled(context: Context): Boolean =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(KEY_MORNING_BRIEF, true)
+
+        fun isSoundEnabled(context: Context): Boolean =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(KEY_SOUND_ENABLED, true)
 
         const val THEME_SYSTEM = "system"
         const val THEME_LIGHT = "light"
