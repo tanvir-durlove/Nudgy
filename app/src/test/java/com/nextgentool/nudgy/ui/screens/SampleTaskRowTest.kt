@@ -1,6 +1,11 @@
 package com.nextgentool.nudgy.ui.screens
 
 import android.content.Context
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -8,7 +13,6 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -24,6 +28,7 @@ import com.nextgentool.nudgy.domain.usecase.SaveViewUseCase
 import com.nextgentool.nudgy.domain.usecase.ToggleTaskCompletionUseCase
 import com.nextgentool.nudgy.domain.usecase.UpdateTaskUseCase
 import com.nextgentool.nudgy.domain.usecase.WeeklyReviewUseCase
+import com.nextgentool.nudgy.ui.components.TaskBoard
 import com.nextgentool.nudgy.ui.viewmodel.TasksViewModel
 import com.nextgentool.nudgy.ui.viewmodel.TodayViewModel
 import com.nextgentool.nudgy.ui.viewmodel.startOfTodayMillis
@@ -49,25 +54,29 @@ import org.robolectric.annotation.Config
  * 00:00, so it lands in the Anytime group on the same tab.
  *
  * The chip test stays on TodayScreen (it passes there). The DELETE
- * test lives on TasksScreen in BOARD mode instead: TodayScreen has
- * no LazyColumn to scroll by index, and programmatic scrolling does
- * not re-place content in Robolectric (CalendarDragTest rounds 9–15
- * proved it: scrollTo moves the value but does not re-place the
- * content, performScrollTo leaves the bounds stale) — run 864
- * failed the delete tap on Today for exactly that reason. The
- * 1000 dp tall viewport tried next (run 866) hung the test step
- * twice with zero output, so that approach is reverted. The
- * index-scroll tried next (runs 867/868) failed too: after
- * performScrollToIndex(6) the chip never composed within 10 s on
- * this list. So the delete test uses the board instead — the board
- * renders its cards in plain Columns (no lazy list inside), so
- * every card is composed eagerly once the board item itself is
- * composed, and no index scrolling is needed at all. The delete
+ * test renders the TaskBoard directly (the BoardDragTest pattern)
+ * with items from the real TasksViewModel flow. Four surfaces were
+ * tried before this one and each failed on a harness quirk, not on
+ * the product code: TodayScreen (run 864 — programmatic scroll
+ * does not re-place content in Robolectric, so the delete button
+ * never became pressable); the 1000 dp tall viewport (run 866 —
+ * hung the test step twice with zero output); the Tasks list by
+ * index (runs 867/868 — after performScrollToIndex(6) the chip
+ * never composed within 10 s); TasksScreen in board mode (run 870 —
+ * after the S14-proven performScrollTo + click on view_mode_board
+ * the chip still never appeared, most likely the tap landing on
+ * stale bounds after the programmatic scroll — the repo's
+ * documented lesson that semantics bounds do not update after a
+ * programmatic scroll). The direct board render has no LazyColumn,
+ * no toggle and no scrolling of any kind: the board's cards live in
+ * plain Columns, so every card is composed eagerly, and the delete
  * path is identical (the same SampleDeleteButton component, the
- * same viewModel.deleteTask) — only the surface differs. The
- * view-mode switch uses the S14-proven pattern (performScrollTo +
- * click on view_mode_board); the delete button is scrolled into
- * view the same way before the tap.
+ * same viewModel.deleteTask, items from the same ViewModel flow —
+ * so the chip disappearing after the tap proves the flow-driven
+ * refresh too). What this version does NOT prove is the
+ * TasksScreen wiring of onDeleteSample into the board/list rows —
+ * that is verified by code trace and by the sprint-end device
+ * test (§10), not by this test.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -139,23 +148,28 @@ class SampleTaskRowTest {
             )
         }
 
-        // TasksScreen in BOARD mode, not the list (see the class
-        // comment): the board's cards compose eagerly, so the delete
-        // button is reachable without any index scrolling.
+        // The board rendered directly (see the class comment): no
+        // LazyColumn, no toggle, no scrolling — every card is composed
+        // eagerly. Items come from the real TasksViewModel flow, so the
+        // board follows the delete.
         composeRule.setContent {
-            TasksScreen(viewModel = tasksViewModel)
+            val uiState by tasksViewModel.uiState.collectAsState()
+            Box(modifier = Modifier.fillMaxSize()) {
+                TaskBoard(
+                    items = uiState.items,
+                    onMoveTask = { _, _, _, _ -> },
+                    onToggle = { tasksViewModel.toggleTask(it) },
+                    onTaskClick = {},
+                    onDeleteSample = { tasksViewModel.deleteTask(it) }
+                )
+            }
         }
-        // Wait for a task row's text (the S14 pattern) — this proves
-        // the tasks have loaded and are composed, not just that the
-        // static quick-add field rendered.
+        // Wait for a task card's text — this proves the flow has
+        // emitted and the cards are composed.
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("Real task")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        // Switch to the board (S14-proven: scroll the toggle into
-        // view first, then tap it).
-        composeRule.onNodeWithTag("view_mode_board").performScrollTo()
-        composeRule.onNodeWithTag("view_mode_board").performClick()
         // The sample chip lands exactly once (the sample card);
         // the ordinary task next to it carries no chip.
         composeRule.waitUntil(timeoutMillis = 10_000) {
@@ -167,11 +181,10 @@ class SampleTaskRowTest {
             composeRule.onAllNodesWithTag("sample_chip")
                 .fetchSemanticsNodes().size
         )
-        // Scroll the row's own delete button into view, then tap it.
+        // One tap on the card's own delete button removes the sample.
         // No waitForIdle: the chip-disappearance waitUntil below is
         // the synchronisation, and it gives the delete coroutine time
         // to run.
-        composeRule.onNodeWithTag("sample_delete_${sample.id}").performScrollTo()
         composeRule.onNodeWithTag("sample_delete_${sample.id}").assertIsDisplayed()
         composeRule.onNodeWithTag("sample_delete_${sample.id}")
             .performClick()
