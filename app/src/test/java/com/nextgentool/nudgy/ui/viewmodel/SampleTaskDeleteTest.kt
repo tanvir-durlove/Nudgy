@@ -1,6 +1,7 @@
 package com.nextgentool.nudgy.ui.viewmodel
 
 import android.content.Context
+import android.os.Looper
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -21,22 +22,27 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
+import java.time.Duration
 
 /**
  * Sprint 6-3 — the sample delete, proven WITHOUT compose (feature 40,
  * Q3=(a), spec §6).
  *
- * DIAGNOSTIC BISECT round 10 — CREATES ONLY; do not merge in this
- * shape. Round 9 proved the empty body goes green (PR 899 + push
- * 900, 931/931, 0 failures), so setUp + VM construction + tearDown
- * are innocent and shared-state fallout to a later class is
- * refuted — the hang needs a body operation (create/delete/pump/
- * poll). This round restores ONLY the two creates: if green, the
- * hang is in delete/idleFor/poll (next: add the delete); if it
- * hangs, a create is guilty. The uploaded test-results XML
- * (workflow: timeout-minutes: 10 + Upload test results step)
- * names the hanging class.
+ * DIAGNOSTIC BISECT round 11 — creates + delete + one bounded pump +
+ * one DB read, NO poll loop; do not merge in this shape. Round 9
+ * proved the empty body goes green (PR 899 + push 900, 931/931,
+ * 0 failures), so setUp + VM construction + tearDown are innocent
+ * and shared-state fallout to a later class is refuted. Round 10
+ * proved the two creates are innocent (push 901 green; PR 902
+ * green on the sanctioned re-run after the documented PR #99
+ * GroupRepositoryTest harness-leak flake). This round adds the
+ * delete + ONE idleFor(2000ms) + ONE DB read: if green, the hang
+ * was the poll loop; if it hangs, the hang is in the delete's
+ * execution or the pump. The uploaded test-results XML (workflow:
+ * timeout-minutes: 10 + Upload test results step) names the
+ * hanging class.
  *
  * The tap wiring itself (IconButton onClick → viewModel.deleteTask)
  * is NOT proven by this test — DEVICE-GATE item for the
@@ -97,12 +103,13 @@ class SampleTaskDeleteTest {
 
     @Test
     fun `deleting a sample removes only it`() {
-        // DIAGNOSTIC BISECT round 10 — creates only. No delete, no
-        // idleFor/pump, no DB poll loop, no looper calls anywhere.
+        // DIAGNOSTIC BISECT round 11 — creates + delete + one bounded
+        // pump + ONE DB read. No poll loop, no Thread.sleep loop, no
+        // live uiState collection.
         val tasksViewModel = buildViewModel()
         assertNotNull(tasksViewModel)
 
-        runBlocking {
+        val sample = runBlocking {
             repository.createTask(
                 userId = userId,
                 title = "Morning walk",
@@ -118,9 +125,21 @@ class SampleTaskDeleteTest {
             )
         }
 
-        val tasks = runBlocking { repository.getAllTasksOnce(userId) }
-        assertEquals(2, tasks.size)
-        assertTrue(tasks.any { it.title == "Morning walk" })
-        assertTrue(tasks.any { it.title == "Real task" })
+        val before = runBlocking { repository.getAllTasksOnce(userId) }
+        assertEquals(2, before.size)
+        assertTrue(before.any { it.title == "Morning walk" })
+        assertTrue(before.any { it.title == "Real task" })
+
+        tasksViewModel.deleteTask(sample)
+        // One bounded pump so the posted delete coroutine (Main →
+        // IO → Main) runs and resumes; 2s virtual is generous for
+        // the one-shot IO delete.
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(2000))
+
+        // ONE DB read, no loop: the delete must already have landed.
+        val after = runBlocking { repository.getAllTasksOnce(userId) }
+        assertEquals(1, after.size)
+        assertEquals("Real task", after[0].title)
+        assertTrue(after.none { it.id == sample.id })
     }
 }
