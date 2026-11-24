@@ -2,7 +2,6 @@ package com.nextgentool.nudgy.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -113,17 +112,11 @@ fun TodayScreen(
     // nullable (not a hiltViewModel() default) on purpose: the
     // existing Today tests omit this parameter, and a default would
     // evaluate hiltViewModel() in a non-Hilt Robolectric test.
-    habitViewModel: HabitViewModel? = null,
-    // Sprint 6-3 — test seam (the S1-4c Board pattern): an externally
-    // owned scroll state, so a test can scroll the screen after
-    // layout without performScrollTo — which hangs this harness when
-    // a real scroll is required (runs 851/852, 857/858). Null in
-    // production and in older call sites — no behaviour change.
-    todayScrollState: ScrollState? = null
+    habitViewModel: HabitViewModel? = null
 ) {
     val uiState by todayViewModel.uiState.collectAsState()
     val tasksUiState by tasksViewModel.uiState.collectAsState()
-    val scrollState = todayScrollState ?: rememberScrollState()
+    val scrollState = rememberScrollState()
     // Sprint 1-4 — List / Board toggle for the My Day section (Feature 5).
     var myDayViewMode by remember { mutableStateOf(TaskViewMode.LIST) }
     val percent = if (uiState.todayTotal == 0) 0

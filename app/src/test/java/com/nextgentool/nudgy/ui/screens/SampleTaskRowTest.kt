@@ -1,15 +1,12 @@
 package com.nextgentool.nudgy.ui.screens
 
 import android.content.Context
-import androidx.compose.foundation.ScrollState
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -29,7 +26,6 @@ import com.nextgentool.nudgy.ui.viewmodel.TasksViewModel
 import com.nextgentool.nudgy.ui.viewmodel.TodayViewModel
 import com.nextgentool.nudgy.ui.viewmodel.startOfTodayMillis
 import kotlinx.coroutines.runBlocking
-import kotlin.math.roundToInt
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -51,7 +47,14 @@ import org.robolectric.annotation.Config
  * 00:00, so it lands in the Anytime group on the same tab.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+// The viewport is 1000 dp tall (w360dp-h1000dp) so the first
+// timeline row — and its delete button — are in view from the
+// first layout. No scroll mechanism brings a node into a pressable
+// state in Robolectric (CalendarDragTest rounds 9–15 proved it:
+// scrollTo moves the value but does not re-place the content,
+// performScrollTo leaves the bounds stale), so the test does not
+// scroll at all — it renders tall and taps directly.
+@Config(sdk = [36], qualifiers = "w360dp-h1000dp")
 class SampleTaskRowTest {
 
     @get:Rule
@@ -62,12 +65,6 @@ class SampleTaskRowTest {
     private lateinit var tasksViewModel: TasksViewModel
     private lateinit var todayViewModel: TodayViewModel
     private val viewModelStore = ViewModelStore()
-    // The Today screen's scroll state, owned by the test (the S1-4c
-    // seam): the delete button sits below the fold, and the screen is
-    // scrolled to it by offset — never performScrollTo, which hangs
-    // this harness when a real scroll is required (runs 851/852 and
-    // 857/858).
-    private val todayScrollState = ScrollState(0)
     // The tasks must belong to the user the ViewModels actually
     // observe: constructed without a GroupAuth seam they fall back to
     // repository.currentUserId() (the TodayScreenS12Test pattern) —
@@ -131,8 +128,7 @@ class SampleTaskRowTest {
                 onPlanClick = {},
                 onAllTasksClick = {},
                 tasksViewModel = tasksViewModel,
-                todayViewModel = todayViewModel,
-                todayScrollState = todayScrollState
+                todayViewModel = todayViewModel
             )
         }
         // The sample chip lands exactly once (the Today-tab TaskPoint);
@@ -150,27 +146,14 @@ class SampleTaskRowTest {
         composeRule.onNodeWithText("Real task").assertExists()
 
         // One tap on the row's own delete button removes the sample.
-        // The first timeline row sits below the fold (hero + quick-add
-        // + My Day sit above it), so scroll it into view by offset
-        // through the test-owned ScrollState: the button's root bounds
-        // give its unscrolled Y, and scrollTo jumps there directly —
-        // no gesture, no paused-clock animation. Then one tap.
-        val deleteNode = composeRule.onNodeWithTag("sample_delete_${sample.id}")
-            .fetchSemanticsNode()
-        val targetPx = with(composeRule.density) {
-            deleteNode.boundsInRoot.top - 100.dp.toPx()
-        }
-        runBlocking { todayScrollState.scrollTo(targetPx.roundToInt().coerceAtLeast(0)) }
-        composeRule.waitForIdle()
-        // The scroll must have revealed the button — if this fails,
-        // the offset math (not the tap) is the problem.
-        composeRule.onNodeWithTag("sample_delete_${sample.id}").assertIsDisplayed()
+        // The viewport is 1000 dp tall (see the @Config above), so the
+        // button is in view from the first layout and the tap lands
+        // directly — no scrolling of any kind (see the class comment).
         composeRule.onNodeWithTag("sample_delete_${sample.id}")
             .performClick()
         composeRule.waitForIdle()
         // The delete must have reached the DB — if this fails, the tap
-        // missed or the ViewModel coroutine never ran, even though the
-        // button was on screen.
+        // missed or the ViewModel coroutine never ran.
         assertEquals(1, runBlocking { repository.getAllTasksOnce(repository.currentUserId()).size })
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithTag("sample_chip")
