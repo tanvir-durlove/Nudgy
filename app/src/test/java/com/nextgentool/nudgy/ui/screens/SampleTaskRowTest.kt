@@ -131,7 +131,12 @@ class SampleTaskRowTest {
             composeRule.onAllNodesWithTag("sample_chip")
                 .fetchSemanticsNodes().size == 1
         }
-        composeRule.onNodeWithText("Morning walk").assertExists()
+        // Never assert on the bare title: the 01:00 sample is already
+        // past at test time, so the Weekly Review card lists it under
+        // "Missed" too — "Morning walk" matches TWO nodes. The row's
+        // own delete button tag is unique; the ordinary task is
+        // date-only (midnight), so it is not missed and matches once.
+        composeRule.onNodeWithTag("sample_delete_${sample.id}").assertExists()
         composeRule.onNodeWithText("Real task").assertExists()
 
         // One tap on the row's own delete button removes the sample.
@@ -146,7 +151,7 @@ class SampleTaskRowTest {
         }
         // The ordinary task is untouched, and the sample never returns.
         composeRule.onNodeWithText("Real task").assertExists()
-        composeRule.onNodeWithText("Morning walk").assertDoesNotExist()
+        composeRule.onNodeWithTag("sample_delete_${sample.id}").assertDoesNotExist()
         assertEquals(1, runBlocking { repository.getAllTasksOnce(repository.currentUserId()).size })
     }
 
