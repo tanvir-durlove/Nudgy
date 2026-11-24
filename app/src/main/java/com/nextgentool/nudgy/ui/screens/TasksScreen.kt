@@ -47,6 +47,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -197,7 +198,7 @@ fun TasksScreen(
                 OutlinedTextField(
                     value = uiState.filter.text,
                     onValueChange = { viewModel.setSearchText(it) },
-                    placeholder = { Text("Search tasks", color = NudgyMuted) },
+                    placeholder = { Text(stringResource(R.string.tasks_search_hint), color = NudgyMuted) },
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Filled.Search,
@@ -365,7 +366,7 @@ fun TasksScreen(
                 if (doneItems.isNotEmpty()) {
                     item(key = "completed_header") {
                         Text(
-                            text = "Completed (${doneItems.size})",
+                            text = stringResource(R.string.tasks_completed, doneItems.size),
                             style = MaterialTheme.typography.labelLarge,
                             color = NudgyMuted,
                             modifier = Modifier.padding(top = 8.dp, start = 4.dp)
@@ -491,7 +492,7 @@ private fun FilterChipRow(
             FilterChip(
                 selected = filter.isEmpty(),
                 onClick = { onFilterChange(SavedViewFilter.empty()) },
-                label = { Text("All") },
+                label = { Text(stringResource(R.string.tasks_filter_all)) },
                 colors = filterChipColors()
             )
         }
@@ -583,7 +584,7 @@ private fun FilterChipRow(
             FilterChip(
                 selected = filter.groupOnly,
                 onClick = { onFilterChange(filter.copy(groupOnly = !filter.groupOnly)) },
-                label = { Text("Group") },
+                label = { Text(stringResource(R.string.tasks_filter_group)) },
                 colors = filterChipColors()
             )
         }

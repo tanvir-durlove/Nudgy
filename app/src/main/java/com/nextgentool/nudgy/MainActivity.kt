@@ -1,5 +1,6 @@
 package com.nextgentool.nudgy
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -14,9 +15,11 @@ import com.nextgentool.nudgy.auth.AuthManager
 import com.nextgentool.nudgy.auth.GroupAuth
 import com.nextgentool.nudgy.auth.SignInScreen
 import com.nextgentool.nudgy.settings.SettingsPreferences
+import com.nextgentool.nudgy.settings.AppLocale
 import com.nextgentool.nudgy.ui.navigation.NudgyApp
 import com.nextgentool.nudgy.ui.viewmodel.ShareIntentViewModel
 import com.nextgentool.nudgy.work.GroupPollWorker
+import com.nextgentool.nudgy.work.MorningBriefWorker
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -78,8 +81,23 @@ class MainActivity : ComponentActivity() {
     /** Sprint 5-3 — pending group-notification tap (group id, one-shot). */
     private var openGroupId by mutableStateOf<String?>(null)
 
+    /**
+     * Sprint 6-2 — per-app UI language (spec §2 Q10=(a)): the base
+     * context carries the stored language, so a fresh launch already
+     * renders Settings/Today/Tasks in the chosen language (string
+     * resources resolve values-bn when "bn"). No Hilt here — the
+     * prefs file is read directly; injection happens in onCreate.
+     */
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLocale.wrap(newBase, AppLocale.storedCode(newBase)))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Sprint 6-2 — the Morning Brief schedule (spec §2 Q8=(a)):
+        // KEEP, safe on every launch; the worker no-ops while the
+        // toggle is OFF, so no re-schedule is ever needed.
+        MorningBriefWorker.schedule(this)
         // Sprint 5 fix round — restore a returning Google session at
         // startup (v1 MainActivity did the same); a guest stays guest.
         groupAuth.attemptSilentSignIn(lifecycleScope)

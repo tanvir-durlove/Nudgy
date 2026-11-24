@@ -1,0 +1,119 @@
+<resources>
+    <string name="app_name">Nudgy</string>
+
+    <!-- Sprint 6-2 — Bengali strings for the Settings screen + the main
+         screens (Today/Tasks/navigation) only (spec §2 Q10). Every key
+         here MUST exist in values/strings.xml with the same name. -->
+
+    <!-- Bottom navigation -->
+    <string name="nav_today">আজ</string>
+    <string name="nav_calendar">ক্যালেন্ডার</string>
+    <string name="nav_chat">চ্যাট</string>
+    <string name="nav_groups">গ্রুপ</string>
+    <string name="nav_settings">সেটিংস</string>
+
+    <!-- Settings screen -->
+    <string name="settings_title">সেটিংস</string>
+    <string name="settings_section_profile">প্রোফাইল</string>
+    <string name="settings_section_profile_sub">তোমার নাম, ইমেইল আর ছবি</string>
+    <string name="settings_section_sign_in">সাইন ইন</string>
+    <string name="settings_section_sign_in_sub">Google সাইন-ইন আর গেস্ট মোড</string>
+    <string name="settings_section_notifications">নোটিফিকেশন</string>
+    <string name="settings_section_notifications_sub">সকালের সারাংশ, শব্দ আর ভাইব্রেশন</string>
+    <string name="settings_section_appearance">থিম</string>
+    <string name="settings_section_appearance_sub">সিস্টেম, লাইট বা ডার্ক থিম</string>
+    <string name="settings_section_language">ভাষা</string>
+    <string name="settings_section_language_sub">English বা বাংলা</string>
+    <string name="settings_section_calendar">ক্যালেন্ডার সংযোগ</string>
+    <string name="settings_section_calendar_sub">Google ক্যালেন্ডার সিঙ্ক</string>
+    <string name="settings_section_gemini_key">Gemini API key</string>
+    <string name="settings_section_gemini_key_sub">নিজের key (BYOK)</string>
+    <string name="settings_section_privacy">গোপনীয়তা নীতি</string>
+    <string name="settings_section_privacy_sub">তোমার ডেটা কীভাবে ব্যবহার হয়</string>
+    <string name="settings_section_help_feedback">সাহায্য ও মতামত</string>
+    <string name="settings_section_help_feedback_sub">সাহায্য নাও বা মতামত পাঠাও</string>
+    <string name="settings_section_memories">স্মৃতি</string>
+    <string name="settings_section_memories_sub">Nudgy তোমার সম্পর্কে যা মনে রেখেছে</string>
+    <string name="settings_section_delete_account">অ্যাকাউন্ট মুছে ফেলো</string>
+    <string name="settings_section_delete_account_sub">অ্যাকাউন্ট আর ডেটা মুছে ফেলো</string>
+    <string name="settings_section_weekly_review">সাপ্তাহিক পর্যালোচনা</string>
+
+    <string name="settings_guest_user">গেস্ট ব্যবহারকারী</string>
+    <string name="settings_guest_subtitle">ডেটা সিঙ্ক করতে Google দিয়ে সাইন ইন করো</string>
+    <string name="settings_sign_in_button">Google দিয়ে সাইন ইন</string>
+    <string name="settings_sign_out">সাইন আউট</string>
+    <string name="settings_sign_out_sub">এই ডিভাইসে গেস্ট মোডে যাও</string>
+    <string name="settings_calendar_synced">ক্যালেন্ডার সিঙ্ক হয়েছে</string>
+    <string name="settings_calendar_synced_sub">ডিভাইস ক্যালেন্ডারের ইভেন্ট সিঙ্ক থাকে।</string>
+    <string name="settings_calendar_connect">ক্যালেন্ডারটা নিয়ে এসো</string>
+    <string name="settings_calendar_connect_sub">ক্যালেন্ডারের অনুমতি দিলে কনফ্লিক্ট ধরা যায় আর ফাঁকা সময় পাওয়া যায়।</string>
+    <string name="settings_calendar_sync_now">এখনই সিঙ্ক করো</string>
+    <string name="settings_calendar_syncing">সিঙ্ক হচ্ছে…</string>
+    <string name="settings_calendar_connect_button">যুক্ত করো</string>
+    <string name="settings_gemini_custom_key">নিজের key সংরক্ষিত</string>
+    <string name="settings_gemini_builtin">Nudgy-র বিল্ট-ইন AI ব্যবহার হচ্ছে</string>
+    <string name="settings_memories_empty">এখনো কিছু মনে রাখা হয়নি</string>
+    <string name="settings_memories_facts">%1$dটি তথ্য</string>
+    <string name="settings_weekly_review_sub">এই সপ্তাহে কী শেষ হলো, ফোকাস মিনিট আর streak</string>
+
+    <!-- Sprint 6-2 — notifications row (v1 texts) -->
+    <string name="settings_morning_brief_title">সকালের সারাংশ</string>
+    <string name="settings_morning_brief_sub">সকাল ৮টায় দিনের সারাংশ পাও</string>
+    <string name="settings_sound_title">শব্দ ও ভাইব্রেশন</string>
+    <string name="settings_sound_sub">রিমাইন্ডার বাজলে শব্দ হবে</string>
+
+    <!-- Sprint 6-2 — appearance (v1 radio rows) -->
+    <string name="settings_theme_system">সিস্টেমের মতো</string>
+    <string name="settings_theme_light">লাইট</string>
+    <string name="settings_theme_dark">ডার্ক</string>
+    <string name="settings_theme_system_sub">সিস্টেমের থিম মেনে চলবে</string>
+    <string name="settings_theme_light_sub">লাইট থিম</string>
+    <string name="settings_theme_dark_sub">ডার্ক থিম</string>
+
+    <!-- Sprint 6-2 — language -->
+    <string name="settings_language_english">English</string>
+    <string name="settings_language_bengali">বাংলা</string>
+
+    <!-- BYOK dialog (v1 texts) -->
+    <string name="settings_byok_title">Gemini API Key (BYOK)</string>
+    <string name="settings_byok_body">নিজের key নিয়ে এসো: Google AI Studio থেকে তোমার Gemini API key দাও। ডেভেলপারের কোটা বাঁচাতে এই ডিভাইসেই ব্যক্তিগতভাবে সংরক্ষিত থাকে।</string>
+    <string name="settings_byok_label">API Key</string>
+    <string name="settings_byok_save">সংরক্ষণ করো</string>
+    <string name="settings_byok_reset">মুছে ফেলো</string>
+
+    <!-- Memories dialog (v1 texts) -->
+    <string name="settings_memories_title">Nudgy-র স্মৃতি ও জ্ঞান</string>
+    <string name="settings_memories_body">Nudgy তোমার রুটিন, পছন্দ আর ফোকাসের অভ্যাস সম্পর্কে যা শিখেছে:</string>
+    <string name="settings_memories_hint">Nudgy-কে একটা পছন্দ শেখাও...</string>
+    <string name="settings_memories_add">যোগ করো</string>
+    <string name="settings_memories_empty_dialog">এখনো কোনো স্মৃতি সংরক্ষিত হয়নি। উপরে যোগ করো বা চ্যাটে বলো: \'Remember that...\'</string>
+    <string name="settings_memories_done">হয়ে গেছে</string>
+
+    <!-- Delete account dialog (v1 texts) -->
+    <string name="settings_delete_title">অ্যাকাউন্ট মুছবে?</string>
+    <string name="settings_delete_body">এতে তোমার অ্যাকাউন্ট, টাস্ক আর Nudgy-র স্মৃতি স্থায়ীভাবে মুছে যাবে। এটা আর ফেরানো যাবে না।</string>
+    <string name="settings_delete_confirm">চিরতরে মুছে ফেলো</string>
+    <string name="settings_delete_deleting">মুছছে…</string>
+    <string name="settings_delete_cancel">বাতিল</string>
+
+    <!-- Today screen headers -->
+    <string name="today_tab_today">আজ</string>
+    <string name="today_tab_upcoming">আসছে</string>
+    <string name="today_my_day">আমার দিন</string>
+    <string name="today_view_list">লিস্ট</string>
+    <string name="today_view_board">বোর্ড</string>
+    <string name="today_view_matrix">ম্যাট্রিক্স</string>
+    <string name="today_nothing_planned">আজকের জন্য এখনো কিছু প্ল্যান করা হয়নি</string>
+    <string name="today_all_tasks">সব টাস্ক</string>
+    <string name="today_tasks_count">%1$dটি টাস্ক</string>
+    <string name="today_time_label">আজ</string>
+    <string name="today_anytime">যেকোনো সময়</string>
+    <string name="today_no_due_date">কোনো নির্ধারিত তারিখ নেই</string>
+    <string name="today_no_date">তারিখ নেই</string>
+
+    <!-- Tasks screen headers -->
+    <string name="tasks_search_hint">টাস্ক খুঁজো</string>
+    <string name="tasks_completed">শেষ হয়েছে (%1$d)</string>
+    <string name="tasks_filter_all">সব</string>
+    <string name="tasks_filter_group">গ্রুপ</string>
+</resources>

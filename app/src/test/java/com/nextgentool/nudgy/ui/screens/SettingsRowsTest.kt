@@ -3,6 +3,7 @@ package com.nextgentool.nudgy.ui.screens
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -17,6 +18,7 @@ import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.NudgyMemoryEntity
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -254,13 +256,12 @@ class SettingsRowsTest {
     }
 
     @Test
-    fun `notifications appearance and language rows stay inert stubs for S6-2`() {
+    fun `notifications appearance and language rows are wired, no Soon remains`() {
         setGuestShell()
-        // Exactly the three S6-2 rows still say "Soon" — the eight
-        // S6-1 rows no longer do. (assertCountEquals does not exist
-        // in Compose 1.7 — count the semantics nodes instead.)
+        // Sprint 6-2 — the three rows are real now: no "Soon" text
+        // anywhere on the screen, and all three row tags exist.
         assertEquals(
-            3,
+            0,
             composeRule.onAllNodesWithText("Soon").fetchSemanticsNodes().size
         )
         for (slug in listOf("notifications", "appearance", "language")) {
@@ -269,5 +270,98 @@ class SettingsRowsTest {
                 composeRule.onAllNodesWithTag("settings_row_$slug").fetchSemanticsNodes().size
             )
         }
+        composeRule.onNodeWithTag("settings_row_notifications").performScrollTo()
+        composeRule.onNodeWithText("Morning Brief Alert").assertIsDisplayed()
+        composeRule.onNodeWithText("Sound & Haptics").assertIsDisplayed()
+    }
+
+    @Test
+    fun `notification toggles fire their callbacks with the flipped value`() {
+        val briefChanges = mutableListOf<Boolean>()
+        val soundChanges = mutableListOf<Boolean>()
+        composeRule.setContent {
+            NudgyTheme {
+                SettingsShell(
+                    onMorningBriefChange = { briefChanges += it },
+                    onSoundChange = { soundChanges += it }
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_morning_brief_switch").performScrollTo().performClick()
+        composeRule.onNodeWithTag("settings_sound_switch").performScrollTo().performClick()
+        assertEquals(listOf(false), briefChanges)
+        assertEquals(listOf(false), soundChanges)
+    }
+
+    @Test
+    fun `appearance dialog opens and picking Dark calls back`() {
+        val modes = mutableListOf<String>()
+        composeRule.setContent {
+            NudgyTheme {
+                SettingsShell(onThemeModeChange = { modes += it })
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_row_appearance").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_appearance_dialog").assertIsDisplayed()
+        composeRule.onNodeWithText("System default").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_theme_dark").performClick()
+        assertEquals(listOf("dark"), modes)
+    }
+
+    @Test
+    fun `language dialog opens and picking Bengali calls back`() {
+        val codes = mutableListOf<String>()
+        composeRule.setContent {
+            NudgyTheme {
+                SettingsShell(onLanguageChange = { codes += it })
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_row_language").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_language_dialog").assertIsDisplayed()
+        composeRule.onNodeWithText("বাংলা").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_language_bn").performClick()
+        assertEquals(listOf("bn"), codes)
+    }
+
+    @Test
+    fun `settings screen re-renders in Bengali when the locale context is Bengali`() {
+        val context: android.content.Context =
+            androidx.test.core.app.ApplicationProvider.getApplicationContext()
+        val bnContext = com.nextgentool.nudgy.settings.AppLocale.wrap(
+            context,
+            com.nextgentool.nudgy.settings.SettingsPreferences.LANGUAGE_BENGALI
+        )
+        composeRule.setContent {
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalContext provides bnContext
+            ) {
+                NudgyTheme { SettingsShell() }
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("সেটিংস").assertIsDisplayed()
+        composeRule.onNodeWithText("নোটিফিকেশন").assertIsDisplayed()
+        // The appearance / language rows repeat their section title as
+        // the row title, so the Bengali title text exists TWICE —
+        // onNodeWithText would throw on the duplicate. Disambiguate by
+        // the unique section-header tag and read the Bengali text off
+        // the semantics node (the PlanScreenTest traversal pattern:
+        // fetchSemanticsNode + SemanticsProperties.Text + containment —
+        // assertTextEquals and the generic assert() do not exist on
+        // this Compose 1.7 BOM). Below the fold: scroll into view first.
+        val appearanceText = composeRule.onNodeWithTag("settings_section_appearance")
+            .performScrollTo().fetchSemanticsNode()
+            .config[SemanticsProperties.Text].toString()
+        assertTrue(appearanceText.contains("থিম"))
+        val languageText = composeRule.onNodeWithTag("settings_section_language")
+            .performScrollTo().fetchSemanticsNode()
+            .config[SemanticsProperties.Text].toString()
+        assertTrue(languageText.contains("ভাষা"))
+        composeRule.onNodeWithText("সকালের সারাংশ").performScrollTo().assertIsDisplayed()
     }
 }

@@ -35,6 +35,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -52,6 +53,7 @@ import androidx.navigation.compose.navigation
 import androidx.navigation.compose.rememberNavController
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.intent.IncomingIntent
+import com.nextgentool.nudgy.settings.AppLocale
 import com.nextgentool.nudgy.settings.SettingsPreferences
 import com.nextgentool.nudgy.ui.screens.CalendarScreen
 import com.nextgentool.nudgy.ui.screens.ChatScreen
@@ -544,8 +546,8 @@ fun NudgyNavHost(
         composable(NudgyRoute.Settings.route) {
             // Sprint 6-1 — Settings core (spec §4–§5): the wired rows
             // (profile/sign-in, Memories, BYOK, Privacy, Help &
-            // feedback, calendar, delete). The notifications /
-            // appearance / language rows stay inert stubs for S6-2.
+            // feedback, calendar, delete). Sprint 6-2 adds the
+            // notifications / appearance / language rows below.
             val viewModel: SettingsViewModel = hiltViewModel()
             val user by viewModel.user.collectAsState()
             val memories by viewModel.memories.collectAsState()
@@ -553,6 +555,12 @@ fun NudgyNavHost(
             val calendarConnected by viewModel.calendarConnected.collectAsState()
             val isCalendarSyncing by viewModel.isCalendarSyncing.collectAsState()
             val isDeleting by viewModel.isDeleting.collectAsState()
+            // Sprint 6-2 — the notification toggles, theme mode and
+            // language (spec §2 Q8/Q9/Q10), live from the store.
+            val morningBriefEnabled by viewModel.morningBriefEnabled.collectAsState()
+            val soundEnabled by viewModel.soundEnabled.collectAsState()
+            val settingsThemeMode by viewModel.themeMode.collectAsState()
+            val settingsLanguage by viewModel.language.collectAsState()
             val context = LocalContext.current
             LaunchedEffect(viewModel) {
                 viewModel.settingsError.collect { message ->
@@ -613,7 +621,21 @@ fun NudgyNavHost(
                     context.startActivity(mailIntent)
                 },
                 onAddMemory = { content -> viewModel.addMemory(content) },
-                onDeleteMemory = { memoryId -> viewModel.deleteMemory(memoryId) }
+                onDeleteMemory = { memoryId -> viewModel.deleteMemory(memoryId) },
+                // Sprint 6-2 — notifications / appearance / language.
+                morningBriefEnabled = morningBriefEnabled,
+                soundEnabled = soundEnabled,
+                themeMode = settingsThemeMode,
+                language = settingsLanguage,
+                onMorningBriefChange = { enabled -> viewModel.setMorningBriefEnabled(enabled) },
+                onSoundChange = { enabled -> viewModel.setSoundEnabled(enabled) },
+                onThemeModeChange = { mode -> viewModel.setThemeMode(mode) },
+                onLanguageChange = { code ->
+                    viewModel.setLanguage(code)
+                    // The new locale only reaches already-inflated
+                    // resources through a restart (AppLocale).
+                    (context as? Activity)?.let { AppLocale.applyAndRecreate(it, code) }
+                }
             )
         }
     }
@@ -621,17 +643,19 @@ fun NudgyNavHost(
 
 private data class BottomNavEntry(
     val route: NudgyRoute,
-    val title: String,
+    // Sprint 6-2 — the label is a string resource (the language
+    // setting renders it in বাংলা when "bn" is chosen).
+    val titleRes: Int,
     val icon: ImageVector,
     val isCentreChat: Boolean = false
 )
 
 private val bottomNavEntries = listOf(
-    BottomNavEntry(NudgyRoute.Today, "Today", Icons.Outlined.Home),
-    BottomNavEntry(NudgyRoute.Calendar, "Calendar", Icons.Outlined.CalendarMonth),
-    BottomNavEntry(NudgyRoute.Chat, "Chat", Icons.Filled.Add, isCentreChat = true),
-    BottomNavEntry(NudgyRoute.Groups, "Groups", Icons.Outlined.Group),
-    BottomNavEntry(NudgyRoute.Settings, "Settings", Icons.Outlined.Settings)
+    BottomNavEntry(NudgyRoute.Today, R.string.nav_today, Icons.Outlined.Home),
+    BottomNavEntry(NudgyRoute.Calendar, R.string.nav_calendar, Icons.Outlined.CalendarMonth),
+    BottomNavEntry(NudgyRoute.Chat, R.string.nav_chat, Icons.Filled.Add, isCentreChat = true),
+    BottomNavEntry(NudgyRoute.Groups, R.string.nav_groups, Icons.Outlined.Group),
+    BottomNavEntry(NudgyRoute.Settings, R.string.nav_settings, Icons.Outlined.Settings)
 )
 
 /**
@@ -679,14 +703,14 @@ fun NudgyBottomNav(
                             )
                         }
                     },
-                    label = { Text("Chat") }
+                    label = { Text(stringResource(R.string.nav_chat)) }
                 )
             } else {
                 NavigationBarItem(
                     selected = selected,
                     onClick = { navigateTo(navController, entry.route) },
-                    icon = { Icon(entry.icon, contentDescription = entry.title) },
-                    label = { Text(entry.title) }
+                    icon = { Icon(entry.icon, contentDescription = stringResource(entry.titleRes)) },
+                    label = { Text(stringResource(entry.titleRes)) }
                 )
             }
         }

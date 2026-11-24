@@ -82,4 +82,57 @@ class SettingsPreferencesTest {
         assertTrue(prefs.getBoolean("has_seen_onboarding", false))
         assertTrue(SettingsPreferences(prefs).hasSeenOnboarding.value)
     }
+
+    // ---- Sprint 6-2 — the notification toggles (spec §2 Q8=(a)) ----
+
+    @Test
+    fun `notification toggles default ON (v1 initial state)`() {
+        assertTrue(store.morningBriefEnabled.value)
+        assertTrue(store.soundEnabled.value)
+    }
+
+    @Test
+    fun `setMorningBriefEnabled persists and a rebuilt store reads it back`() {
+        store.setMorningBriefEnabled(false)
+        assertFalse(store.morningBriefEnabled.value)
+        assertFalse(prefs.getBoolean("morning_brief_enabled", true))
+        assertFalse(SettingsPreferences(prefs).morningBriefEnabled.value)
+
+        store.setMorningBriefEnabled(true)
+        assertTrue(SettingsPreferences(prefs).morningBriefEnabled.value)
+    }
+
+    @Test
+    fun `setSoundEnabled persists and a rebuilt store reads it back`() {
+        store.setSoundEnabled(false)
+        assertFalse(store.soundEnabled.value)
+        assertFalse(prefs.getBoolean("sound_enabled", true))
+        assertFalse(SettingsPreferences(prefs).soundEnabled.value)
+
+        store.setSoundEnabled(true)
+        assertTrue(SettingsPreferences(prefs).soundEnabled.value)
+    }
+
+    @Test
+    fun `static readers match the store (same keys, same defaults)`() {
+        val context: Context = ApplicationProvider.getApplicationContext()
+        // The static readers read the real "nudgy_settings" file, not
+        // the test file — write then restore, so no other test's
+        // leftovers (and no ordering) can affect the assertions.
+        val realPrefs = context.getSharedPreferences(
+            SettingsPreferences.PREFS_NAME, Context.MODE_PRIVATE
+        )
+        assertTrue(SettingsPreferences.isMorningBriefEnabled(context))
+        assertTrue(SettingsPreferences.isSoundEnabled(context))
+        realPrefs.edit()
+            .putBoolean("morning_brief_enabled", false)
+            .putBoolean("sound_enabled", false)
+            .commit()
+        assertFalse(SettingsPreferences.isMorningBriefEnabled(context))
+        assertFalse(SettingsPreferences.isSoundEnabled(context))
+        realPrefs.edit()
+            .putBoolean("morning_brief_enabled", true)
+            .putBoolean("sound_enabled", true)
+            .commit()
+    }
 }

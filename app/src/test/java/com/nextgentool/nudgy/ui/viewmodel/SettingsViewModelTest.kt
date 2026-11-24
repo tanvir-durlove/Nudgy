@@ -14,6 +14,7 @@ import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.settings.ByokKeyStore
 import com.nextgentool.nudgy.settings.CalendarConnection
 import com.nextgentool.nudgy.settings.SettingsAccountActions
+import com.nextgentool.nudgy.settings.SettingsPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -106,14 +107,19 @@ class SettingsViewModelTest {
         fakeAuth: GroupAuth = FlipGroupAuth(),
         fakeActions: SettingsAccountActions = FakeSettingsAccountActions(),
         fakeByok: ByokKeyStore = FakeByokKeyStore(),
-        fakeCalendar: CalendarConnection = FakeCalendarConnection()
+        fakeCalendar: CalendarConnection = FakeCalendarConnection(),
+        settingsPrefs: SettingsPreferences = SettingsPreferences(
+            context.getSharedPreferences("test_s6_2_settings", Context.MODE_PRIVATE)
+                .also { it.edit().clear().commit() }
+        )
     ): SettingsViewModel = SettingsViewModel(
         taskRepository = taskRepository,
         memoryRepository = memoryRepository,
         groupAuth = fakeAuth,
         accountActions = fakeActions,
         byokKeyStore = fakeByok,
-        calendarConnection = fakeCalendar
+        calendarConnection = fakeCalendar,
+        settingsPreferences = settingsPrefs
     ).also { store.put("settings", it) }
 
     private fun flip(auth: FlipGroupAuth) {
@@ -277,6 +283,50 @@ class SettingsViewModelTest {
         viewModel.syncCalendarNow()
         assertEquals("sync failed", error.await())
         assertFalse(viewModel.isCalendarSyncing.first())
+    }
+
+    // ---- Notifications / Appearance / Language (Sprint 6-2) ----
+
+    @Test
+    fun `notification toggles default ON and persist through the store`() = vmTest {
+        val viewModel = buildViewModel()
+        assertTrue(viewModel.morningBriefEnabled.first())
+        assertTrue(viewModel.soundEnabled.first())
+
+        viewModel.setMorningBriefEnabled(false)
+        viewModel.setSoundEnabled(false)
+        assertFalse(viewModel.morningBriefEnabled.first())
+        assertFalse(viewModel.soundEnabled.first())
+        val prefs = context.getSharedPreferences("test_s6_2_settings", Context.MODE_PRIVATE)
+        assertFalse(prefs.getBoolean("morning_brief_enabled", true))
+        assertFalse(prefs.getBoolean("sound_enabled", true))
+    }
+
+    @Test
+    fun `theme choice writes theme_mode and the resolved darkTheme flips`() = vmTest {
+        val viewModel = buildViewModel()
+        assertEquals(SettingsPreferences.THEME_SYSTEM, viewModel.themeMode.first())
+        // System + light system = light.
+        assertFalse(SettingsPreferences.resolveDarkTheme(viewModel.themeMode.first(), false))
+
+        viewModel.setThemeMode(SettingsPreferences.THEME_DARK)
+        assertEquals(SettingsPreferences.THEME_DARK, viewModel.themeMode.first())
+        assertTrue(SettingsPreferences.resolveDarkTheme(viewModel.themeMode.first(), false))
+
+        viewModel.setThemeMode(SettingsPreferences.THEME_LIGHT)
+        assertEquals(SettingsPreferences.THEME_LIGHT, viewModel.themeMode.first())
+        // Light + dark system = still light.
+        assertFalse(SettingsPreferences.resolveDarkTheme(viewModel.themeMode.first(), true))
+    }
+
+    @Test
+    fun `language choice writes the preference`() = vmTest {
+        val viewModel = buildViewModel()
+        assertEquals(SettingsPreferences.LANGUAGE_ENGLISH, viewModel.language.first())
+        viewModel.setLanguage(SettingsPreferences.LANGUAGE_BENGALI)
+        assertEquals(SettingsPreferences.LANGUAGE_BENGALI, viewModel.language.first())
+        val prefs = context.getSharedPreferences("test_s6_2_settings", Context.MODE_PRIVATE)
+        assertEquals("bn", prefs.getString("language", null))
     }
 
     private fun mockActivity(): Activity =

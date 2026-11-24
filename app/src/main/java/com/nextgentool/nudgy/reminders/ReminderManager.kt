@@ -14,6 +14,7 @@ class ReminderManager(private val context: Context) {
 
     init {
         createNotificationChannel()
+        createSilentNotificationChannel()
     }
 
     private fun createNotificationChannel() {
@@ -25,6 +26,33 @@ class ReminderManager(private val context: Context) {
             ).apply {
                 description = "Smart actionable reminders from Nudgy"
                 enableVibration(true)
+            }
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    /**
+     * Sprint 6-2 — the silent twin of [CHANNEL_ID] (spec §2 Q8=(a):
+     * Sound & Haptics OFF must silence reminder sound/vibration
+     * WITHOUT suppressing the notification itself). On API 26+ a
+     * notification's sound comes from its channel, so per-notification
+     * silencing is done by posting on this IMPORTANCE_LOW channel
+     * (no sound, no vibration, no heads-up — the notification still
+     * appears in the shade). [ReminderNotification] picks the
+     * channel from the persisted sound toggle; the receiver never
+     * chooses it directly.
+     */
+    private fun createSilentNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                SILENT_CHANNEL_ID,
+                "Nudgy Reminders (silent)",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Reminders with sound and vibration off"
+                enableVibration(false)
+                setSound(null, null)
             }
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
@@ -186,6 +214,8 @@ class ReminderManager(private val context: Context) {
             return trigger < nowMillis
         }
         const val CHANNEL_ID = "nudgy_reminders_channel"
+        /** Sprint 6-2 — the silent twin (IMPORTANCE_LOW): Sound OFF posts here. */
+        const val SILENT_CHANNEL_ID = "nudgy_reminders_silent_channel"
         // NOTE: action strings stay com.example.* on purpose — renaming would drop alarms already scheduled by installed builds.
         const val ACTION_TRIGGER_REMINDER = "com.example.nudgy.ACTION_TRIGGER_REMINDER"
         const val ACTION_MARK_DONE = "com.example.nudgy.ACTION_MARK_DONE"
