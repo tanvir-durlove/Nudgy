@@ -10,7 +10,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
+import com.nextgentool.nudgy.auth.AuthManager
 import com.nextgentool.nudgy.auth.GroupAuth
+import com.nextgentool.nudgy.auth.SignInScreen
 import com.nextgentool.nudgy.settings.SettingsPreferences
 import com.nextgentool.nudgy.ui.navigation.NudgyApp
 import com.nextgentool.nudgy.ui.viewmodel.ShareIntentViewModel
@@ -60,6 +62,12 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var groupAuth: GroupAuth
 
+    // Sprint 6-1 — the same @Singleton AuthManager the seam wraps,
+    // for the first-run sign-in gate (the carried SignInScreen takes
+    // the AuthManager directly, v1 MainActivity pattern).
+    @Inject
+    lateinit var authManager: AuthManager
+
     // Sprint 6-0 — the Settings store (foundation): the single
     // @Singleton that reads "nudgy_settings". Its themeMode flow is
     // collected below and passed to NudgyApp, so an S6-2 Appearance
@@ -82,11 +90,34 @@ class MainActivity : ComponentActivity() {
             // lesson: a value frozen at construction never follows a
             // later change).
             val themeMode by settingsPreferences.themeMode.collectAsState()
-            NudgyApp(
-                themeMode = themeMode,
-                openGroupId = openGroupId,
-                onOpenGroupIdConsumed = { openGroupId = null }
-            )
+            // Sprint 6-1 — the first-run sign-in gate (v1 MainActivity
+            // pattern, spec §5): no auth info yet means the carried
+            // SignInScreen full-screen — "Warm Welcome", Google button
+            // + a plain "Continue as Guest" button. A returning user
+            // never sees it: AuthManager seeds userState synchronously
+            // from the cached Firebase user or the guest flag, so the
+            // gate only opens on a truly fresh install (or after a
+            // sign-out, when the state goes null again). Signing in or
+            // continuing as guest flips the flow and the gate opens
+            // the app with no restart.
+            val user by groupAuth.userState.collectAsState()
+            if (user == null) {
+                val isLoading by authManager.isLoading.collectAsState()
+                val errorMessage by authManager.errorMessage.collectAsState()
+                SignInScreen(
+                    authManager = authManager,
+                    scope = lifecycleScope,
+                    isLoading = isLoading,
+                    errorMessage = errorMessage,
+                    onSignInSuccess = {}
+                )
+            } else {
+                NudgyApp(
+                    themeMode = themeMode,
+                    openGroupId = openGroupId,
+                    onOpenGroupIdConsumed = { openGroupId = null }
+                )
+            }
         }
     }
 

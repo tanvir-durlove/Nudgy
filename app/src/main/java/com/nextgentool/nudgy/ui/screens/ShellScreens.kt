@@ -23,14 +23,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.unit.dp
 import com.nextgentool.nudgy.R
+import com.nextgentool.nudgy.auth.NudgyUser
+import com.nextgentool.nudgy.data.local.entity.NudgyMemoryEntity
+import kotlinx.coroutines.flow.SharedFlow
 import com.nextgentool.nudgy.ui.theme.NudgyAccent
 import com.nextgentool.nudgy.ui.theme.NudgyCanvas
 import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
@@ -216,8 +224,40 @@ fun SettingsShell(
     // Sprint 4-4 — the Settings entry to the weekly review screen
     // (spec §7, Q9=(a)): the same screen the Today progress ring
     // opens. Defaults to no-op so older call sites keep compiling.
-    onWeeklyReviewClick: () -> Unit = {}
+    onWeeklyReviewClick: () -> Unit = {},
+    // Sprint 6-1 — the wired rows (spec §4–§5). All defaulted so the
+    // S6-0 shell test (no params) still renders one row per section:
+    // with no user the profile/sign-in rows render the guest state.
+    user: NudgyUser? = null,
+    memories: List<NudgyMemoryEntity> = emptyList(),
+    byokKey: String = "",
+    calendarConnected: Boolean = false,
+    isCalendarSyncing: Boolean = false,
+    isDeleting: Boolean = false,
+    deleteCompleted: SharedFlow<Unit>? = null,
+    onSignInClick: () -> Unit = {},
+    onSignOutClick: () -> Unit = {},
+    onDeleteAccountClick: () -> Unit = {},
+    onCalendarConnectClick: () -> Unit = {},
+    onCalendarSyncClick: () -> Unit = {},
+    onSaveByokKey: (String) -> Unit = {},
+    onResetByokKey: () -> Unit = {},
+    onPrivacyClick: () -> Unit = {},
+    onHelpFeedbackClick: () -> Unit = {},
+    onAddMemory: (String) -> Unit = {},
+    onDeleteMemory: (String) -> Unit = {}
 ) {
+    // Sprint 6-1 — dialog state lives in the shell; the dialogs
+    // themselves are in SettingsDialogs.kt (v1 texts verbatim).
+    var showByokDialog by remember { mutableStateOf(false) }
+    var showMemoriesDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    // The delete dialog closes on success (v1 C7: it stays up while
+    // the deletion runs, and a failure keeps it open for a retry).
+    LaunchedEffect(deleteCompleted) {
+        deleteCompleted?.collect { showDeleteDialog = false }
+    }
+    val isGuest = user == null || user.isGuest
     // Sprint 6-0 — the real Settings structure (spec §4): the
     // static placeholder rows are gone (the S5 fix-round blink
     // guard stays relevant — no shimmer anywhere on this screen).
@@ -234,7 +274,57 @@ fun SettingsShell(
         Text(text = "Settings", color = NudgyCharcoal)
         for (section in SETTINGS_SECTIONS) {
             SettingsSectionHeader(title = section.title, slug = section.slug)
-            SettingsStubRow(section = section)
+            // Sprint 6-1 — the wired sections replace their stub row
+            // with the real row (same `settings_row_<slug>` testTag);
+            // notifications/appearance/language stay stubs for S6-2.
+            when (section.slug) {
+                "profile" -> SettingsProfileRow(user = user)
+                "sign_in" -> SettingsSignInRow(
+                    isGuest = isGuest,
+                    onSignInClick = onSignInClick,
+                    onSignOutClick = onSignOutClick
+                )
+                "calendar" -> SettingsCalendarRow(
+                    connected = calendarConnected,
+                    isSyncing = isCalendarSyncing,
+                    onConnectClick = onCalendarConnectClick,
+                    onSyncClick = onCalendarSyncClick
+                )
+                "gemini_key" -> SettingsActionRow(
+                    slug = "gemini_key",
+                    title = "Gemini API key",
+                    subtitle = if (byokKey.isNotBlank()) "Custom key saved"
+                    else "Using Nudgy's built-in AI",
+                    onClick = { showByokDialog = true }
+                )
+                "privacy" -> SettingsActionRow(
+                    slug = "privacy",
+                    title = "Privacy Policy",
+                    subtitle = "How your data is handled",
+                    onClick = onPrivacyClick
+                )
+                "help_feedback" -> SettingsActionRow(
+                    slug = "help_feedback",
+                    title = "Help & feedback",
+                    subtitle = "Get help or send feedback",
+                    onClick = onHelpFeedbackClick
+                )
+                "memories" -> SettingsActionRow(
+                    slug = "memories",
+                    title = "Memories",
+                    subtitle = if (memories.isEmpty()) "Nothing remembered yet"
+                    else "${memories.size} facts",
+                    onClick = { showMemoriesDialog = true }
+                )
+                "delete_account" -> SettingsActionRow(
+                    slug = "delete_account",
+                    title = "Delete account",
+                    subtitle = "Erase your account and data",
+                    titleColor = Color(0xFFD32F2F),
+                    onClick = { showDeleteDialog = true }
+                )
+                else -> SettingsStubRow(section = section)
+            }
         }
         SettingsSectionHeader(title = "Weekly review", slug = "weekly_review")
         Surface(
@@ -272,5 +362,35 @@ fun SettingsShell(
             }
         }
         Spacer(modifier = Modifier.height(16.dp))
+    }
+    // Sprint 6-1 — the dialogs (v1 texts verbatim, SettingsDialogs.kt).
+    if (showByokDialog) {
+        ByokKeyDialog(
+            initialKey = byokKey,
+            onSave = { key ->
+                onSaveByokKey(key)
+                showByokDialog = false
+            },
+            onReset = {
+                onResetByokKey()
+                showByokDialog = false
+            },
+            onDismiss = { showByokDialog = false }
+        )
+    }
+    if (showMemoriesDialog) {
+        MemoriesDialog(
+            memories = memories,
+            onAddMemory = onAddMemory,
+            onDeleteMemory = onDeleteMemory,
+            onDismiss = { showMemoriesDialog = false }
+        )
+    }
+    if (showDeleteDialog) {
+        DeleteAccountDialog(
+            isDeleting = isDeleting,
+            onConfirm = onDeleteAccountClick,
+            onDismiss = { showDeleteDialog = false }
+        )
     }
 }

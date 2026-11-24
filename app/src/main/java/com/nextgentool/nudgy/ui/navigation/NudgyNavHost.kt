@@ -2,6 +2,8 @@ package com.nextgentool.nudgy.ui.navigation
 
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -55,6 +57,8 @@ import com.nextgentool.nudgy.ui.screens.CalendarScreen
 import com.nextgentool.nudgy.ui.screens.ChatScreen
 import com.nextgentool.nudgy.ui.screens.FocusScreen
 import com.nextgentool.nudgy.ui.screens.GroupsScreen
+import com.nextgentool.nudgy.ui.screens.HELP_FEEDBACK_EMAIL
+import com.nextgentool.nudgy.ui.screens.PRIVACY_POLICY_URL
 import com.nextgentool.nudgy.ui.screens.PlanScreen
 import com.nextgentool.nudgy.ui.screens.SettingsShell
 import com.nextgentool.nudgy.ui.screens.TasksScreen
@@ -68,6 +72,7 @@ import com.nextgentool.nudgy.ui.viewmodel.CalendarViewModel
 import com.nextgentool.nudgy.ui.viewmodel.ChatViewModel
 import com.nextgentool.nudgy.ui.viewmodel.GroupsViewModel
 import com.nextgentool.nudgy.ui.viewmodel.HabitViewModel
+import com.nextgentool.nudgy.ui.viewmodel.SettingsViewModel
 import com.nextgentool.nudgy.ui.viewmodel.ShareIntentViewModel
 
 /**
@@ -537,10 +542,78 @@ fun NudgyNavHost(
             )
         }
         composable(NudgyRoute.Settings.route) {
+            // Sprint 6-1 — Settings core (spec §4–§5): the wired rows
+            // (profile/sign-in, Memories, BYOK, Privacy, Help &
+            // feedback, calendar, delete). The notifications /
+            // appearance / language rows stay inert stubs for S6-2.
+            val viewModel: SettingsViewModel = hiltViewModel()
+            val user by viewModel.user.collectAsState()
+            val memories by viewModel.memories.collectAsState()
+            val byokKey by viewModel.byokKey.collectAsState()
+            val calendarConnected by viewModel.calendarConnected.collectAsState()
+            val isCalendarSyncing by viewModel.isCalendarSyncing.collectAsState()
+            val isDeleting by viewModel.isDeleting.collectAsState()
+            val context = LocalContext.current
+            LaunchedEffect(viewModel) {
+                viewModel.settingsError.collect { message ->
+                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                }
+            }
+            // The Activity + scope the Credential Manager flow needs
+            // (Groups route pattern).
+            val signInScope = rememberCoroutineScope()
+            // The Calendar route's permission launcher pattern: the
+            // route owns the launcher, the ViewModel owns the state.
+            val calendarPermissionLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestMultiplePermissions()
+            ) { grants ->
+                if (grants.values.all { it }) {
+                    viewModel.onCalendarPermissionGranted()
+                }
+            }
             SettingsShell(
                 // Sprint 4-4 — the Settings entry to the same weekly
                 // review screen the progress ring opens (spec §7).
-                onWeeklyReviewClick = { navController.navigate(NudgyRoute.WeeklyReview.route) }
+                onWeeklyReviewClick = { navController.navigate(NudgyRoute.WeeklyReview.route) },
+                user = user,
+                memories = memories,
+                byokKey = byokKey,
+                calendarConnected = calendarConnected,
+                isCalendarSyncing = isCalendarSyncing,
+                isDeleting = isDeleting,
+                deleteCompleted = viewModel.deleteCompleted,
+                onSignInClick = {
+                    (context as? Activity)?.let { viewModel.signIn(it, signInScope) }
+                },
+                onSignOutClick = { viewModel.signOut() },
+                onDeleteAccountClick = { viewModel.deleteAccount() },
+                onCalendarConnectClick = {
+                    calendarPermissionLauncher.launch(
+                        arrayOf(
+                            Manifest.permission.READ_CALENDAR,
+                            Manifest.permission.WRITE_CALENDAR
+                        )
+                    )
+                },
+                onCalendarSyncClick = { viewModel.syncCalendarNow() },
+                onSaveByokKey = { key -> viewModel.saveByokKey(key) },
+                onResetByokKey = { viewModel.resetByokKey() },
+                onPrivacyClick = {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_POLICY_URL))
+                    )
+                },
+                onHelpFeedbackClick = {
+                    val mailIntent = Intent(
+                        Intent.ACTION_SENDTO,
+                        Uri.parse("mailto:$HELP_FEEDBACK_EMAIL")
+                    ).apply {
+                        putExtra(Intent.EXTRA_SUBJECT, "Nudgy feedback")
+                    }
+                    context.startActivity(mailIntent)
+                },
+                onAddMemory = { content -> viewModel.addMemory(content) },
+                onDeleteMemory = { memoryId -> viewModel.deleteMemory(memoryId) }
             )
         }
     }
