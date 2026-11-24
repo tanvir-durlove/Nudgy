@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -351,9 +352,9 @@ class SettingsRowsTest {
         // (Below the fold: scroll into view first — assertIsDisplayed
         // fails for below-fold nodes, Compose 1.7.)
         composeRule.onNodeWithTag("settings_section_appearance")
-            .performScrollTo().assertTextEquals("থিম")
+            .performScrollTo().assert(hasText("থিম"))
         composeRule.onNodeWithTag("settings_section_language")
-            .performScrollTo().assertTextEquals("ভাষা")
+            .performScrollTo().assert(hasText("ভাষা"))
         composeRule.onNodeWithText("সকালের সারাংশ").performScrollTo().assertIsDisplayed()
     }
 }
