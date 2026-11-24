@@ -16,6 +16,7 @@ import com.nextgentool.nudgy.domain.usecase.UpdateTaskUseCase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -138,7 +139,7 @@ class SampleTaskDeleteTest {
         // Keep the uiState sharing coroutine alive (WhileSubscribed):
         // without a subscriber the List's state never refreshes.
         scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-        scope!!.launch { tasksViewModel.uiState.collect() }
+        scope!!.launch { tasksViewModel.uiState.collect {} }
 
         val sample = runBlocking {
             repository.createTask(
