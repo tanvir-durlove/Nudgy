@@ -179,6 +179,7 @@ fun TasksScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
+                .testTag("tasks_list")
                 .padding(horizontal = NudgyTokens.screenPadding),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
