@@ -12,8 +12,11 @@ import com.nextgentool.nudgy.domain.usecase.DeleteTaskUseCase
 import com.nextgentool.nudgy.domain.usecase.SaveViewUseCase
 import com.nextgentool.nudgy.domain.usecase.ToggleTaskCompletionUseCase
 import com.nextgentool.nudgy.domain.usecase.UpdateTaskUseCase
+import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -24,25 +27,16 @@ import org.robolectric.annotation.Config
  * Sprint 6-3 — the sample delete, proven WITHOUT compose (feature 40,
  * Q3=(a), spec §6).
  *
- * DIAGNOSTIC BISECT round 9 — EMPTY body; do not merge in this shape.
- * Rounds 5–8 eliminated, in order: runTest cleanup (8/8
- * UncompletedCoroutinesError, but no hang), plain-JUnit + idle()
- * pump (hang), bounded idleFor pump (hang — idle() refuted), live
- * uiState.collect dropped + single idleFor(500ms) + DB poll (hang —
- * live-collect refuted). The parent also verified in code that no
- * Dispatchers.Main exists anywhere in the TaskRepository
- * create/delete paths or DeleteTaskUseCase (Main appears only in
- * AuthManager sign-in/delete flows, untouched by this test), so a
- * Main-deadlock inside runBlocking is refuted for those paths.
- * Round 4's bisect only proved the hang depends on this test
- * RUNNING — not that it is inside its body; it could be
- * shared-state fallout in a LATER test class. This round stops
- * guessing: if the suite goes green, the hang needs a body
- * operation (create/delete/pump/poll); if it still hangs, the
- * hang is in setUp/construction/tearDown or in shared-state
- * fallout to a later class — the uploaded test-results XML
- * (workflow now has timeout-minutes: 10 + an Upload test
- * results step) names the hanging class.
+ * DIAGNOSTIC BISECT round 10 — CREATES ONLY; do not merge in this
+ * shape. Round 9 proved the empty body goes green (PR 899 + push
+ * 900, 931/931, 0 failures), so setUp + VM construction + tearDown
+ * are innocent and shared-state fallout to a later class is
+ * refuted — the hang needs a body operation (create/delete/pump/
+ * poll). This round restores ONLY the two creates: if green, the
+ * hang is in delete/idleFor/poll (next: add the delete); if it
+ * hangs, a create is guilty. The uploaded test-results XML
+ * (workflow: timeout-minutes: 10 + Upload test results step)
+ * names the hanging class.
  *
  * The tap wiring itself (IconButton onClick → viewModel.deleteTask)
  * is NOT proven by this test — DEVICE-GATE item for the
@@ -103,10 +97,30 @@ class SampleTaskDeleteTest {
 
     @Test
     fun `deleting a sample removes only it`() {
-        // DIAGNOSTIC BISECT round 9 — empty body. No runBlocking, no
-        // repository calls, no looper calls, no delete, no poll.
-        // Only construction + tearDown remain.
+        // DIAGNOSTIC BISECT round 10 — creates only. No delete, no
+        // idleFor/pump, no DB poll loop, no looper calls anywhere.
         val tasksViewModel = buildViewModel()
         assertNotNull(tasksViewModel)
+
+        runBlocking {
+            repository.createTask(
+                userId = userId,
+                title = "Morning walk",
+                dueEpochMillis = startOfTodayMillis() + 1 * 60 * 60 * 1000L,
+                isSample = true
+            )
+        }
+        runBlocking {
+            repository.createTask(
+                userId = userId,
+                title = "Real task",
+                dueEpochMillis = startOfTodayMillis()
+            )
+        }
+
+        val tasks = runBlocking { repository.getAllTasksOnce(userId) }
+        assertEquals(2, tasks.size)
+        assertTrue(tasks.any { it.title == "Morning walk" })
+        assertTrue(tasks.any { it.title == "Real task" })
     }
 }
