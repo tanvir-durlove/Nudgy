@@ -1,11 +1,6 @@
 package com.nextgentool.nudgy.ui.screens
 
 import android.content.Context
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -13,6 +8,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -28,7 +24,6 @@ import com.nextgentool.nudgy.domain.usecase.SaveViewUseCase
 import com.nextgentool.nudgy.domain.usecase.ToggleTaskCompletionUseCase
 import com.nextgentool.nudgy.domain.usecase.UpdateTaskUseCase
 import com.nextgentool.nudgy.domain.usecase.WeeklyReviewUseCase
-import com.nextgentool.nudgy.ui.components.TaskBoard
 import com.nextgentool.nudgy.ui.viewmodel.TasksViewModel
 import com.nextgentool.nudgy.ui.viewmodel.TodayViewModel
 import com.nextgentool.nudgy.ui.viewmodel.startOfTodayMillis
@@ -54,30 +49,33 @@ import org.robolectric.annotation.Config
  * 00:00, so it lands in the Anytime group on the same tab.
  *
  * The chip test stays on TodayScreen (it passes there). The DELETE
- * test renders the TaskBoard directly (the BoardDragTest pattern)
- * with items from the real TasksViewModel flow. Four surfaces were
- * tried before this one and each failed on a harness quirk, not on
- * the product code: TodayScreen (run 864 — programmatic scroll
- * does not re-place content in Robolectric, so the delete button
- * never became pressable); the 1000 dp tall viewport (run 866 —
- * hung the test step twice with zero output); the Tasks list by
- * index (runs 867/868 — after performScrollToIndex(6) the chip
- * never composed within 10 s); TasksScreen in board mode (run 870 —
- * after the S14-proven performScrollTo + click on view_mode_board
- * the chip still never appeared). The direct board render (run 872)
- * finally named the real mechanism: the chip wait timed out even
- * with the cards composed eagerly and "Real task" found — because
- * Modifier.clickable merges descendants, so a testTag inside a
- * clickable row is invisible in the merged semantics tree. The
- * board card and the Tasks list row are clickable (TaskRow /
- * BoardTaskCard Surface), while TodayTaskRow has NO clickable —
- * which is why the chip test below finds the chip on TodayScreen
- * without any flag. The fix is useUnmergedTree = true on the chip
- * and delete-button lookups (the merged title text needs no flag).
- * The same merging also hides the delete button from TalkBack as a
- * separate element (the card announces as one button) — a real
- * product-side follow-up (move chip + delete outside the clickable),
- * not fixed here.
+ * test lives on TasksScreen instead: TodayScreen has no LazyColumn
+ * to scroll by index, and programmatic scrolling does not re-place
+ * content in Robolectric (CalendarDragTest rounds 9–15 proved it:
+ * scrollTo moves the value but does not re-place the content,
+ * performScrollTo leaves the bounds stale) — run 864 failed the
+ * delete tap on Today for exactly that reason. The 1000 dp tall
+ * viewport tried next (run 866) hung the test step twice with zero
+ * output, so that approach is reverted. TasksScreen is a LazyColumn
+ * and scrolls by index (the S14-proven performScrollToIndex
+ * pattern): with the two seeded tasks the list indices are 0
+ * quick_add, 1 search, 2 saved_views, 3 filters, 4 view_mode,
+ * 5 the real task (due 00:00, due-date sort first), 6 the sample
+ * (due 01:00) — verified against TasksViewModel's sort
+ * (compareBy isCompleted, thenBy dueSortKey) and the default
+ * LIST view mode.
+ *
+ * Round 2 (product fix): the list-index delete test failed on runs
+ * 867/868 because Modifier.clickable merges descendants — the chip
+ * and delete tags inside the clickable row/card are invisible in
+ * the merged semantics tree (title text stays findable; child
+ * testTags do not). The board-mode (870) and direct-board (872)
+ * attempts proved the same mechanism. The test-side workaround
+ * (useUnmergedTree, head 3d48eb3) then HUNG the test step twice
+ * (run 874, ~20 min each, both attempts cancelled) — useUnmergedTree
+ * is the prime suspect, unproven. So the fix is product-side: the
+ * chip + delete button moved OUTSIDE the clickable in TaskRow and
+ * BoardTaskCard, and this test is back to plain merged-tree lookups.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -149,55 +147,37 @@ class SampleTaskRowTest {
             )
         }
 
-        // The board rendered directly (see the class comment): no
-        // LazyColumn, no toggle, no scrolling — every card is composed
-        // eagerly. Items come from the real TasksViewModel flow, so the
-        // board follows the delete.
+        // TasksScreen, not TodayScreen (see the class comment): the
+        // list scrolls by index, so the delete button is composed and
+        // pressable. The sample is list index 6, the real task 5.
         composeRule.setContent {
-            val uiState by tasksViewModel.uiState.collectAsState()
-            Box(modifier = Modifier.fillMaxSize()) {
-                TaskBoard(
-                    items = uiState.items,
-                    onMoveTask = { _, _, _, _ -> },
-                    onToggle = { tasksViewModel.toggleTask(it) },
-                    onTaskClick = {},
-                    onDeleteSample = { tasksViewModel.deleteTask(it) }
-                )
-            }
+            TasksScreen(viewModel = tasksViewModel)
         }
-        // Wait for a task card's text — this proves the flow has
-        // emitted and the cards are composed.
+        // The list arrives behind the loading skeleton — wait for the
+        // quick-add field (the TasksScreenSmokeTest pattern) before
+        // scrolling, or the scroll lands on an empty list.
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Real task")
+            composeRule.onAllNodesWithText("Add task")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        // The sample chip lands exactly once (the sample card);
+        composeRule.onNodeWithTag("tasks_list").performScrollToIndex(6)
+        // The sample chip lands exactly once (the sample row);
         // the ordinary task next to it carries no chip.
-        // useUnmergedTree: the board card is clickable, and clickable
-        // merges descendants — the chip tag (and the delete button
-        // tag) are invisible in the merged tree. TodayTaskRow has no
-        // clickable, which is why the chip test below finds the chip
-        // without it. The title text IS findable merged, so the
-        // "Real task" wait above needs no flag.
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithTag("sample_chip", useUnmergedTree = true)
-                .fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithTag("sample_chip")
+                .fetchSemanticsNodes().size == 1
         }
-        assertEquals(
-            1,
-            composeRule.onAllNodesWithTag("sample_chip", useUnmergedTree = true)
-                .fetchSemanticsNodes().size
-        )
-        // One tap on the card's own delete button removes the sample.
+        composeRule.onNodeWithTag("sample_delete_${sample.id}").assertIsDisplayed()
+        composeRule.onNodeWithText("Real task").assertExists()
+
+        // One tap on the row's own delete button removes the sample.
         // No waitForIdle: the chip-disappearance waitUntil below is
         // the synchronisation, and it gives the delete coroutine time
         // to run.
-        composeRule.onNodeWithTag("sample_delete_${sample.id}", useUnmergedTree = true)
-            .assertIsDisplayed()
-        composeRule.onNodeWithTag("sample_delete_${sample.id}", useUnmergedTree = true)
+        composeRule.onNodeWithTag("sample_delete_${sample.id}")
             .performClick()
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithTag("sample_chip", useUnmergedTree = true)
+            composeRule.onAllNodesWithTag("sample_chip")
                 .fetchSemanticsNodes().isEmpty()
         }
         // The delete must have reached the DB — if this fails, the tap
@@ -205,8 +185,7 @@ class SampleTaskRowTest {
         assertEquals(1, runBlocking { repository.getAllTasksOnce(repository.currentUserId()).size })
         // The ordinary task is untouched, and the sample never returns.
         composeRule.onNodeWithText("Real task").assertExists()
-        composeRule.onNodeWithTag("sample_delete_${sample.id}", useUnmergedTree = true)
-            .assertDoesNotExist()
+        composeRule.onNodeWithTag("sample_delete_${sample.id}").assertDoesNotExist()
     }
 
     @Test
