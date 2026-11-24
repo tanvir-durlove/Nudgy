@@ -499,7 +499,9 @@ fun TaskBoard(
                     computeDropTargetState = computeDropTargetState,
                     cardCoordsById = cardCoordsById,
                     onToggle = onToggle,
-                    onTaskClick = onTaskClick
+                    onTaskClick = onTaskClick,
+                    // Sprint 6-3 — the sample row's one-tap delete.
+                    onDeleteSample = onDeleteSample
                 )
             }
         }
@@ -550,7 +552,10 @@ private fun BoardColumn(
     computeDropTargetState: State<(String, Offset) -> Pair<TaskStatus, Int>>,
     cardCoordsById: SnapshotStateMap<String, LayoutCoordinates>,
     onToggle: (TaskEntity) -> Unit,
-    onTaskClick: (TaskEntity) -> Unit
+    onTaskClick: (TaskEntity) -> Unit,
+    // Sprint 6-3 — plumbed from TaskBoard: the sample row's one-tap
+    // delete (null = no delete button renders).
+    onDeleteSample: ((TaskEntity) -> Unit)? = null
 ) {
     // The column under the pointer highlights while a card is dragged
     // over it — the same affordance the S1-4 drop target had.
