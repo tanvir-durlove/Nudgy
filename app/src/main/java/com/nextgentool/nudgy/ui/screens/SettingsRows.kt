@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -52,7 +53,7 @@ import com.nextgentool.nudgy.ui.theme.NudgyTokens
 private fun SettingsRowCard(
     slug: String,
     onClick: (() -> Unit)? = null,
-    content: @Composable () -> Unit
+    content: @Composable RowScope.() -> Unit
 ) {
     Surface(
         modifier = Modifier
@@ -75,7 +76,7 @@ private fun SettingsRowCard(
 }
 
 @Composable
-private fun SettingsRowTexts(title: String, subtitle: String, titleColor: Color = NudgyCharcoal) {
+private fun RowScope.SettingsRowTexts(title: String, subtitle: String, titleColor: Color = NudgyCharcoal) {
     Column(modifier = Modifier.weight(1f)) {
         Text(
             text = title,
