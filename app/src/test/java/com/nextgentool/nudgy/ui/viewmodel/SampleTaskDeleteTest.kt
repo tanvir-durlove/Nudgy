@@ -1,11 +1,11 @@
 package com.nextgentool.nudgy.ui.viewmodel
 
 import android.content.Context
+import android.os.Looper
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
-import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.domain.usecase.AddSubtaskUseCase
 import com.nextgentool.nudgy.domain.usecase.CreateTaskUseCase
@@ -13,15 +13,11 @@ import com.nextgentool.nudgy.domain.usecase.DeleteTaskUseCase
 import com.nextgentool.nudgy.domain.usecase.SaveViewUseCase
 import com.nextgentool.nudgy.domain.usecase.ToggleTaskCompletionUseCase
 import com.nextgentool.nudgy.domain.usecase.UpdateTaskUseCase
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.TestScope
-import kotlinx.coroutines.test.advanceUntilIdle
-import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -29,6 +25,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 
 /**
@@ -44,27 +41,26 @@ import org.robolectric.annotation.Config
  * sample and leaves the ordinary task untouched. No compose rule,
  * no waitUntil, no semantics, no performClick.
  *
- * Await pattern (round 5 fix): the FIRST shape awaited the delete
- * through the raw repository flow (`observeAllTasks(...).first`),
- * which threw UncompletedCoroutinesError on both runs 881/882.
- * This shape follows the EisenhowerMatrixViewModelTest pattern
- * instead — the SAME TasksViewModel, the SAME vmTest — awaiting
- * the ViewModel's own uiState (awaitLoaded, then a uiState
- * predicate on the surviving items). It still threw the same
- * error on runs 883/884, so the test now also clears the
- * ViewModelStore BEFORE the runTest body ends (see the
- * store.clear() at the end of the test): the uiState stateIn
- * (WhileSubscribed(5_000)) keeps its sharing coroutine alive on
- * the test Main after the last subscriber leaves, and runTest's
- * cleanup throws UncompletedCoroutinesError for it — the PR #86
- * store.clear() in tearDown runs too late for that check. That
- * still threw on runs 885/886, so the test now ALSO drains the
- * scheduler with advanceUntilIdle() before the clear: the suite
- * timing proves the body completes in seconds (green run 880's
- * test step took 3m20s; runs 882/884/885 took 3m12–3m29s), so
- * the error is runTest's cleanup check on a non-idle scheduler,
- * not the 60 s timeout — and a cancelled delay still counts as
- * a pending task, which is why the clear alone did not help.
+ * Plain JUnit ON PURPOSE (round 6): the runTest + setMain shape
+ * threw UncompletedCoroutinesError 8/8 (runs 881–888) across four
+ * shapes — repo-flow await, uiState await, store.clear() in the
+ * body, advanceUntilIdle() + clear — while the SAME ViewModel +
+ * SAME delete path passes in the compose test (plain JUnit +
+ * runBlocking, no runTest) and the SAME ViewModel passes under
+ * the identical runTest + setMain shape in
+ * EisenhowerMatrixViewModelTest. The CI log carries only the
+ * error type, never the message (verified from run 888's full
+ * log), so the uncompleted coroutine could not be named from CI.
+ * The parent's verdict: a runTest-cleanup harness interaction,
+ * not a product defect — the product paths are all one-shot
+ * plain IO (deleteTask = one viewModelScope.launch,
+ * repository.deleteTask / getAllTasksOnce = withContext(IO),
+ * seedBuiltInTemplates = a plain IO loop). So this test
+ * deliberately uses plain JUnit with the repo's own pumpUntil
+ * pattern (PlanViewModelTest) instead of runTest. Do NOT move
+ * it back to runTest without first naming the uncompleted
+ * coroutine from a local run — the CI log cannot show it.
+ *
  * The tap wiring itself (IconButton onClick → viewModel.deleteTask)
  * is NOT proven by this test — DEVICE-GATE item for the
  * sprint-end build.
@@ -73,9 +69,11 @@ import org.robolectric.annotation.Config
  * inside each test (never in setUp — the init coroutines need the
  * test Main), the ViewModel lives in a ViewModelStore cleared
  * BEFORE the database closes, and in-flight Room IO is drained
- * first (S4-1 round 7).
+ * first (S4-1 round 7). The uid matches Eisenhower's
+ * ("test-user-1" via nudgy_auth_prefs) instead of the GUEST
+ * fallback — the last remaining difference from the passing
+ * Eisenhower test.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class SampleTaskDeleteTest {
@@ -84,10 +82,14 @@ class SampleTaskDeleteTest {
     private lateinit var db: NudgyDatabase
     private lateinit var repository: TaskRepository
     private val store = ViewModelStore()
+    private val userId = "test-user-1"
+    private var scope: CoroutineScope? = null
 
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
+        context.getSharedPreferences("nudgy_auth_prefs", Context.MODE_PRIVATE)
+            .edit().putString("active_user_id", userId).apply()
         db = Room.inMemoryDatabaseBuilder(context, NudgyDatabase::class.java)
             .allowMainThreadQueries()
             .build()
@@ -99,19 +101,9 @@ class SampleTaskDeleteTest {
         // PR #86 rule: cancel the ViewModel scopes before the database
         // closes, then drain in-flight Room IO (S4-1 round 7).
         store.clear()
+        scope?.cancel()
         Thread.sleep(500)
         db.close()
-    }
-
-    /** runTest with Main on the test dispatcher (CalendarViewModelTest pattern). */
-    private fun vmTest(block: suspend TestScope.() -> Unit) = runTest {
-        val testDispatcher = StandardTestDispatcher(testScheduler)
-        Dispatchers.setMain(testDispatcher)
-        try {
-            block()
-        } finally {
-            Dispatchers.resetMain()
-        }
     }
 
     private fun buildViewModel(): TasksViewModel {
@@ -128,63 +120,55 @@ class SampleTaskDeleteTest {
         return viewModel
     }
 
-    private suspend fun TasksViewModel.awaitLoaded(): TasksUiState =
-        uiState.first { !it.isLoading }
-
-    private suspend fun TasksViewModel.awaitTasks(
-        predicate: (List<TaskEntity>) -> Boolean
-    ): List<TaskEntity> =
-        uiState.first { state ->
-            predicate(state.items.map { it.task })
-        }.items.map { it.task }
+    /** Drive the paused Main looper until [condition] holds (PlanViewModelTest pattern). */
+    private fun pumpUntil(timeoutMillis: Long = 10_000, condition: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        while (System.currentTimeMillis() < deadline) {
+            Shadows.shadowOf(Looper.getMainLooper()).idle()
+            if (condition()) return
+            Thread.sleep(50)
+        }
+        Shadows.shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(condition())
+    }
 
     @Test
-    fun `deleting a sample removes only it`() = vmTest {
-        val userId = repository.currentUserId()
+    fun `deleting a sample removes only it`() {
         val tasksViewModel = buildViewModel()
-        tasksViewModel.awaitLoaded()
+        // Keep the uiState sharing coroutine alive (WhileSubscribed):
+        // without a subscriber the List's state never refreshes.
+        scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+        scope!!.launch { tasksViewModel.uiState.collect() }
 
-        val sample = repository.createTask(
-            userId = userId,
-            title = "Morning walk",
-            dueEpochMillis = startOfTodayMillis() + 1 * 60 * 60 * 1000L,
-            isSample = true
-        )
-        repository.createTask(
-            userId = userId,
-            title = "Real task",
-            dueEpochMillis = startOfTodayMillis()
-        )
+        val sample = runBlocking {
+            repository.createTask(
+                userId = userId,
+                title = "Morning walk",
+                dueEpochMillis = startOfTodayMillis() + 1 * 60 * 60 * 1000L,
+                isSample = true
+            )
+        }
+        runBlocking {
+            repository.createTask(
+                userId = userId,
+                title = "Real task",
+                dueEpochMillis = startOfTodayMillis()
+            )
+        }
         // Both rows are visible in the List before the delete.
-        tasksViewModel.awaitTasks { tasks -> tasks.size == 2 }
+        pumpUntil { tasksViewModel.uiState.value.items.size == 2 }
 
         tasksViewModel.deleteTask(sample)
 
-        // Await the delete through the ViewModel's own uiState (the
-        // EisenhowerMatrixViewModelTest pattern): the sample is gone
-        // and the ordinary task is the only row left.
-        val remaining = tasksViewModel.awaitTasks { tasks ->
-            tasks.size == 1 && tasks.single().title == "Real task"
+        // The sample is gone and the ordinary task is the only row left.
+        pumpUntil {
+            val items = tasksViewModel.uiState.value.items
+            items.size == 1 && items.single().task.title == "Real task"
         }
+        val remaining = tasksViewModel.uiState.value.items.map { it.task }
         assertEquals("Real task", remaining.single().title)
         assertTrue(remaining.none { it.id == sample.id })
         // The delete reached the DB, not just the List's state.
-        assertEquals(1, repository.getAllTasksOnce(userId).size)
-
-        // Drain the test scheduler BEFORE runTest ends: the uiState
-        // stateIn (WhileSubscribed(5_000)) leaves its grace delay
-        // as a pending task on the test Main scheduler after the
-        // last subscriber leaves, and runTest's cleanup throws
-        // UncompletedCoroutinesError while the scheduler is not
-        // idle (runs 881–886 — the suite timing proves the body
-        // itself completes in seconds, so this is the cleanup
-        // check, not the 60 s timeout). advanceUntilIdle runs the
-        // delay out so the sharing coroutine finishes.
-        advanceUntilIdle()
-        // Cancel the ViewModel's scope as well (see the KDoc): the
-        // PR #86 store.clear() in tearDown runs too late for
-        // runTest's cleanup check, so it happens here, after the
-        // last assertion.
-        store.clear()
+        assertEquals(1, runBlocking { repository.getAllTasksOnce(userId).size })
     }
 }
