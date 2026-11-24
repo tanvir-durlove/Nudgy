@@ -18,6 +18,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -56,7 +57,14 @@ import org.robolectric.annotation.Config
  * (WhileSubscribed(5_000)) keeps its sharing coroutine alive on
  * the test Main after the last subscriber leaves, and runTest's
  * cleanup throws UncompletedCoroutinesError for it — the PR #86
- * store.clear() in tearDown runs too late for that check.
+ * store.clear() in tearDown runs too late for that check. That
+ * still threw on runs 885/886, so the test now ALSO drains the
+ * scheduler with advanceUntilIdle() before the clear: the suite
+ * timing proves the body completes in seconds (green run 880's
+ * test step took 3m20s; runs 882/884/885 took 3m12–3m29s), so
+ * the error is runTest's cleanup check on a non-idle scheduler,
+ * not the 60 s timeout — and a cancelled delay still counts as
+ * a pending task, which is why the clear alone did not help.
  * The tap wiring itself (IconButton onClick → viewModel.deleteTask)
  * is NOT proven by this test — DEVICE-GATE item for the
  * sprint-end build.
@@ -163,13 +171,20 @@ class SampleTaskDeleteTest {
         // The delete reached the DB, not just the List's state.
         assertEquals(1, repository.getAllTasksOnce(userId).size)
 
-        // Cancel the ViewModel's scope BEFORE runTest ends: the
-        // uiState stateIn (WhileSubscribed(5_000)) keeps its sharing
-        // coroutine alive on the test Main after the last subscriber
-        // leaves, and runTest throws UncompletedCoroutinesError for
-        // it at cleanup (runs 881–884). The PR #86 store.clear() in
-        // tearDown runs too late — after runTest's check — so it
-        // happens here, after the last assertion.
+        // Drain the test scheduler BEFORE runTest ends: the uiState
+        // stateIn (WhileSubscribed(5_000)) leaves its grace delay
+        // as a pending task on the test Main scheduler after the
+        // last subscriber leaves, and runTest's cleanup throws
+        // UncompletedCoroutinesError while the scheduler is not
+        // idle (runs 881–886 — the suite timing proves the body
+        // itself completes in seconds, so this is the cleanup
+        // check, not the 60 s timeout). advanceUntilIdle runs the
+        // delay out so the sharing coroutine finishes.
+        advanceUntilIdle()
+        // Cancel the ViewModel's scope as well (see the KDoc): the
+        // PR #86 store.clear() in tearDown runs too late for
+        // runTest's cleanup check, so it happens here, after the
+        // last assertion.
         store.clear()
     }
 }
