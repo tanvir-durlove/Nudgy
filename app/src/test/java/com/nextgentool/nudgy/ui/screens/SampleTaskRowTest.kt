@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -43,9 +44,8 @@ import org.robolectric.annotation.Config
  * Hilt). The sample is seeded due today at 01:00 — the timeline has
  * no past filter, so it always lands as the first Today-tab
  * TaskPoint whatever hour the test runs at (a now-relative due would
- * cross midnight on a late-night run), and the row is visible
- * without scrolling. The normal task is due at 00:00, so it lands
- * in the Anytime group on the same tab.
+ * cross midnight on a late-night run). The normal task is due at
+ * 00:00, so it lands in the Anytime group on the same tab.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -140,10 +140,15 @@ class SampleTaskRowTest {
         composeRule.onNodeWithText("Real task").assertExists()
 
         // One tap on the row's own delete button removes the sample.
-        // No performScrollTo: on this harness it hangs the test
-        // worker (runs 851/852). The sample is due at 01:00 so its
-        // row is the first timeline point — visible without scrolling.
+        // The first timeline row sits below the fold (hero + quick-add
+        // + My Day sit above it), so scroll it into view first.
+        // performScrollTo is safe HERE: TodayScreen's root is a plain
+        // verticalScroll Column (top arrangement) — the same shape as
+        // the Settings tests that use it green. It is NOT used on the
+        // OnboardingScreen page (Arrangement.Center + scroll hung runs
+        // 851/852); that file asserts existence instead.
         composeRule.onNodeWithTag("sample_delete_${sample.id}")
+            .performScrollTo()
             .performClick()
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithTag("sample_chip")
