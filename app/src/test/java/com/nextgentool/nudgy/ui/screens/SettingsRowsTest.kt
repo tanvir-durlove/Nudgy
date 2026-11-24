@@ -344,11 +344,16 @@ class SettingsRowsTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("সেটিংস").assertIsDisplayed()
         composeRule.onNodeWithText("নোটিফিকেশন").assertIsDisplayed()
-        // The appearance / language sections sit below the fold in the
-        // scrollable Settings column: scroll each into view first —
-        // assertIsDisplayed fails for below-fold nodes (Compose 1.7).
-        composeRule.onNodeWithText("থিম").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("ভাষা").performScrollTo().assertIsDisplayed()
+        // The appearance / language rows repeat their section title as
+        // the row title, so the Bengali title text exists TWICE —
+        // onNodeWithText would throw on the duplicate. Disambiguate by
+        // the unique section-header tag and assert the Bengali text on it.
+        // (Below the fold: scroll into view first — assertIsDisplayed
+        // fails for below-fold nodes, Compose 1.7.)
+        composeRule.onNodeWithTag("settings_section_appearance")
+            .performScrollTo().assertTextEquals("থিম")
+        composeRule.onNodeWithTag("settings_section_language")
+            .performScrollTo().assertTextEquals("ভাষা")
         composeRule.onNodeWithText("সকালের সারাংশ").performScrollTo().assertIsDisplayed()
     }
 }
