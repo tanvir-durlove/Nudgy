@@ -27,29 +27,38 @@ import org.robolectric.annotation.Config
  * Sprint 6-3 — the sample delete, proven WITHOUT compose (feature 40,
  * Q3=(a), spec §6).
  *
- * DIAGNOSTIC BISECT round 13 — creates + delete call only, NO
- * pump; do not merge in this shape. Round 9 proved the empty
+ * DIAGNOSTIC BISECT round 14 — repository-level delete (no
+ * ViewModel, no Main, no pump); do not merge in this shape
+ * until the parent verifies it. Round 9 proved the empty
  * body goes green (PR 899 + push 900, 931/931, 0 failures), so
  * setUp + VM construction + tearDown are innocent and shared-state
- * fallout to a later class is refuted. Round 10 proved the two
- * creates are innocent (push 901 green; PR 902 green on the
- * sanctioned re-run after the documented PR #99
+ * fallout to a later class is refuted for the empty test. Round 10
+ * proved the two creates are innocent (push 901 green; PR 902
+ * green on the sanctioned re-run after the documented PR #99
  * GroupRepositoryTest harness-leak flake). Round 11 proved the
- * hang came back with the delete (push 903 + PR 904 both hit the
- * 10-minute step timeout) — and round 11 had NO poll loop, so the
- * poll loop is exonerated. Round 12 proved delete + pump with NO
- * post-delete DB read still hung (PR 906 + push 905, both
- * 10-minute timeouts), so the post-delete DB read is exonerated
- * too. This round drops the pump as well: the delete coroutine is
- * posted to Main and never runs — tearDown's store.clear()
- * cancels it. If green, the pump (idleFor) is the hang (it runs
- * the pending seed + delete coroutines on Main); if it hangs,
- * the hang is in the delete call / its teardown interaction (a
- * launch cannot block, so suspicion falls on store.clear() +
- * db.close() racing the pending delete coroutine). On a TIMEOUT
- * run no test-results XML exists (Gradle writes XML only when
- * the test task finishes), so the run conclusion + timeout
- * message are the evidence.
+ * hang came back with the VM delete (push 903 + PR 904 both hit
+ * the 10-minute step timeout) — and round 11 had NO poll loop,
+ * so the poll loop is exonerated. Round 12 proved delete + pump
+ * with NO post-delete DB read still hung (PR 906 + push 905,
+ * both 10-minute timeouts), so the post-delete DB read is
+ * exonerated too. Round 13 proved delete with NO pump still
+ * hung (PR 908 + push 907, both 10-minute timeouts), so the
+ * pump (idleFor) is exonerated — the ONLY difference from
+ * green round 10 is the `tasksViewModel.deleteTask(sample)`
+ * call. This round deletes at the repository level instead:
+ * `runBlocking { repository.deleteTask(sample.id) }` runs on
+ * the test thread + Dispatchers.IO, with NO viewModelScope,
+ * NO Dispatchers.Main, NO pump. If green, the hang needs the
+ * VM's Main-launched delete (a Main-looper interaction, not
+ * the delete logic) — and this shape is the SHIPPABLE test
+ * (the VM's deleteTask is a one-line viewModelScope.launch
+ * wrapper around it, proven by code-reading; the IconButton
+ * tap wiring stays a DEVICE-GATE item for the sprint-end
+ * build). If it hangs, the hang is in the repository
+ * delete's own IO/DAO work — a product-path finding. On a
+ * TIMEOUT run no test-results XML exists (Gradle writes XML
+ * only when the test task finishes), so the run conclusion +
+ * timeout message are the evidence.
  *
  * The tap wiring itself (IconButton onClick → viewModel.deleteTask)
  * is NOT proven by this test — DEVICE-GATE item for the
@@ -137,10 +146,14 @@ class SampleTaskDeleteTest {
         assertTrue(before.any { it.title == "Morning walk" })
         assertTrue(before.any { it.title == "Real task" })
 
-        tasksViewModel.deleteTask(sample)
-        // DIAGNOSTIC BISECT round 13 — NO pump: the delete coroutine
-        // is posted to Main and never runs; tearDown's store.clear()
-        // cancels it. The test returns here.
-        assertNotNull(tasksViewModel)
+        // DIAGNOSTIC BISECT round 14 — repository-level delete:
+        // no ViewModel delete call, no Main, no pump. Runs on the
+        // test thread + Dispatchers.IO via runBlocking.
+        runBlocking { repository.deleteTask(sample.id) }
+
+        val after = runBlocking { repository.getAllTasksOnce(userId) }
+        assertEquals(1, after.size)
+        assertEquals("Real task", after[0].title)
+        assertTrue(after.none { it.id == sample.id })
     }
 }
