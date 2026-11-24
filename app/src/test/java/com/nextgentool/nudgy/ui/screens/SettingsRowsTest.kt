@@ -344,8 +344,11 @@ class SettingsRowsTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("সেটিংস").assertIsDisplayed()
         composeRule.onNodeWithText("নোটিফিকেশন").assertIsDisplayed()
-        composeRule.onNodeWithText("থিম").assertIsDisplayed()
-        composeRule.onNodeWithText("ভাষা").assertIsDisplayed()
-        composeRule.onNodeWithText("সকালের সারাংশ").assertIsDisplayed()
+        // The appearance / language sections sit below the fold in the
+        // scrollable Settings column: scroll each into view first —
+        // assertIsDisplayed fails for below-fold nodes (Compose 1.7).
+        composeRule.onNodeWithText("থিম").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("ভাষা").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("সকালের সারাংশ").performScrollTo().assertIsDisplayed()
     }
 }
