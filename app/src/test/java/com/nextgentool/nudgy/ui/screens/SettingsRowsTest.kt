@@ -3,8 +3,8 @@ package com.nextgentool.nudgy.ui.screens
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -18,6 +18,7 @@ import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.NudgyMemoryEntity
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -348,13 +349,19 @@ class SettingsRowsTest {
         // The appearance / language rows repeat their section title as
         // the row title, so the Bengali title text exists TWICE —
         // onNodeWithText would throw on the duplicate. Disambiguate by
-        // the unique section-header tag and assert the Bengali text on it.
-        // (Below the fold: scroll into view first — assertIsDisplayed
-        // fails for below-fold nodes, Compose 1.7.)
-        composeRule.onNodeWithTag("settings_section_appearance")
-            .performScrollTo().assert(hasText("থিম"))
-        composeRule.onNodeWithTag("settings_section_language")
-            .performScrollTo().assert(hasText("ভাষা"))
+        // the unique section-header tag and read the Bengali text off
+        // the semantics node (the PlanScreenTest traversal pattern:
+        // fetchSemanticsNode + SemanticsProperties.Text + containment —
+        // assertTextEquals and the generic assert() do not exist on
+        // this Compose 1.7 BOM). Below the fold: scroll into view first.
+        val appearanceText = composeRule.onNodeWithTag("settings_section_appearance")
+            .performScrollTo().fetchSemanticsNode()
+            .config[SemanticsProperties.Text].toString()
+        assertTrue(appearanceText.contains("থিম"))
+        val languageText = composeRule.onNodeWithTag("settings_section_language")
+            .performScrollTo().fetchSemanticsNode()
+            .config[SemanticsProperties.Text].toString()
+        assertTrue(languageText.contains("ভাষা"))
         composeRule.onNodeWithText("সকালের সারাংশ").performScrollTo().assertIsDisplayed()
     }
 }
