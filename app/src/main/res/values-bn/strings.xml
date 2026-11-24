@@ -37,6 +37,26 @@
     <string name="settings_section_delete_account">অ্যাকাউন্ট মুছে ফেলো</string>
     <string name="settings_section_delete_account_sub">অ্যাকাউন্ট আর ডেটা মুছে ফেলো</string>
     <string name="settings_section_weekly_review">সাপ্তাহিক পর্যালোচনা</string>
+    <string name="settings_section_onboarding">টিউটোরিয়াল</string>
+    <string name="settings_section_onboarding_sub">প্রথমবারের পরিচয় আবার দেখো</string>
+
+    <!-- Sprint 6-3 — onboarding tutorial + sample tasks (spec §6) -->
+    <string name="sample_chip">নমুনা</string>
+    <string name="sample_delete_content">নমুনা টাস্ক মোছো</string>
+    <string name="onboarding_skip">এড়িয়ে যাও</string>
+    <string name="onboarding_next">পরেরটা</string>
+    <string name="onboarding_finish">শুরু করি</string>
+    <string name="onboarding_done">ঠিক আছে</string>
+    <string name="onboarding_page1_title">কয়েক সেকেন্ডে টাস্ক ধরো</string>
+    <string name="onboarding_page1_body">লিখে, বলে বা অন্য অ্যাপ থেকে শেয়ার করে টাস্ক যোগ করো — সব এক জায়গায় থাকবে।</string>
+    <string name="onboarding_page2_title">আজকের দিনটা সাজাও</string>
+    <string name="onboarding_page2_body">আজ যা জরুরি তা বেছে নাও, এক ট্যাপে দিন শুরু করো।</string>
+    <string name="onboarding_page3_title">সময়মতো মনে করিয়ে দেবে</string>
+    <string name="onboarding_page3_body">রিমাইন্ডার দিলে ঠিক সময়ে মনে করিয়ে দেবে — যতটুকু চেয়েছ তার বেশি নয়।</string>
+    <string name="onboarding_page4_title">একসাথে পরিকল্পনা করো</string>
+    <string name="onboarding_page4_body">গ্রুপ বানাও, টাস্ক শেয়ার করো, কে কী করল দেখো।</string>
+    <string name="onboarding_sample_title">নমুনা টাস্ক দিয়ে শুরু করি</string>
+    <string name="onboarding_sample_sub">৩টা স্পষ্ট চিহ্নিত নমুনা টাস্ক — এক ট্যাপে মুছে ফেলা যায়।</string>
 
     <string name="settings_guest_user">গেস্ট ব্যবহারকারী</string>
     <string name="settings_guest_subtitle">ডেটা সিঙ্ক করতে Google দিয়ে সাইন ইন করো</string>

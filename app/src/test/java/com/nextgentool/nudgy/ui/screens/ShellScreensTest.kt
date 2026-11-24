@@ -49,6 +49,8 @@ class ShellScreensTest {
             "gemini_key",
             "privacy",
             "help_feedback",
+            // Sprint 6-3 — the tutorial re-view row (spec §6).
+            "onboarding",
             "memories",
             "delete_account"
         )

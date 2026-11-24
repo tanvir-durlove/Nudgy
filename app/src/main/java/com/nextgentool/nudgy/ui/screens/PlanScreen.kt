@@ -41,6 +41,7 @@ import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.domain.dayLabel
 import com.nextgentool.nudgy.domain.formatMinutes
 import com.nextgentool.nudgy.domain.timeLabel
+import com.nextgentool.nudgy.ui.components.SampleChip
 import com.nextgentool.nudgy.ui.theme.NudgyAccent
 import com.nextgentool.nudgy.ui.theme.NudgyCanvas
 import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
@@ -230,6 +231,13 @@ private fun PlanPickedRow(
                         color = NudgyAccent
                     )
                 }
+                // Sprint 6-3 — the sample chip (Plan is a picker, so
+                // the chip only: the one-tap delete lives on the
+                // task rows in Today/Tasks).
+                if (task.isSample) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    SampleChip()
+                }
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 IconButton(onClick = onMoveUp, enabled = canMoveUp) {
@@ -306,6 +314,11 @@ private fun PlanUnpickedRow(
                         style = MaterialTheme.typography.bodySmall,
                         color = NudgyAccent
                     )
+                }
+                // Sprint 6-3 — the sample chip (see PlanPickedRow).
+                if (task.isSample) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    SampleChip()
                 }
             }
         }

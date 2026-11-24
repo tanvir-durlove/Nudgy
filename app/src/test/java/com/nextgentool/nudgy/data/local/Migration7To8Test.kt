@@ -228,7 +228,7 @@ class Migration7To8Test {
         // The 8 -> 9 and 9 -> 10 steps do not touch the v7 assertions
         // below: 9 -> 10 only adds three empty tables.)
         return Room.databaseBuilder(context, NudgyDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+            .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
             .allowMainThreadQueries()
             .build()
     }

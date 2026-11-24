@@ -38,6 +38,26 @@
     <string name="settings_section_delete_account">Delete account</string>
     <string name="settings_section_delete_account_sub">Erase your account and data</string>
     <string name="settings_section_weekly_review">Weekly review</string>
+    <string name="settings_section_onboarding">Tutorial</string>
+    <string name="settings_section_onboarding_sub">See the first-run tutorial again</string>
+
+    <!-- Sprint 6-3 — onboarding tutorial + sample tasks (spec §6) -->
+    <string name="sample_chip">Sample</string>
+    <string name="sample_delete_content">Delete sample task</string>
+    <string name="onboarding_skip">Skip</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_finish">Get started</string>
+    <string name="onboarding_done">Done</string>
+    <string name="onboarding_page1_title">Capture tasks in seconds</string>
+    <string name="onboarding_page1_body">Type it, say it, or share it from another app — Nudgy keeps it in one place.</string>
+    <string name="onboarding_page2_title">Plan My Day</string>
+    <string name="onboarding_page2_body">Pick what matters today and start your day with one tap.</string>
+    <string name="onboarding_page3_title">Reminders that respect you</string>
+    <string name="onboarding_page3_body">Set a reminder and Nudgy nudges you at the right time — never more than you asked for.</string>
+    <string name="onboarding_page4_title">Plan together</string>
+    <string name="onboarding_page4_body">Create a group, share tasks, and see who did what.</string>
+    <string name="onboarding_sample_title">Start with sample tasks</string>
+    <string name="onboarding_sample_sub">3 clearly-marked sample tasks you can delete in one tap.</string>
 
     <string name="settings_guest_user">Guest User</string>
     <string name="settings_guest_subtitle">Sign in with Google to sync your data</string>

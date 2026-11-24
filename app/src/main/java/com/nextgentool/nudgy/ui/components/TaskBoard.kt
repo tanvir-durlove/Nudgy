@@ -58,6 +58,8 @@ import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskStatus
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.ui.components.SampleChip
+import com.nextgentool.nudgy.ui.components.SampleDeleteButton
 import com.nextgentool.nudgy.ui.theme.NudgyAccent
 import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
 import com.nextgentool.nudgy.ui.theme.NudgyMuted
@@ -279,6 +281,11 @@ fun TaskBoard(
     onMoveTask: (TaskEntity, TaskStatus, Int, List<TaskEntity>) -> Unit,
     onToggle: (TaskEntity) -> Unit,
     onTaskClick: (TaskEntity) -> Unit,
+    // Sprint 6-3 — the sample row's one-tap delete (spec §6): null
+    // in older call sites (no delete button renders); the list rows
+    // are the primary delete surface, the board card carries it too
+    // (safe: the drag starts on long-press, the button takes taps).
+    onDeleteSample: ((TaskEntity) -> Unit)? = null,
     modifier: Modifier = Modifier,
     // Test observability (S1-4c): reports the live drag pointer
     // position (board-viewport px) at drag start and on every move.
@@ -492,7 +499,9 @@ fun TaskBoard(
                     computeDropTargetState = computeDropTargetState,
                     cardCoordsById = cardCoordsById,
                     onToggle = onToggle,
-                    onTaskClick = onTaskClick
+                    onTaskClick = onTaskClick,
+                    // Sprint 6-3 — the sample row's one-tap delete.
+                    onDeleteSample = onDeleteSample
                 )
             }
         }
@@ -543,7 +552,10 @@ private fun BoardColumn(
     computeDropTargetState: State<(String, Offset) -> Pair<TaskStatus, Int>>,
     cardCoordsById: SnapshotStateMap<String, LayoutCoordinates>,
     onToggle: (TaskEntity) -> Unit,
-    onTaskClick: (TaskEntity) -> Unit
+    onTaskClick: (TaskEntity) -> Unit,
+    // Sprint 6-3 — plumbed from TaskBoard: the sample row's one-tap
+    // delete (null = no delete button renders).
+    onDeleteSample: ((TaskEntity) -> Unit)? = null
 ) {
     // The column under the pointer highlights while a card is dragged
     // over it — the same affordance the S1-4 drop target had.
@@ -622,7 +634,10 @@ private fun BoardColumn(
                                 cardCoordsById = cardCoordsById,
                                 isDragging = dragState.value?.taskId == item.task.id,
                                 onToggle = { onToggle(item.task) },
-                                onClick = { onTaskClick(item.task) }
+                                onClick = { onTaskClick(item.task) },
+                                onDeleteSample = onDeleteSample?.let { delete ->
+                                    { delete(item.task) }
+                                }
                             )
                         }
                     }
@@ -646,7 +661,9 @@ private fun BoardTaskCard(
     cardCoordsById: SnapshotStateMap<String, LayoutCoordinates>,
     isDragging: Boolean,
     onToggle: () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    // Sprint 6-3 — bound by the caller (null = no sample delete).
+    onDeleteSample: (() -> Unit)? = null
 ) {
     val task = item.task
     // S1-4c fix: keep the card's LayoutCoordinates, not a cached
@@ -761,7 +778,6 @@ private fun BoardTaskCard(
                     }
                 )
             }
-            .clickable { onClick() }
             .testTag("board_card_${task.id}"),
         shape = NudgyTokens.cardRadius,
         color = MaterialTheme.colorScheme.surface,
@@ -770,79 +786,106 @@ private fun BoardTaskCard(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp)
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Checkbox(
-                checked = task.isCompleted,
-                onCheckedChange = { onToggle() },
-                colors = CheckboxDefaults.colors(
-                    checkedColor = colorResource(R.color.nudgy_teal)
-                )
-            )
-            Box(
+            // Sprint 6-3 (round 2) — the card's tap area is this inner
+            // Row, NOT the card (see TaskRow: clickable merges
+            // descendants). The clickable sits BEFORE the padding, so
+            // the 12 dp padding stays inside the tap area. The drag
+            // detector stays on the Surface above, untouched.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(boardPriorityDotColor(task.priority))
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = task.title,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        textDecoration = if (task.isCompleted) {
-                            TextDecoration.LineThrough
-                        } else {
-                            TextDecoration.None
-                        }
-                    ),
-                    color = if (task.isCompleted) {
-                        NudgyMuted
-                    } else {
-                        NudgyCharcoal
-                    },
-                    maxLines = 2
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = boardDueLabel(task),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = NudgyMuted
+                    .weight(1f)
+                    .clickable { onClick() }
+                    .padding(12.dp)
+            ) {
+                Checkbox(
+                    checked = task.isCompleted,
+                    onCheckedChange = { onToggle() },
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = colorResource(R.color.nudgy_teal)
                     )
-                    if (item.subtaskTotal > 0) {
+                )
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(boardPriorityDotColor(task.priority))
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = task.title,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            textDecoration = if (task.isCompleted) {
+                                TextDecoration.LineThrough
+                            } else {
+                                TextDecoration.None
+                            }
+                        ),
+                        color = if (task.isCompleted) {
+                            NudgyMuted
+                        } else {
+                            NudgyCharcoal
+                        },
+                        maxLines = 2
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(
-                            text = "· ${item.subtaskDone}/${item.subtaskTotal}",
+                            text = boardDueLabel(task),
                             style = MaterialTheme.typography.bodySmall,
                             color = NudgyMuted
                         )
+                        if (item.subtaskTotal > 0) {
+                            Text(
+                                text = "· ${item.subtaskDone}/${item.subtaskTotal}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = NudgyMuted
+                            )
+                        }
+                    }
+                    if (task.groupId != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(
+                                    colorResource(R.color.nudgy_teal).copy(alpha = 0.12f)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "Group",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = NudgyAccent
+                            )
+                        }
+                        // Sprint 5-5 (feature 36): the assignee's name,
+                        // denormalized on the row — blank reads "Member".
+                        if (task.assigneeUid != null) {
+                            Text(
+                                text = "· ${task.assigneeName?.ifBlank { "Member" } ?: "Member"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = NudgyMuted
+                            )
+                        }
                     }
                 }
-                if (task.groupId != null) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Box(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(
-                                colorResource(R.color.nudgy_teal).copy(alpha = 0.12f)
-                            )
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = "Group",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = NudgyAccent
-                        )
-                    }
-                    // Sprint 5-5 (feature 36): the assignee's name,
-                    // denormalized on the row — blank reads "Member".
-                    if (task.assigneeUid != null) {
-                        Text(
-                            text = "· ${task.assigneeName?.ifBlank { "Member" } ?: "Member"}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = NudgyMuted
-                        )
-                    }
+            }
+            // Sprint 6-3 (round 2) — the sample marker + one-tap
+            // delete live OUTSIDE the clickable (see above): their
+            // testTags are findable in the merged tree and TalkBack
+            // sees the delete as its own element. Only sample cards
+            // gain this edge zone.
+            if (task.isSample && onDeleteSample != null) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(end = 12.dp)
+                ) {
+                    SampleChip()
+                    SampleDeleteButton(task = task, onDeleteSample = onDeleteSample)
                 }
             }
         }

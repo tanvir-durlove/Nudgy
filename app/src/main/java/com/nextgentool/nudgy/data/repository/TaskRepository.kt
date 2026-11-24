@@ -173,7 +173,10 @@ class TaskRepository @Inject constructor(
         parentTaskId: String? = null,
         projectId: String? = null,
         templateId: String? = null,
-        estimatedMinutes: Int? = null
+        estimatedMinutes: Int? = null,
+        // Sprint 6-3 — an onboarding sample task (feature 40): the
+        // row's "Sample" chip + one-tap delete read this flag.
+        isSample: Boolean = false
     ): TaskEntity = withContext(Dispatchers.IO) {
         // S1-4g (d1): a new top-level task appends at the END of its
         // column (every create lands in TODO) — creating must never
@@ -208,6 +211,7 @@ class TaskRepository @Inject constructor(
             projectId = projectId,
             templateId = templateId,
             estimatedMinutes = estimatedMinutes,
+            isSample = isSample,
             boardOrder = boardOrder
         )
         taskDao.insertTask(task)

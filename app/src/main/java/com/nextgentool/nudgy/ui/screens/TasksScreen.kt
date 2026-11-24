@@ -55,11 +55,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.data.local.entity.ProjectEntity
 import com.nextgentool.nudgy.data.local.entity.TagEntity
+import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskStatus
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.domain.model.SavedViewFilter
 import com.nextgentool.nudgy.ui.components.QuickAddTask
+import com.nextgentool.nudgy.ui.components.SampleChip
+import com.nextgentool.nudgy.ui.components.SampleDeleteButton
 import com.nextgentool.nudgy.ui.components.TaskBoard
 import com.nextgentool.nudgy.ui.components.TaskDetailSheet
 import com.nextgentool.nudgy.ui.components.TaskViewMode
@@ -176,6 +179,7 @@ fun TasksScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
+                .testTag("tasks_list")
                 .padding(horizontal = NudgyTokens.screenPadding),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -352,7 +356,10 @@ fun TasksScreen(
                             viewModel.moveTaskToPosition(task, status, index, visibleItems)
                         },
                         onToggle = { viewModel.toggleTask(it) },
-                        onTaskClick = { viewModel.selectTask(it.id) }
+                        onTaskClick = { viewModel.selectTask(it.id) },
+                        // Sprint 6-3 — the board card carries the
+                        // sample delete too (same deleteTask).
+                        onDeleteSample = { viewModel.deleteTask(it) }
                     )
                 }
             } else {
@@ -360,7 +367,8 @@ fun TasksScreen(
                     TaskRow(
                         item = item,
                         onToggle = { viewModel.toggleTask(item.task) },
-                        onClick = { viewModel.selectTask(item.task.id) }
+                        onClick = { viewModel.selectTask(item.task.id) },
+                        onDeleteSample = { viewModel.deleteTask(it) }
                     )
                 }
                 if (doneItems.isNotEmpty()) {
@@ -376,7 +384,8 @@ fun TasksScreen(
                         TaskRow(
                             item = item,
                             onToggle = { viewModel.toggleTask(item.task) },
-                            onClick = { viewModel.selectTask(item.task.id) }
+                            onClick = { viewModel.selectTask(item.task.id) },
+                            onDeleteSample = { viewModel.deleteTask(it) }
                         )
                     }
                 }
@@ -615,13 +624,14 @@ private fun priorityDotColor(priority: Priority) = when (priority) {
 private fun TaskRow(
     item: TaskListItem,
     onToggle: () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    // Sprint 6-3 — the sample row's one-tap delete (spec §6): null
+    // in older call sites (no delete button renders).
+    onDeleteSample: ((TaskEntity) -> Unit)? = null
 ) {
     val task = item.task
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() },
+        modifier = Modifier.fillMaxWidth(),
         shape = NudgyTokens.cardRadius,
         color = MaterialTheme.colorScheme.surface,
         shadowElevation = NudgyTokens.cardElevation
@@ -629,108 +639,139 @@ private fun TaskRow(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Checkbox(
-                checked = task.isCompleted,
-                onCheckedChange = { onToggle() },
-                colors = CheckboxDefaults.colors(
-                    checkedColor = colorResource(R.color.nudgy_teal)
-                )
-            )
-            Box(
+            // Sprint 6-3 (round 2) — the row's tap area is this inner
+            // Row, NOT the card: Modifier.clickable merges
+            // descendants, so a chip/delete inside the card is
+            // invisible in the merged semantics tree (the chip wait
+            // timed out in CI runs 867/868/870/872) and TalkBack
+            // announces the card as one button. The clickable sits
+            // BEFORE the padding in the chain, so the 16 dp padding
+            // stays inside the tap area — non-sample rows keep
+            // exactly the tap area they had.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(priorityDotColor(task.priority))
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = task.title,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        textDecoration = if (task.isCompleted) {
-                            TextDecoration.LineThrough
-                        } else {
-                            TextDecoration.None
-                        }
-                    ),
-                    color = if (task.isCompleted) {
-                        NudgyMuted
-                    } else {
-                        NudgyCharcoal
-                    }
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = formatDueLabel(task.dueDateEpochMillis, task.isCompleted),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = NudgyMuted
+                    .weight(1f)
+                    .clickable { onClick() }
+                    .padding(16.dp)
+            ) {
+                Checkbox(
+                    checked = task.isCompleted,
+                    onCheckedChange = { onToggle() },
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = colorResource(R.color.nudgy_teal)
                     )
-                    if (item.project != null) {
+                )
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(priorityDotColor(task.priority))
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = task.title,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            textDecoration = if (task.isCompleted) {
+                                TextDecoration.LineThrough
+                            } else {
+                                TextDecoration.None
+                            }
+                        ),
+                        color = if (task.isCompleted) {
+                            NudgyMuted
+                        } else {
+                            NudgyCharcoal
+                        }
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text = "· ${item.project.name}",
+                            text = formatDueLabel(task.dueDateEpochMillis, task.isCompleted),
                             style = MaterialTheme.typography.bodySmall,
                             color = NudgyMuted
                         )
+                        if (item.project != null) {
+                            Text(
+                                text = "· ${item.project.name}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = NudgyMuted
+                            )
+                        }
+                        if (item.subtaskTotal > 0) {
+                            Text(
+                                text = "· ${item.subtaskDone}/${item.subtaskTotal}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = NudgyMuted
+                            )
+                        }
                     }
-                    if (item.subtaskTotal > 0) {
-                        Text(
-                            text = "· ${item.subtaskDone}/${item.subtaskTotal}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = NudgyMuted
-                        )
+                    if (item.tags.isNotEmpty() || task.groupId != null) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            item.tags.forEach { tag ->
+                                Box(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(colorFromHex(tag.color).copy(alpha = 0.14f))
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = tag.name,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = NudgyCharcoal
+                                    )
+                                }
+                            }
+                            if (task.groupId != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(
+                                            colorResource(R.color.nudgy_teal).copy(alpha = 0.12f)
+                                        )
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Group",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = NudgyAccent
+                                    )
+                                }
+                                // Sprint 5-5 (feature 36): the assignee's
+                                // name, denormalized on the row — blank
+                                // reads "Member".
+                                if (task.assigneeUid != null) {
+                                    Text(
+                                        text = "· ${task.assigneeName?.ifBlank { "Member" } ?: "Member"}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = NudgyMuted
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
-                if (item.tags.isNotEmpty() || task.groupId != null) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        item.tags.forEach { tag ->
-                            Box(
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(colorFromHex(tag.color).copy(alpha = 0.14f))
-                                    .padding(horizontal = 8.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = tag.name,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = NudgyCharcoal
-                                )
-                            }
-                        }
-                        if (task.groupId != null) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(
-                                        colorResource(R.color.nudgy_teal).copy(alpha = 0.12f)
-                                    )
-                                    .padding(horizontal = 8.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = "Group",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = NudgyAccent
-                                )
-                            }
-                            // Sprint 5-5 (feature 36): the assignee's
-                            // name, denormalized on the row — blank
-                            // reads "Member".
-                            if (task.assigneeUid != null) {
-                                Text(
-                                    text = "· ${task.assigneeName?.ifBlank { "Member" } ?: "Member"}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = NudgyMuted
-                                )
-                            }
-                        }
-                    }
+            }
+            // Sprint 6-3 (round 2) — the sample marker + one-tap
+            // delete live OUTSIDE the clickable (see above): their
+            // testTags are findable in the merged tree and TalkBack
+            // sees the delete as its own element. Only sample rows
+            // gain this edge zone.
+            if (task.isSample && onDeleteSample != null) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(end = 16.dp)
+                ) {
+                    SampleChip()
+                    SampleDeleteButton(task = task, onDeleteSample = { onDeleteSample(task) })
                 }
             }
         }

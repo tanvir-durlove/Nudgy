@@ -329,6 +329,18 @@ val MIGRATION_11_12 = object : Migration(11, 12) {
     }
 }
 
+val MIGRATION_12_13 = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Sprint 6-3 (feature 40, Q3=(a)): the onboarding sample
+        // marker. One NOT NULL column with DEFAULT 0, appended last
+        // (the boardOrder/assignee convention): every pre-existing
+        // row migrates false — only tasks the S6-3 tutorial seeds
+        // carry true, so no tester ever sees a phantom "Sample" chip
+        // on their own tasks.
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `isSample` INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 @Database(
     entities = [
         TaskEntity::class,
@@ -348,7 +360,7 @@ val MIGRATION_11_12 = object : Migration(11, 12) {
         HabitEntity::class,
         HabitCheckInEntity::class
     ],
-    version = 12,
+    version = 13,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -380,7 +392,7 @@ abstract class NudgyDatabase : RoomDatabase() {
                     NudgyDatabase::class.java,
                     "nudgy_local_db"
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
                     // Public-launch policy (revisited from the pre-launch
                     // note): destructive fallback is RETIRED from v5.
                     // Every distributed install is v4 (1.0.2 was the first

@@ -69,7 +69,16 @@ data class TaskEntity(
      * last-column convention).
      */
     val assigneeUid: String? = null,
-    val assigneeName: String? = null
+    val assigneeName: String? = null,
+    /**
+     * Sprint 6-3 (feature 40, Q3=(a)): an onboarding sample task.
+     * Appended last (same convention): the chip + one-tap delete in
+     * the task rows read this flag — never the title, so renaming a
+     * sample keeps its marker and a real task can never match it by
+     * accident. Old rows migrate false (MIGRATION_12_13); samples
+     * are local-only personal tasks (groupId null, no reminder).
+     */
+    val isSample: Boolean = false
 )
 
 @Entity(tableName = "calendar_events")
