@@ -125,7 +125,11 @@ class WeeklyReviewEntriesTest {
             SettingsShell(onWeeklyReviewClick = { reviewClicked = true })
         }
 
-        composeRule.onNodeWithTag("settings_weekly_review").performClick()
+        // Sprint 6-0 — the Settings screen scrolls (eleven sections
+        // + the Weekly review row); the row sits below the fold, so
+        // scroll it into view before clicking — the click itself is
+        // what this test proves.
+        composeRule.onNodeWithTag("settings_weekly_review").performScrollTo().performClick()
 
         assertTrue(reviewClicked)
     }

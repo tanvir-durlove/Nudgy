@@ -24,8 +24,12 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 class SettingsPreferences(private val prefs: SharedPreferences) {
 
+    // A stored value outside the known set (e.g. written by hand or
+    // an older build) normalizes to "system" — the flow never carries
+    // an invalid mode.
     private val _themeMode = MutableStateFlow(
-        prefs.getString(KEY_THEME_MODE, THEME_SYSTEM) ?: THEME_SYSTEM
+        prefs.getString(KEY_THEME_MODE, THEME_SYSTEM)?.takeIf { it in THEME_MODES }
+            ?: THEME_SYSTEM
     )
 
     /** "system" | "light" | "dark" — v1 key "theme_mode", default "system". */
@@ -45,10 +49,15 @@ class SettingsPreferences(private val prefs: SharedPreferences) {
     /** False until the S6-3 tutorial is shown once. */
     val hasSeenOnboarding: StateFlow<Boolean> = _hasSeenOnboarding.asStateFlow()
 
-    /** Unknown values fall back to "system" (never a crash, never stuck dark/light). */
+    /**
+     * Unknown values fall back to "system" (never a crash, never
+     * stuck dark/light). The normalized value is always persisted —
+     * no early return: setting "sepia" while already on "system"
+     * must still write "system", so the stored value is the
+     * effective value.
+     */
     fun setThemeMode(mode: String) {
         val clean = if (mode in THEME_MODES) mode else THEME_SYSTEM
-        if (clean == _themeMode.value) return
         _themeMode.value = clean
         prefs.edit().putString(KEY_THEME_MODE, clean).apply()
     }
