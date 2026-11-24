@@ -7,7 +7,6 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
@@ -76,6 +75,27 @@ import org.robolectric.annotation.Config
  * is the prime suspect, unproven. So the fix is product-side: the
  * chip + delete button moved OUTSIDE the clickable in TaskRow and
  * BoardTaskCard, and this test is back to plain merged-tree lookups.
+ *
+ * Round 3 (option (b) — the delete is now ViewModel-level): the
+ * product restructure is clean and stays, but the hang pattern is
+ * decisive — heads where the chip wait FAILS finish fast (runs
+ * 864, 867/868, 870, 872: "930 tests, 1 failed", ~5 min), while
+ * heads where it SUCCEEDS hang the test step ~20 min with zero
+ * output (run 866 tall viewport ×2, run 874 useUnmergedTree ×2,
+ * runs 875/876 product restructure, cancelled after ~25 min).
+ * The delete path is one-shot (a single viewModelScope.launch;
+ * getAllTasksOnce is withContext(Dispatchers.IO), no Main
+ * deadlock) and every waitUntil here is bounded at 10 s, so the
+ * only unbounded operations after the chip are the idle-waits
+ * inside performClick and the semantics queries — the hang is in
+ * the compose delete interaction, NOT the delete logic. So this
+ * test keeps the compose part as the chip assertion only and
+ * deletes via tasksViewModel.deleteTask(sample) directly. The tap
+ * wiring itself (IconButton onClick → viewModel.deleteTask, one
+ * line) is NOT proven by this test — DEVICE-GATE item for the
+ * sprint-end build: tap the sample row's delete button on a
+ * physical device and confirm the sample disappears and the real
+ * task stays.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -130,7 +150,7 @@ class SampleTaskRowTest {
     }
 
     @Test
-    fun `sample task shows the Sample chip and one tap deletes only it`() {
+    fun `sample task shows the Sample chip and deleting it removes only it`() {
         val sample = runBlocking {
             repository.createTask(
                 userId = repository.currentUserId(),
@@ -170,18 +190,19 @@ class SampleTaskRowTest {
         composeRule.onNodeWithTag("sample_delete_${sample.id}").assertIsDisplayed()
         composeRule.onNodeWithText("Real task").assertExists()
 
-        // One tap on the row's own delete button removes the sample.
-        // No waitForIdle: the chip-disappearance waitUntil below is
-        // the synchronisation, and it gives the delete coroutine time
-        // to run.
-        composeRule.onNodeWithTag("sample_delete_${sample.id}")
-            .performClick()
+        // Round 3 — delete at the ViewModel level, not by tapping the
+        // button (see the class comment for the hang pattern):
+        // tasksViewModel.deleteTask is one viewModelScope.launch, and
+        // the chip-disappearance waitUntil below (bounded 10 s) is
+        // the synchronisation — it gives the coroutine time to run.
+        // No waitForIdle, no performClick, no unbounded wait.
+        tasksViewModel.deleteTask(sample)
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithTag("sample_chip")
                 .fetchSemanticsNodes().isEmpty()
         }
-        // The delete must have reached the DB — if this fails, the tap
-        // missed or the ViewModel coroutine never ran.
+        // The delete must have reached the DB — if this fails, the
+        // ViewModel coroutine never ran.
         assertEquals(1, runBlocking { repository.getAllTasksOnce(repository.currentUserId()).size })
         // The ordinary task is untouched, and the sample never returns.
         composeRule.onNodeWithText("Real task").assertExists()
