@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
+import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.domain.usecase.AddSubtaskUseCase
 import com.nextgentool.nudgy.domain.usecase.CreateTaskUseCase
@@ -40,17 +41,23 @@ import org.robolectric.annotation.Config
  * render only (chip + delete button); THIS test proves the delete
  * LOGIC: TasksViewModel.deleteTask(sample) removes exactly the
  * sample and leaves the ordinary task untouched. No compose rule,
- * no waitUntil, no semantics, no performClick — the await is the
- * repo's own flow-first pattern (CalendarViewModelDropTest /
- * GroupsViewModelTest.awaitGroup).
+ * no waitUntil, no semantics, no performClick.
+ *
+ * Await pattern (round 5 fix): the FIRST shape awaited the delete
+ * through the raw repository flow (`observeAllTasks(...).first`),
+ * which threw UncompletedCoroutinesError on both runs 881/882.
+ * This shape follows the EisenhowerMatrixViewModelTest pattern
+ * instead — the SAME TasksViewModel, the SAME vmTest — awaiting
+ * the ViewModel's own uiState (awaitLoaded, then a uiState
+ * predicate on the surviving items). The tap wiring itself
+ * (IconButton onClick → viewModel.deleteTask) is NOT proven by
+ * this test — DEVICE-GATE item for the sprint-end build.
  *
  * Follows the GroupsViewModelTest pattern: the ViewModel is built
  * inside each test (never in setUp — the init coroutines need the
  * test Main), the ViewModel lives in a ViewModelStore cleared
  * BEFORE the database closes, and in-flight Room IO is drained
- * first (S4-1 round 7). The tap wiring itself (IconButton onClick
- * → viewModel.deleteTask) is NOT proven by this test — DEVICE-GATE
- * item for the sprint-end build.
+ * first (S4-1 round 7).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -105,9 +112,22 @@ class SampleTaskDeleteTest {
         return viewModel
     }
 
+    private suspend fun TasksViewModel.awaitLoaded(): TasksUiState =
+        uiState.first { !it.isLoading }
+
+    private suspend fun TasksViewModel.awaitTasks(
+        predicate: (List<TaskEntity>) -> Boolean
+    ): List<TaskEntity> =
+        uiState.first { state ->
+            predicate(state.items.map { it.task })
+        }.items.map { it.task }
+
     @Test
     fun `deleting a sample removes only it`() = vmTest {
         val userId = repository.currentUserId()
+        val tasksViewModel = buildViewModel()
+        tasksViewModel.awaitLoaded()
+
         val sample = repository.createTask(
             userId = userId,
             title = "Morning walk",
@@ -119,16 +139,20 @@ class SampleTaskDeleteTest {
             title = "Real task",
             dueEpochMillis = startOfTodayMillis()
         )
-        val tasksViewModel = buildViewModel()
+        // Both rows are visible in the List before the delete.
+        tasksViewModel.awaitTasks { tasks -> tasks.size == 2 }
 
         tasksViewModel.deleteTask(sample)
 
-        // Await the delete through the repository flow itself — the
-        // one-shot viewModelScope.launch runs on the test Main, the
-        // Room flow re-emits once the row is gone.
-        val remaining = repository.observeAllTasks(userId).first { it.size == 1 }
+        // Await the delete through the ViewModel's own uiState (the
+        // EisenhowerMatrixViewModelTest pattern): the sample is gone
+        // and the ordinary task is the only row left.
+        val remaining = tasksViewModel.awaitTasks { tasks ->
+            tasks.size == 1 && tasks.single().title == "Real task"
+        }
         assertEquals("Real task", remaining.single().title)
         assertTrue(remaining.none { it.id == sample.id })
+        // The delete reached the DB, not just the List's state.
         assertEquals(1, repository.getAllTasksOnce(userId).size)
     }
 }
