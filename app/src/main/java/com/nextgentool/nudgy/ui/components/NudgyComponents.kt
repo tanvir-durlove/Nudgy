@@ -36,10 +36,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -59,8 +67,61 @@ import com.nextgentool.nudgy.ui.theme.NudgyMuted
 import com.nextgentool.nudgy.ui.theme.NudgyPrimary
 
 /**
+ * Brand logo mark — the approved logo, drawn in Compose (no cream
+ * circle): one tilted coral bar + two upright teal bars. Geometry is
+ * the launcher foreground vector (ic_launcher_foreground.xml) adapted
+ * to Canvas: bars 52x96 with 14 radius, tilted 56° / 26° / 0° about
+ * their bottom pivots, tops leaning right. Brand colors are the logo
+ * hexes (coral #F97360, teal #0F766E) — NOT the darkened theme
+ * primary (#CC3F27), so the mark matches the approved logo exactly.
+ */
+@Composable
+fun NudgyLogoMark(
+    modifier: Modifier = Modifier
+) {
+    Canvas(
+        modifier = modifier
+            .size(width = 55.dp, height = 24.dp)
+            .semantics { contentDescription = "Nudgy logo" }
+    ) {
+        // Vector-space bounding box of the three rotated bars:
+        // x [-249.2, 0], y [106.9, 216] (W 249.2, H 109.1).
+        val scale = size.width / 249.2f
+        translate(left = 249.2f * scale, top = -106.9f * scale) {
+            scale(scale, scale) {
+                // Coral bar, tilted 56° about its bottom pivot.
+                rotate(degrees = 56f, pivot = Offset(-220.13f, 216f)) {
+                    drawRoundRect(
+                        color = Color(0xFFF97360),
+                        topLeft = Offset(-272.13f, 120f),
+                        size = Size(52f, 96f),
+                        cornerRadius = CornerRadius(14f, 14f)
+                    )
+                }
+                // First teal bar, tilted 26° about its bottom pivot.
+                rotate(degrees = 26f, pivot = Offset(-101.08f, 216f)) {
+                    drawRoundRect(
+                        color = Color(0xFF0F766E),
+                        topLeft = Offset(-153.08f, 120f),
+                        size = Size(52f, 96f),
+                        cornerRadius = CornerRadius(14f, 14f)
+                    )
+                }
+                // Second teal bar, upright.
+                drawRoundRect(
+                    color = Color(0xFF0F766E),
+                    topLeft = Offset(-52f, 120f),
+                    size = Size(52f, 96f),
+                    cornerRadius = CornerRadius(14f, 14f)
+                )
+            }
+        }
+    }
+}
+
+/**
  * Top App Bar matching all Figma screens:
- * Left: Mascot + "Nudgy" title
+ * Left: Mascot + brand logo mark
  * Right: Notification bell with red badge + Avatar circle ("AR")
  */
 @Composable
@@ -93,14 +154,7 @@ fun NudgyTopBar(
             NudgyMascot(size = 36.dp)
             Spacer(modifier = Modifier.width(10.dp))
             Column {
-                Text(
-                    text = "Nudgy",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold
-                    ),
-                    color = NudgyCharcoal
-                )
+                NudgyLogoMark()
                 if (isGuest) {
                     Surface(
                         color = Color(0xFFFFF3E0),
