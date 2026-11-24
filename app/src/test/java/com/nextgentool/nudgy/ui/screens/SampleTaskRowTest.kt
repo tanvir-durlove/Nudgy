@@ -30,6 +30,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
+import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -149,6 +150,13 @@ class SampleTaskRowTest {
         db.close()
     }
 
+    // DIAGNOSTIC BISECT — round 4, do not merge ignored: this test is
+    // ignored to localise the test-step hang (runs 866/874/875-878 hung
+    // ~15-25 min once this test got past the chip wait; the suite
+    // completes fast when it fails at the chip wait). If the run goes
+    // green with this ignored, the hang is inside this test; if it
+    // hangs again, the hang is in another test class.
+    @Ignore("DIAGNOSTIC BISECT — round 4, do not merge ignored")
     @Test
     fun `sample task shows the Sample chip and deleting it removes only it`() {
         val sample = runBlocking {
