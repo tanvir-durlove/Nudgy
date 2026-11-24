@@ -6,6 +6,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -89,7 +90,10 @@ class OnboardingScreenTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("onboarding_sample_offer").assertIsDisplayed()
         composeRule.onNodeWithText("Start with sample tasks").assertIsDisplayed()
+        // The subtitle sits below the fold on the small Robolectric
+        // window — scroll it into view first (the page scrolls).
         composeRule.onNodeWithText("3 clearly-marked sample tasks you can delete in one tap.")
+            .performScrollTo()
             .assertIsDisplayed()
     }
 

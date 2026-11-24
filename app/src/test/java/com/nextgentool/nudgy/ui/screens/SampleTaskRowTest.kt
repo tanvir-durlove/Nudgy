@@ -59,7 +59,10 @@ class SampleTaskRowTest {
     private lateinit var tasksViewModel: TasksViewModel
     private lateinit var todayViewModel: TodayViewModel
     private val viewModelStore = ViewModelStore()
-    private val userId = "user-1"
+    // The tasks must belong to the user the ViewModels actually
+    // observe: constructed without a GroupAuth seam they fall back to
+    // repository.currentUserId() (the TodayScreenS12Test pattern) —
+    // a hardcoded uid would render zero rows on Today.
 
     @Before
     fun setUp() {
@@ -100,7 +103,7 @@ class SampleTaskRowTest {
     fun `sample task shows the Sample chip and one tap deletes only it`() {
         val sample = runBlocking {
             repository.createTask(
-                userId = userId,
+                userId = repository.currentUserId(),
                 title = "Morning walk",
                 dueEpochMillis = startOfTodayMillis() + 12 * 60 * 60 * 1000L,
                 isSample = true
@@ -108,7 +111,7 @@ class SampleTaskRowTest {
         }
         runBlocking {
             repository.createTask(
-                userId = userId,
+                userId = repository.currentUserId(),
                 title = "Real task",
                 dueEpochMillis = startOfTodayMillis()
             )
@@ -142,14 +145,14 @@ class SampleTaskRowTest {
         // The ordinary task is untouched, and the sample never returns.
         composeRule.onNodeWithText("Real task").assertExists()
         composeRule.onNodeWithText("Morning walk").assertDoesNotExist()
-        assertEquals(1, runBlocking { repository.getAllTasksOnce(userId).size })
+        assertEquals(1, runBlocking { repository.getAllTasksOnce(repository.currentUserId()).size })
     }
 
     @Test
     fun `ordinary task carries no chip and no delete button`() {
         runBlocking {
             repository.createTask(
-                userId = userId,
+                userId = repository.currentUserId(),
                 title = "Real task",
                 dueEpochMillis = startOfTodayMillis()
             )
