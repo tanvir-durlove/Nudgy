@@ -93,6 +93,7 @@ jobs:
 
       # Unit tests (incl. Room migration tests) are a merge gate — a failure must fail the job.
       - name: Run unit tests
+        timeout-minutes: 10
         run: |
           ./gradlew testDebugUnitTest --no-daemon --stacktrace
           
@@ -167,6 +168,17 @@ jobs:
         with:
           name: nudgy-android-artifacts
           path: build-artifacts/*
+          retention-days: 3
+      # Test-result XML is the only record of which classes finished when
+      # the suite hangs or fails (the console strips failure messages).
+      # Always uploaded so a timeout/failure stays diagnosable.
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: nudgy-test-results
+          path: app/build/test-results/testDebugUnitTest/*.xml
           retention-days: 3
       - name: Publish release build to GitHub Release
         if: ${{ github.event_name == 'push' && (github.ref_name == 'scratch/rebuild-v2' || startsWith(github.ref_name, 'sprint0/') || startsWith(github.ref_name, 'sprint1/') || startsWith(github.ref_name, 'sprint2/') || startsWith(github.ref_name, 'sprint3/') || startsWith(github.ref_name, 'sprint4/') || startsWith(github.ref_name, 'sprint5/') || startsWith(github.ref_name, 'sprint6/')) }}
