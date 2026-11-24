@@ -109,7 +109,7 @@ class MorningBriefWorker(
                 set(Calendar.MILLISECOND, 0)
                 if (timeInMillis <= nowMillis) add(Calendar.DAY_OF_YEAR, 1)
             }
-            return next.timeInMillis - now.timeInMillis
+            return next.timeInMillis - nowMillis
         }
 
         /** The summary line: count + the first task, or the empty-day line. Pure. */

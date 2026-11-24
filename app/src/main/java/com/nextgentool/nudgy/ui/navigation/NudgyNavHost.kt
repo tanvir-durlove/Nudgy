@@ -51,9 +51,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.navigation
 import androidx.navigation.compose.rememberNavController
-import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.intent.IncomingIntent
-import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.settings.AppLocale
 import com.nextgentool.nudgy.settings.SettingsPreferences
 import com.nextgentool.nudgy.ui.screens.CalendarScreen
