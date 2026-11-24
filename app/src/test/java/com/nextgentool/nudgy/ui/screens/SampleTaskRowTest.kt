@@ -161,8 +161,16 @@ class SampleTaskRowTest {
         }
         runBlocking { todayScrollState.scrollTo(targetPx.roundToInt().coerceAtLeast(0)) }
         composeRule.waitForIdle()
+        // The scroll must have revealed the button — if this fails,
+        // the offset math (not the tap) is the problem.
+        composeRule.onNodeWithTag("sample_delete_${sample.id}").assertIsDisplayed()
         composeRule.onNodeWithTag("sample_delete_${sample.id}")
             .performClick()
+        composeRule.waitForIdle()
+        // The delete must have reached the DB — if this fails, the tap
+        // missed or the ViewModel coroutine never ran, even though the
+        // button was on screen.
+        assertEquals(1, runBlocking { repository.getAllTasksOnce(repository.currentUserId()).size })
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithTag("sample_chip")
                 .fetchSemanticsNodes().isEmpty()
@@ -170,7 +178,6 @@ class SampleTaskRowTest {
         // The ordinary task is untouched, and the sample never returns.
         composeRule.onNodeWithText("Real task").assertExists()
         composeRule.onNodeWithTag("sample_delete_${sample.id}").assertDoesNotExist()
-        assertEquals(1, runBlocking { repository.getAllTasksOnce(repository.currentUserId()).size })
     }
 
     @Test
