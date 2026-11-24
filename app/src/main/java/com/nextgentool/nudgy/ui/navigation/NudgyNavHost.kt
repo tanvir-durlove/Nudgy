@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
@@ -49,6 +50,7 @@ import androidx.navigation.compose.navigation
 import androidx.navigation.compose.rememberNavController
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.intent.IncomingIntent
+import com.nextgentool.nudgy.settings.SettingsPreferences
 import com.nextgentool.nudgy.ui.screens.CalendarScreen
 import com.nextgentool.nudgy.ui.screens.ChatScreen
 import com.nextgentool.nudgy.ui.screens.FocusScreen
@@ -88,6 +90,12 @@ import com.nextgentool.nudgy.ui.viewmodel.ShareIntentViewModel
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun NudgyApp(
+    // Sprint 6-0 — the live theme mode ("system" | "light" |
+    // "dark"), collected from the SettingsPreferences flow by
+    // MainActivity. Default "system" keeps older call sites on the
+    // previous behaviour (follow the system); the store is the only
+    // writer, so this value is never stale.
+    themeMode: String = SettingsPreferences.THEME_SYSTEM,
     // Sprint 5-3 — a pending group-notification tap: MainActivity
     // feeds the notified group id (from the poll worker's launch
     // intent); the Groups destination opens that group's detail and
@@ -122,7 +130,12 @@ fun NudgyApp(
             navigateTo(navController, NudgyRoute.Groups)
         }
     }
-    NudgyTheme {
+    // Sprint 6-0 — the theme is resolved here from the live mode
+    // (v1's rule: "light" never dark, "dark" always dark, anything
+    // else follows the system). Before this, NudgyTheme was called
+    // with no argument, so the app was system-only even though the
+    // dark tokens were complete.
+    NudgyTheme(darkTheme = SettingsPreferences.resolveDarkTheme(themeMode, isSystemInDarkTheme())) {
         // Sprint 3-1 — the ChatViewModel is Activity-scoped (same
         // instance the Chat route uses): the Quick Chat sheet and the
         // full chat share it, so history survives leaving and

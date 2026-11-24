@@ -5,6 +5,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -125,7 +126,11 @@ class WeeklyReviewEntriesTest {
             SettingsShell(onWeeklyReviewClick = { reviewClicked = true })
         }
 
-        composeRule.onNodeWithTag("settings_weekly_review").performClick()
+        // Sprint 6-0 — the Settings screen scrolls (eleven sections
+        // + the Weekly review row); the row sits below the fold, so
+        // scroll it into view before clicking — the click itself is
+        // what this test proves.
+        composeRule.onNodeWithTag("settings_weekly_review").performScrollTo().performClick()
 
         assertTrue(reviewClicked)
     }
