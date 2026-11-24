@@ -2,8 +2,6 @@ package com.nextgentool.nudgy.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -97,12 +95,7 @@ fun OnboardingScreen(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f)
-                // Sprint 6-3 — the last page carries the sample offer
-                // below the body; on a small screen (or a large font
-                // scale) the offer can clip below the fold, so the
-                // page scrolls instead of cutting it off.
-                .verticalScroll(rememberScrollState()),
+                .weight(1f),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
