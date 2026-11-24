@@ -1,5 +1,8 @@
 package com.nextgentool.nudgy.ui.screens
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -223,10 +226,14 @@ class SettingsRowsTest {
     fun `calendar row offers connect when disconnected and sync when connected`() {
         var connects = 0
         var syncs = 0
+        // One setContent per test (the rule throws on a second call —
+        // PlanScreenTest): the connected state flips through a
+        // mutableState instead.
+        var connected by mutableStateOf(false)
         composeRule.setContent {
             NudgyTheme {
                 SettingsShell(
-                    calendarConnected = false,
+                    calendarConnected = connected,
                     onCalendarConnectClick = { connects++ },
                     onCalendarSyncClick = { syncs++ }
                 )
@@ -238,15 +245,7 @@ class SettingsRowsTest {
         composeRule.onNodeWithTag("settings_calendar_connect_button").performClick()
         assertEquals(1, connects)
 
-        composeRule.setContent {
-            NudgyTheme {
-                SettingsShell(
-                    calendarConnected = true,
-                    onCalendarConnectClick = { connects++ },
-                    onCalendarSyncClick = { syncs++ }
-                )
-            }
-        }
+        composeRule.runOnIdle { connected = true }
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("settings_row_calendar").performScrollTo()
         composeRule.onNodeWithText("Calendar synced").assertIsDisplayed()

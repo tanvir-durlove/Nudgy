@@ -212,20 +212,24 @@ class SettingsViewModelTest {
         val fakeByok = FakeByokKeyStore()
         val viewModel = buildViewModel(fakeByok = fakeByok)
 
-        assertFalse(viewModel.byokKeySet.first())
+        // byokKeySet is a derived stateIn flow: a bare first() returns
+        // the stale replayed value before the sharing coroutine
+        // propagates the change, so await the predicate instead
+        // (the PR #101 Plan flip-test lesson).
+        viewModel.byokKeySet.first { !it }
         viewModel.saveByokKey("  AIzaSy-test-key  ")
-        assertTrue(viewModel.byokKeySet.first())
+        viewModel.byokKeySet.first { it }
         assertEquals("AIzaSy-test-key", viewModel.byokKey.first())
         assertEquals("AIzaSy-test-key", fakeByok.getKey())
 
         viewModel.saveByokKey("   ")
-        assertFalse(viewModel.byokKeySet.first())
+        viewModel.byokKeySet.first { !it }
         assertEquals(null, fakeByok.getKey())
 
         viewModel.saveByokKey("AIzaSy-second")
-        assertTrue(viewModel.byokKeySet.first())
+        viewModel.byokKeySet.first { it }
         viewModel.resetByokKey()
-        assertFalse(viewModel.byokKeySet.first())
+        viewModel.byokKeySet.first { !it }
         assertEquals("", viewModel.byokKey.first())
     }
 
