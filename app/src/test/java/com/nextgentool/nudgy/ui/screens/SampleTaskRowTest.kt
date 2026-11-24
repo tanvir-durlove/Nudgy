@@ -30,7 +30,6 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
-import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -91,12 +90,28 @@ import org.robolectric.annotation.Config
  * inside performClick and the semantics queries — the hang is in
  * the compose delete interaction, NOT the delete logic. So this
  * test keeps the compose part as the chip assertion only and
- * deletes via tasksViewModel.deleteTask(sample) directly. The tap
- * wiring itself (IconButton onClick → viewModel.deleteTask, one
+ * deletes via tasksViewModel.deleteTask(sample) directly. (That
+ * shape is superseded by the round-5 split below — the delete no
+ * longer happens in this test at all.)
+ * The tap wiring itself (IconButton onClick → viewModel.deleteTask, one
  * line) is NOT proven by this test — DEVICE-GATE item for the
  * sprint-end build: tap the sample row's delete button on a
  * physical device and confirm the sample disappears and the real
  * task stays.
+ *
+ * Round 5 (split — the delete test is now two tests): the bisect
+ * proved the hang is inside this test's post-chip compose waits —
+ * with only this test @Ignore'd the suite went green (PR run 880
+ * SUCCESS; push run 879 finished in 3m36s with only the two
+ * documented flakes failing). So this test keeps steps 1–7 only
+ * (render: chip + delete button + real task) and ends there — no
+ * delete, no disappearance wait, no DB assert. The delete LOGIC is
+ * proven by the pure ViewModel test
+ * SampleTaskDeleteTest.`deleting a sample removes only it` (no
+ * compose rule, no waitUntil, no semantics, no performClick). The
+ * tap wiring itself (IconButton onClick → viewModel.deleteTask)
+ * is still NOT proven in CI — DEVICE-GATE item for the
+ * sprint-end build, as above.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -150,15 +165,8 @@ class SampleTaskRowTest {
         db.close()
     }
 
-    // DIAGNOSTIC BISECT — round 4, do not merge ignored: this test is
-    // ignored to localise the test-step hang (runs 866/874/875-878 hung
-    // ~15-25 min once this test got past the chip wait; the suite
-    // completes fast when it fails at the chip wait). If the run goes
-    // green with this ignored, the hang is inside this test; if it
-    // hangs again, the hang is in another test class.
-    @Ignore("DIAGNOSTIC BISECT — round 4, do not merge ignored")
     @Test
-    fun `sample task shows the Sample chip and deleting it removes only it`() {
+    fun `sample task shows the Sample chip and its delete button`() {
         val sample = runBlocking {
             repository.createTask(
                 userId = repository.currentUserId(),
@@ -197,24 +205,6 @@ class SampleTaskRowTest {
         }
         composeRule.onNodeWithTag("sample_delete_${sample.id}").assertIsDisplayed()
         composeRule.onNodeWithText("Real task").assertExists()
-
-        // Round 3 — delete at the ViewModel level, not by tapping the
-        // button (see the class comment for the hang pattern):
-        // tasksViewModel.deleteTask is one viewModelScope.launch, and
-        // the chip-disappearance waitUntil below (bounded 10 s) is
-        // the synchronisation — it gives the coroutine time to run.
-        // No waitForIdle, no performClick, no unbounded wait.
-        tasksViewModel.deleteTask(sample)
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithTag("sample_chip")
-                .fetchSemanticsNodes().isEmpty()
-        }
-        // The delete must have reached the DB — if this fails, the
-        // ViewModel coroutine never ran.
-        assertEquals(1, runBlocking { repository.getAllTasksOnce(repository.currentUserId()).size })
-        // The ordinary task is untouched, and the sample never returns.
-        composeRule.onNodeWithText("Real task").assertExists()
-        composeRule.onNodeWithTag("sample_delete_${sample.id}").assertDoesNotExist()
     }
 
     @Test
