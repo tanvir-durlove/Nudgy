@@ -49,9 +49,17 @@ import org.robolectric.annotation.Config
  * This shape follows the EisenhowerMatrixViewModelTest pattern
  * instead — the SAME TasksViewModel, the SAME vmTest — awaiting
  * the ViewModel's own uiState (awaitLoaded, then a uiState
- * predicate on the surviving items). The tap wiring itself
- * (IconButton onClick → viewModel.deleteTask) is NOT proven by
- * this test — DEVICE-GATE item for the sprint-end build.
+ * predicate on the surviving items). It still threw the same
+ * error on runs 883/884, so the test now also clears the
+ * ViewModelStore BEFORE the runTest body ends (see the
+ * store.clear() at the end of the test): the uiState stateIn
+ * (WhileSubscribed(5_000)) keeps its sharing coroutine alive on
+ * the test Main after the last subscriber leaves, and runTest's
+ * cleanup throws UncompletedCoroutinesError for it — the PR #86
+ * store.clear() in tearDown runs too late for that check.
+ * The tap wiring itself (IconButton onClick → viewModel.deleteTask)
+ * is NOT proven by this test — DEVICE-GATE item for the
+ * sprint-end build.
  *
  * Follows the GroupsViewModelTest pattern: the ViewModel is built
  * inside each test (never in setUp — the init coroutines need the
@@ -154,5 +162,14 @@ class SampleTaskDeleteTest {
         assertTrue(remaining.none { it.id == sample.id })
         // The delete reached the DB, not just the List's state.
         assertEquals(1, repository.getAllTasksOnce(userId).size)
+
+        // Cancel the ViewModel's scope BEFORE runTest ends: the
+        // uiState stateIn (WhileSubscribed(5_000)) keeps its sharing
+        // coroutine alive on the test Main after the last subscriber
+        // leaves, and runTest throws UncompletedCoroutinesError for
+        // it at cleanup (runs 881–884). The PR #86 store.clear() in
+        // tearDown runs too late — after runTest's check — so it
+        // happens here, after the last assertion.
+        store.clear()
     }
 }
