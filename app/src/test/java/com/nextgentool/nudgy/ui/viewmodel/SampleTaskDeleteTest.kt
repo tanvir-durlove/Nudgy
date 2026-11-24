@@ -13,6 +13,7 @@ import com.nextgentool.nudgy.domain.usecase.DeleteTaskUseCase
 import com.nextgentool.nudgy.domain.usecase.SaveViewUseCase
 import com.nextgentool.nudgy.domain.usecase.ToggleTaskCompletionUseCase
 import com.nextgentool.nudgy.domain.usecase.UpdateTaskUseCase
+import java.time.Duration
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -121,15 +122,27 @@ class SampleTaskDeleteTest {
         return viewModel
     }
 
-    /** Drive the paused Main looper until [condition] holds (PlanViewModelTest pattern). */
+    /**
+     * Drive the paused Main looper until [condition] holds (PlanViewModelTest pattern).
+     *
+     * Round 7 — BOUNDED pump on purpose: the Plan pattern's `idle()` runs the
+     * Main queue until it is EMPTY, and never returns if tasks keep arriving —
+     * the 10 s timeout is only checked between `idle()` calls, so a never-empty
+     * queue hangs the test step (runs 891/892, ~15 min, zero output). The live
+     * `uiState.collect {}` + Room Flow re-emissions are the plausible continuous
+     * posters. `idleFor(100 ms)` advances a bounded virtual duration per
+     * iteration and returns however many tasks arrived, so the loop always
+     * reaches its timeout check; the `Thread.sleep(50)` between iterations
+     * gives the real-IO work (Room delete) real time to land.
+     */
     private fun pumpUntil(timeoutMillis: Long = 10_000, condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeoutMillis
         while (System.currentTimeMillis() < deadline) {
-            Shadows.shadowOf(Looper.getMainLooper()).idle()
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
             if (condition()) return
             Thread.sleep(50)
         }
-        Shadows.shadowOf(Looper.getMainLooper()).idle()
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
         assertTrue(condition())
     }
 
