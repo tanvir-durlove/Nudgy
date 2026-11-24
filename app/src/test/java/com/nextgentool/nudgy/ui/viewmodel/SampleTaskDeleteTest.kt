@@ -27,9 +27,14 @@ import org.robolectric.annotation.Config
  * Sprint 6-3 — the sample delete, proven WITHOUT compose (feature 40,
  * Q3=(a), spec §6).
  *
- * DIAGNOSTIC BISECT round 14 — repository-level delete (no
- * ViewModel, no Main, no pump); do not merge in this shape
- * until the parent verifies it. Round 9 proved the empty
+ * Parent-verified 2026-11-24: the delete logic is proven at the
+ * repository level because the ViewModel's Main-launched delete
+ * hangs under Robolectric's paused Main looper (rounds 11–13) —
+ * a harness interaction, not a product defect. The VM's
+ * deleteTask is a one-line viewModelScope.launch wrapper around
+ * repository.deleteTask (code-verified); the IconButton tap
+ * wiring is a DEVICE-GATE item for the sprint-end build.
+ * Round 9 proved the empty
  * body goes green (PR 899 + push 900, 931/931, 0 failures), so
  * setUp + VM construction + tearDown are innocent and shared-state
  * fallout to a later class is refuted for the empty test. Round 10
@@ -45,20 +50,15 @@ import org.robolectric.annotation.Config
  * hung (PR 908 + push 907, both 10-minute timeouts), so the
  * pump (idleFor) is exonerated — the ONLY difference from
  * green round 10 is the `tasksViewModel.deleteTask(sample)`
- * call. This round deletes at the repository level instead:
+ * call. This round (14) deletes at the repository level instead:
  * `runBlocking { repository.deleteTask(sample.id) }` runs on
  * the test thread + Dispatchers.IO, with NO viewModelScope,
- * NO Dispatchers.Main, NO pump. If green, the hang needs the
- * VM's Main-launched delete (a Main-looper interaction, not
- * the delete logic) — and this shape is the SHIPPABLE test
- * (the VM's deleteTask is a one-line viewModelScope.launch
- * wrapper around it, proven by code-reading; the IconButton
- * tap wiring stays a DEVICE-GATE item for the sprint-end
- * build). If it hangs, the hang is in the repository
- * delete's own IO/DAO work — a product-path finding. On a
- * TIMEOUT run no test-results XML exists (Gradle writes XML
- * only when the test task finishes), so the run conclusion +
- * timeout message are the evidence.
+ * NO Dispatchers.Main, NO pump — and it went green on both runs
+ * (push 909 + PR 910 attempt 2, 931/931, 0 failures), so the hang
+ * needs the VM's Main-launched delete and this shape is the
+ * SHIPPABLE test. On a TIMEOUT run no test-results XML exists
+ * (Gradle writes XML only when the test task finishes), so the
+ * run conclusion + timeout message are the evidence.
  *
  * The tap wiring itself (IconButton onClick → viewModel.deleteTask)
  * is NOT proven by this test — DEVICE-GATE item for the
@@ -119,9 +119,9 @@ class SampleTaskDeleteTest {
 
     @Test
     fun `deleting a sample removes only it`() {
-        // DIAGNOSTIC BISECT round 13 — creates + delete call only,
-        // NO pump. No poll loop, no Thread.sleep loop, no live
-        // uiState collection, no post-delete DB read.
+        // Repository-level delete (round 14): no ViewModel delete
+        // call, no Main, no pump. Runs on the test thread +
+        // Dispatchers.IO via runBlocking.
         val tasksViewModel = buildViewModel()
         assertNotNull(tasksViewModel)
 
