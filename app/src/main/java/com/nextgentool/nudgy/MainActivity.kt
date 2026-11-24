@@ -5,11 +5,13 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import com.nextgentool.nudgy.auth.GroupAuth
+import com.nextgentool.nudgy.settings.SettingsPreferences
 import com.nextgentool.nudgy.ui.navigation.NudgyApp
 import com.nextgentool.nudgy.ui.viewmodel.ShareIntentViewModel
 import com.nextgentool.nudgy.work.GroupPollWorker
@@ -58,6 +60,13 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var groupAuth: GroupAuth
 
+    // Sprint 6-0 — the Settings store (foundation): the single
+    // @Singleton that reads "nudgy_settings". Its themeMode flow is
+    // collected below and passed to NudgyApp, so an S6-2 Appearance
+    // change recomposes the theme with no restart.
+    @Inject
+    lateinit var settingsPreferences: SettingsPreferences
+
     /** Sprint 5-3 — pending group-notification tap (group id, one-shot). */
     private var openGroupId by mutableStateOf<String?>(null)
 
@@ -68,7 +77,13 @@ class MainActivity : ComponentActivity() {
         groupAuth.attemptSilentSignIn(lifecycleScope)
         handleIncomingIntent(intent)
         setContent {
+            // Sprint 6-0 — the theme mode is a live flow off the
+            // store, not a value captured once at launch (the PR #101
+            // lesson: a value frozen at construction never follows a
+            // later change).
+            val themeMode by settingsPreferences.themeMode.collectAsState()
             NudgyApp(
+                themeMode = themeMode,
                 openGroupId = openGroupId,
                 onOpenGroupIdConsumed = { openGroupId = null }
             )

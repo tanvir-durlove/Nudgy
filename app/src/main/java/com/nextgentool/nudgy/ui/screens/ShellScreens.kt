@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -127,16 +129,114 @@ fun CalendarShell() = ShellScaffold(
     note = "Sprint 2 fills this in: Google / Outlook sync, time blocking, drag to slot."
 )
 
+/**
+ * Sprint 6-0 — the Settings sections (foundation shell, spec §4).
+ *
+ * One section per spec §4 entry, in the v1 sheet's order. The rows
+ * are inert stubs in this sub-PR ("Soon" — no behaviour): S6-1
+ * wires profile/sign-in, Memories, BYOK, Privacy, Help & feedback
+ * and calendar; S6-2 wires notifications, Appearance and language.
+ * The section headers + rows are the contract the later sub-PRs
+ * fill in — a later PR replaces a stub row's onClick/behaviour, it
+ * never re-lays-out the screen.
+ */
+private data class SettingsSection(
+    val slug: String,
+    val title: String,
+    val subtitle: String
+)
+
+private val SETTINGS_SECTIONS = listOf(
+    SettingsSection("profile", "Profile", "Your name, email and photo"),
+    SettingsSection("sign_in", "Sign in", "Google sign-in and guest mode"),
+    SettingsSection("notifications", "Notifications", "Morning brief, sound and haptics"),
+    SettingsSection("appearance", "Appearance", "System, light or dark theme"),
+    SettingsSection("language", "Language", "English or বাংলা"),
+    SettingsSection("calendar", "Calendar connections", "Google Calendar sync"),
+    SettingsSection("gemini_key", "Gemini API key", "Your own key (BYOK)"),
+    SettingsSection("privacy", "Privacy Policy", "How your data is handled"),
+    SettingsSection("help_feedback", "Help & feedback", "Get help or send feedback"),
+    SettingsSection("memories", "Memories", "Things Nudgy remembers about you"),
+    SettingsSection("delete_account", "Delete account", "Erase your account and data")
+)
+
+@Composable
+private fun SettingsSectionHeader(title: String, slug: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelLarge,
+        color = NudgyMuted,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("settings_section_$slug")
+            .padding(start = 4.dp, top = 16.dp, bottom = 8.dp)
+    )
+}
+
+/** Inert stub row — S6-1/S6-2 replace it with the real row. No onClick: it does nothing. */
+@Composable
+private fun SettingsStubRow(section: SettingsSection) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("settings_row_${section.slug}"),
+        shape = NudgyTokens.cardRadius,
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = NudgyTokens.cardElevation
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = section.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = NudgyCharcoal
+                )
+                Text(
+                    text = section.subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = NudgyMuted
+                )
+            }
+            Text(
+                text = "Soon",
+                style = MaterialTheme.typography.bodySmall,
+                color = NudgyMuted
+            )
+        }
+    }
+}
+
 @Composable
 fun SettingsShell(
     // Sprint 4-4 — the Settings entry to the weekly review screen
     // (spec §7, Q9=(a)): the same screen the Today progress ring
     // opens. Defaults to no-op so older call sites keep compiling.
     onWeeklyReviewClick: () -> Unit = {}
-) = ShellScaffold(
-    title = "Settings",
-    note = "Sprint 6 fills this in: profile, notifications, light/dark/system, language, calendar connections, own Gemini key, Privacy Policy, Help & feedback, Memories.",
-    content = {
+) {
+    // Sprint 6-0 — the real Settings structure (spec §4): the
+    // static placeholder rows are gone (the S5 fix-round blink
+    // guard stays relevant — no shimmer anywhere on this screen).
+    // Scrollable: eleven sections + the Weekly review row do not
+    // fit one screen. The Weekly review row is unchanged from
+    // Sprint 4-4 (same testTag, same behaviour).
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(NudgyCanvas)
+            .padding(NudgyTokens.screenPadding)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Text(text = "Settings", color = NudgyCharcoal)
+        for (section in SETTINGS_SECTIONS) {
+            SettingsSectionHeader(title = section.title, slug = section.slug)
+            SettingsStubRow(section = section)
+        }
+        SettingsSectionHeader(title = "Weekly review", slug = "weekly_review")
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -173,4 +273,4 @@ fun SettingsShell(
         }
         Spacer(modifier = Modifier.height(16.dp))
     }
-)
+}
