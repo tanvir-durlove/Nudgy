@@ -45,12 +45,15 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
+import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.domain.formatMinutes
 import com.nextgentool.nudgy.domain.startOfDayMillis
 import com.nextgentool.nudgy.domain.timeLabel
 import com.nextgentool.nudgy.ui.components.QuickAddTask
 import com.nextgentool.nudgy.ui.components.EisenhowerMatrix
+import com.nextgentool.nudgy.ui.components.SampleChip
+import com.nextgentool.nudgy.ui.components.SampleDeleteButton
 import com.nextgentool.nudgy.ui.components.TaskBoard
 import com.nextgentool.nudgy.ui.components.TaskViewMode
 import com.nextgentool.nudgy.ui.theme.NudgyAccent
@@ -407,6 +410,9 @@ fun TodayScreen(
                     },
                     onToggle = { todayViewModel.toggleTask(it) },
                     onTaskClick = {},
+                    // Sprint 6-3 — the board card carries the sample
+                    // delete too (same deleteTask).
+                    onDeleteSample = { tasksViewModel.deleteTask(it) },
                     sortByBoardOrder = false
                 )
             } else if (myDayViewMode == TaskViewMode.MATRIX) {
@@ -429,7 +435,8 @@ fun TodayScreen(
                         TodayTaskRow(
                             item = item,
                             timeLabel = myDayTimeLabel(item, stringResource(R.string.today_time_label)),
-                            onToggle = { todayViewModel.toggleTask(item.task) }
+                            onToggle = { todayViewModel.toggleTask(item.task) },
+                            onDeleteSample = { tasksViewModel.deleteTask(it) }
                         )
                     }
                 }
@@ -453,12 +460,14 @@ fun TodayScreen(
                                 timeLabel = "${timeLabel(entry.startMillis)} – " +
                                     "${timeLabel(entry.startMillis + entry.durationMinutes * 60 * 1000L)}" +
                                     " · ${formatMinutes(entry.durationMinutes)}",
-                                onToggle = { todayViewModel.toggleTask(entry.item.task) }
+                                onToggle = { todayViewModel.toggleTask(entry.item.task) },
+                                onDeleteSample = { tasksViewModel.deleteTask(it) }
                             )
                             is TodayTimelineEntry.TaskPoint -> TodayTaskRow(
                                 item = entry.item,
                                 timeLabel = timeLabel(entry.startMillis),
-                                onToggle = { todayViewModel.toggleTask(entry.item.task) }
+                                onToggle = { todayViewModel.toggleTask(entry.item.task) },
+                                onDeleteSample = { tasksViewModel.deleteTask(it) }
                             )
                             is TodayTimelineEntry.EventBlock -> TimelineEventRow(entry.event)
                             is TodayTimelineEntry.NowLine -> NowLineRow(entry.atMillis)
@@ -478,7 +487,8 @@ fun TodayScreen(
                                 // "Today" here; repeating the header text
                                 // on every row is redundant).
                                 timeLabel = stringResource(R.string.today_time_label),
-                                onToggle = { todayViewModel.toggleTask(item.task) }
+                                onToggle = { todayViewModel.toggleTask(item.task) },
+                                onDeleteSample = { tasksViewModel.deleteTask(it) }
                             )
                         }
                     }
@@ -508,7 +518,8 @@ fun TodayScreen(
                                 TodayTaskRow(
                                     item = item,
                                     timeLabel = upcomingTimeLabel(item, stringResource(R.string.today_anytime)),
-                                    onToggle = { todayViewModel.toggleTask(item.task) }
+                                    onToggle = { todayViewModel.toggleTask(item.task) },
+                                    onDeleteSample = { tasksViewModel.deleteTask(it) }
                                 )
                             }
                         }
@@ -526,7 +537,8 @@ fun TodayScreen(
                                     // "No due date", not "No date": the
                                     // section header already says No date.
                                     timeLabel = stringResource(R.string.today_no_due_date),
-                                    onToggle = { todayViewModel.toggleTask(item.task) }
+                                    onToggle = { todayViewModel.toggleTask(item.task) },
+                                    onDeleteSample = { tasksViewModel.deleteTask(it) }
                                 )
                             }
                         }
@@ -888,7 +900,10 @@ private fun AllTasksRow(
 private fun TodayTaskRow(
     item: TaskListItem,
     timeLabel: String,
-    onToggle: () -> Unit
+    onToggle: () -> Unit,
+    // Sprint 6-3 — the sample row's one-tap delete (spec §6): null
+    // in older call sites (no delete button renders).
+    onDeleteSample: ((TaskEntity) -> Unit)? = null
 ) {
     val task = item.task
     Surface(
@@ -973,6 +988,16 @@ private fun TodayTaskRow(
                         )
                     }
                 }
+                // Sprint 6-3 — the sample chip (a group row can never
+                // be a sample: samples are local-only personal tasks).
+                if (task.isSample) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    SampleChip()
+                }
+            }
+            // Sprint 6-3 — the sample row's one-tap delete.
+            if (task.isSample && onDeleteSample != null) {
+                SampleDeleteButton(task = task, onDeleteSample = { onDeleteSample(task) })
             }
         }
     }

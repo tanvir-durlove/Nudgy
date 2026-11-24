@@ -55,11 +55,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.data.local.entity.ProjectEntity
 import com.nextgentool.nudgy.data.local.entity.TagEntity
+import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskStatus
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.domain.model.SavedViewFilter
 import com.nextgentool.nudgy.ui.components.QuickAddTask
+import com.nextgentool.nudgy.ui.components.SampleChip
+import com.nextgentool.nudgy.ui.components.SampleDeleteButton
 import com.nextgentool.nudgy.ui.components.TaskBoard
 import com.nextgentool.nudgy.ui.components.TaskDetailSheet
 import com.nextgentool.nudgy.ui.components.TaskViewMode
@@ -352,7 +355,10 @@ fun TasksScreen(
                             viewModel.moveTaskToPosition(task, status, index, visibleItems)
                         },
                         onToggle = { viewModel.toggleTask(it) },
-                        onTaskClick = { viewModel.selectTask(it.id) }
+                        onTaskClick = { viewModel.selectTask(it.id) },
+                        // Sprint 6-3 — the board card carries the
+                        // sample delete too (same deleteTask).
+                        onDeleteSample = { viewModel.deleteTask(it) }
                     )
                 }
             } else {
@@ -360,7 +366,8 @@ fun TasksScreen(
                     TaskRow(
                         item = item,
                         onToggle = { viewModel.toggleTask(item.task) },
-                        onClick = { viewModel.selectTask(item.task.id) }
+                        onClick = { viewModel.selectTask(item.task.id) },
+                        onDeleteSample = { viewModel.deleteTask(it) }
                     )
                 }
                 if (doneItems.isNotEmpty()) {
@@ -376,7 +383,8 @@ fun TasksScreen(
                         TaskRow(
                             item = item,
                             onToggle = { viewModel.toggleTask(item.task) },
-                            onClick = { viewModel.selectTask(item.task.id) }
+                            onClick = { viewModel.selectTask(item.task.id) },
+                            onDeleteSample = { viewModel.deleteTask(it) }
                         )
                     }
                 }
@@ -615,7 +623,10 @@ private fun priorityDotColor(priority: Priority) = when (priority) {
 private fun TaskRow(
     item: TaskListItem,
     onToggle: () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    // Sprint 6-3 — the sample row's one-tap delete (spec §6): null
+    // in older call sites (no delete button renders).
+    onDeleteSample: ((TaskEntity) -> Unit)? = null
 ) {
     val task = item.task
     Surface(
@@ -687,9 +698,13 @@ private fun TaskRow(
                         )
                     }
                 }
-                if (item.tags.isNotEmpty() || task.groupId != null) {
+                if (item.tags.isNotEmpty() || task.groupId != null || task.isSample) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        // Sprint 6-3 — the sample chip, first in the
+                        // badge row (a group row can never be a
+                        // sample: samples are local-only personal).
+                        if (task.isSample) SampleChip()
                         item.tags.forEach { tag ->
                             Box(
                                 modifier = Modifier
@@ -732,6 +747,10 @@ private fun TaskRow(
                         }
                     }
                 }
+            }
+            // Sprint 6-3 — the sample row's one-tap delete.
+            if (task.isSample && onDeleteSample != null) {
+                SampleDeleteButton(task = task, onDeleteSample = { onDeleteSample(task) })
             }
         }
     }

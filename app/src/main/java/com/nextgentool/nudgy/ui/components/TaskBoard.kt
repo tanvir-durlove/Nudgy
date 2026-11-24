@@ -58,6 +58,8 @@ import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskStatus
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.ui.components.SampleChip
+import com.nextgentool.nudgy.ui.components.SampleDeleteButton
 import com.nextgentool.nudgy.ui.theme.NudgyAccent
 import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
 import com.nextgentool.nudgy.ui.theme.NudgyMuted
@@ -279,6 +281,11 @@ fun TaskBoard(
     onMoveTask: (TaskEntity, TaskStatus, Int, List<TaskEntity>) -> Unit,
     onToggle: (TaskEntity) -> Unit,
     onTaskClick: (TaskEntity) -> Unit,
+    // Sprint 6-3 — the sample row's one-tap delete (spec §6): null
+    // in older call sites (no delete button renders); the list rows
+    // are the primary delete surface, the board card carries it too
+    // (safe: the drag starts on long-press, the button takes taps).
+    onDeleteSample: ((TaskEntity) -> Unit)? = null,
     modifier: Modifier = Modifier,
     // Test observability (S1-4c): reports the live drag pointer
     // position (board-viewport px) at drag start and on every move.
@@ -622,7 +629,10 @@ private fun BoardColumn(
                                 cardCoordsById = cardCoordsById,
                                 isDragging = dragState.value?.taskId == item.task.id,
                                 onToggle = { onToggle(item.task) },
-                                onClick = { onTaskClick(item.task) }
+                                onClick = { onTaskClick(item.task) },
+                                onDeleteSample = onDeleteSample?.let { delete ->
+                                    { delete(item.task) }
+                                }
                             )
                         }
                     }
@@ -646,7 +656,9 @@ private fun BoardTaskCard(
     cardCoordsById: SnapshotStateMap<String, LayoutCoordinates>,
     isDragging: Boolean,
     onToggle: () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    // Sprint 6-3 — bound by the caller (null = no sample delete).
+    onDeleteSample: (() -> Unit)? = null
 ) {
     val task = item.task
     // S1-4c fix: keep the card's LayoutCoordinates, not a cached
@@ -844,6 +856,16 @@ private fun BoardTaskCard(
                         )
                     }
                 }
+                // Sprint 6-3 — the sample chip (a group row can never
+                // be a sample: samples are local-only personal tasks).
+                if (task.isSample) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    SampleChip()
+                }
+            }
+            // Sprint 6-3 — the sample row's one-tap delete.
+            if (task.isSample && onDeleteSample != null) {
+                SampleDeleteButton(task = task, onDeleteSample = onDeleteSample)
             }
         }
     }

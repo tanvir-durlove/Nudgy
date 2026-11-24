@@ -10,6 +10,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.lifecycleScope
 import com.nextgentool.nudgy.auth.AuthManager
 import com.nextgentool.nudgy.auth.GroupAuth
@@ -17,6 +18,8 @@ import com.nextgentool.nudgy.auth.SignInScreen
 import com.nextgentool.nudgy.settings.SettingsPreferences
 import com.nextgentool.nudgy.settings.AppLocale
 import com.nextgentool.nudgy.ui.navigation.NudgyApp
+import com.nextgentool.nudgy.ui.screens.OnboardingScreen
+import com.nextgentool.nudgy.ui.viewmodel.OnboardingViewModel
 import com.nextgentool.nudgy.ui.viewmodel.ShareIntentViewModel
 import com.nextgentool.nudgy.work.GroupPollWorker
 import com.nextgentool.nudgy.work.MorningBriefWorker
@@ -119,6 +122,10 @@ class MainActivity : ComponentActivity() {
             // continuing as guest flips the flow and the gate opens
             // the app with no restart.
             val user by groupAuth.userState.collectAsState()
+            // Sprint 6-3 — the onboarding flag, live from the store
+            // (same pattern as themeMode above: a value frozen at
+            // construction would never follow the finish tap).
+            val hasSeenOnboarding by settingsPreferences.hasSeenOnboarding.collectAsState()
             if (user == null) {
                 val isLoading by authManager.isLoading.collectAsState()
                 val errorMessage by authManager.errorMessage.collectAsState()
@@ -128,6 +135,20 @@ class MainActivity : ComponentActivity() {
                     isLoading = isLoading,
                     errorMessage = errorMessage,
                     onSignInSuccess = {}
+                )
+            } else if (!hasSeenOnboarding) {
+                // Sprint 6-3 — the first-run tutorial (spec §6): it
+                // shows AFTER the sign-in gate (a guest who continues
+                // as guest sees it too), and only once — finishing or
+                // skipping sets has_seen_onboarding, so the next
+                // launch goes straight to NudgyApp. A returning user
+                // never sees it.
+                val onboardingViewModel: OnboardingViewModel = hiltViewModel()
+                OnboardingScreen(
+                    isReView = false,
+                    onFinish = { includeSamples ->
+                        onboardingViewModel.finish(includeSamples)
+                    }
                 )
             } else {
                 NudgyApp(

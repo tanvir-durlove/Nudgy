@@ -170,6 +170,9 @@ private val SETTINGS_SECTIONS = listOf(
     SettingsSection("gemini_key", R.string.settings_section_gemini_key, R.string.settings_section_gemini_key_sub),
     SettingsSection("privacy", R.string.settings_section_privacy, R.string.settings_section_privacy_sub),
     SettingsSection("help_feedback", R.string.settings_section_help_feedback, R.string.settings_section_help_feedback_sub),
+    // Sprint 6-3 — the tutorial re-view (spec §6): its own row right
+    // after Help & feedback (the help area), same section pattern.
+    SettingsSection("onboarding", R.string.settings_section_onboarding, R.string.settings_section_onboarding_sub),
     SettingsSection("memories", R.string.settings_section_memories, R.string.settings_section_memories_sub),
     SettingsSection("delete_account", R.string.settings_section_delete_account, R.string.settings_section_delete_account_sub)
 )
@@ -262,7 +265,11 @@ fun SettingsShell(
     onMorningBriefChange: (Boolean) -> Unit = {},
     onSoundChange: (Boolean) -> Unit = {},
     onThemeModeChange: (String) -> Unit = {},
-    onLanguageChange: (String) -> Unit = {}
+    onLanguageChange: (String) -> Unit = {},
+    // Sprint 6-3 — the tutorial re-view (spec §6): opens the same
+    // OnboardingScreen over the app; the row is inert in tests that
+    // render the shell with no params (default no-op).
+    onShowOnboardingClick: () -> Unit = {}
 ) {
     // Sprint 6-1 — dialog state lives in the shell; the dialogs
     // themselves are in SettingsDialogs.kt (v1 texts verbatim).
@@ -343,6 +350,12 @@ fun SettingsShell(
                     title = stringResource(R.string.settings_section_help_feedback),
                     subtitle = stringResource(R.string.settings_section_help_feedback_sub),
                     onClick = onHelpFeedbackClick
+                )
+                "onboarding" -> SettingsActionRow(
+                    slug = "onboarding",
+                    title = stringResource(R.string.settings_section_onboarding),
+                    subtitle = stringResource(R.string.settings_section_onboarding_sub),
+                    onClick = onShowOnboardingClick
                 )
                 "memories" -> SettingsActionRow(
                     slug = "memories",

@@ -60,6 +60,7 @@ import com.nextgentool.nudgy.ui.screens.ChatScreen
 import com.nextgentool.nudgy.ui.screens.FocusScreen
 import com.nextgentool.nudgy.ui.screens.GroupsScreen
 import com.nextgentool.nudgy.ui.screens.HELP_FEEDBACK_EMAIL
+import com.nextgentool.nudgy.ui.screens.OnboardingScreen
 import com.nextgentool.nudgy.ui.screens.PRIVACY_POLICY_URL
 import com.nextgentool.nudgy.ui.screens.PlanScreen
 import com.nextgentool.nudgy.ui.screens.SettingsShell
@@ -150,6 +151,12 @@ fun NudgyApp(
         // above (the Activity is the ViewModelStoreOwner at this root).
         val chatViewModel: ChatViewModel = hiltViewModel()
         var quickChatOpen by rememberSaveable { mutableStateOf(false) }
+        // Sprint 6-3 — the tutorial re-view (spec §6): the Settings
+        // row opens the same OnboardingScreen over the whole app
+        // (re-view mode — no sample offer, no re-seed, the flag is
+        // already true). The first launch shows it from MainActivity
+        // instead; this state only ever opens from Settings.
+        var showOnboarding by rememberSaveable { mutableStateOf(false) }
         // Q7(a): the bottom nav hides while the keyboard is open — the
         // chat gets the full height, one less inset layer in the
         // keyboard-gap equation (S3-8 diagnoses the gap itself).
@@ -173,7 +180,10 @@ fun NudgyApp(
                 pendingInsertEvent = pendingInsertEvent,
                 onInsertEventConsumed = { shareViewModel.consumeInsertEvent() },
                 pendingOpenGroupId = openGroupId,
-                onOpenGroupIdConsumed = onOpenGroupIdConsumed
+                onOpenGroupIdConsumed = onOpenGroupIdConsumed,
+                // Sprint 6-3 — the Settings row opens the tutorial
+                // re-view (no sample offer, no re-seed).
+                onShowOnboardingClick = { showOnboarding = true }
             )
         }
         // Sprint 3-1 — Quick Chat sheet over the current tab.
@@ -201,6 +211,17 @@ fun NudgyApp(
                 onStopVoice = { chatViewModel.stopVoice() },
                 voiceLanguage = sheetVoiceLanguage,
                 onToggleVoiceLanguage = { chatViewModel.toggleVoiceLanguage() }
+            )
+        }
+        // Sprint 6-3 — the tutorial re-view, full-screen over the
+        // app (same overlay pattern as the Quick Chat sheet above):
+        // finishing or skipping only dismisses it — no seeding, no
+        // flag change (the flag is already true; the first launch
+        // never reaches this path).
+        if (showOnboarding) {
+            OnboardingScreen(
+                isReView = true,
+                onFinish = { showOnboarding = false }
             )
         }
         val share = pendingShare
@@ -247,7 +268,10 @@ fun NudgyNavHost(
     // Groups destination (which opens the detail, then consumes it).
     // Null in every other flow.
     pendingOpenGroupId: String? = null,
-    onOpenGroupIdConsumed: () -> Unit = {}
+    onOpenGroupIdConsumed: () -> Unit = {},
+    // Sprint 6-3 — the Settings row opens the tutorial re-view
+    // (NudgyApp owns the state; this route only reports the tap).
+    onShowOnboardingClick: () -> Unit = {}
 ) {
     NavHost(
         navController = navController,
@@ -635,7 +659,10 @@ fun NudgyNavHost(
                     // The new locale only reaches already-inflated
                     // resources through a restart (AppLocale).
                     (context as? Activity)?.let { AppLocale.applyAndRecreate(it, code) }
-                }
+                },
+                // Sprint 6-3 — the tutorial re-view (spec §6): the
+                // row opens the same OnboardingScreen over the app.
+                onShowOnboardingClick = onShowOnboardingClick
             )
         }
     }
