@@ -1,7 +1,6 @@
 package com.nextgentool.nudgy.ui.viewmodel
 
 import android.content.Context
-import android.os.Looper
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -22,31 +21,35 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.Shadows
 import org.robolectric.annotation.Config
-import java.time.Duration
 
 /**
  * Sprint 6-3 — the sample delete, proven WITHOUT compose (feature 40,
  * Q3=(a), spec §6).
  *
- * DIAGNOSTIC BISECT round 12 — creates + delete + one bounded pump,
- * NO post-delete DB read; do not merge in this shape. Round 9
- * proved the empty body goes green (PR 899 + push 900, 931/931,
- * 0 failures), so setUp + VM construction + tearDown are innocent
- * and shared-state fallout to a later class is refuted. Round 10
- * proved the two creates are innocent (push 901 green; PR 902
- * green on the sanctioned re-run after the documented PR #99
+ * DIAGNOSTIC BISECT round 13 — creates + delete call only, NO
+ * pump; do not merge in this shape. Round 9 proved the empty
+ * body goes green (PR 899 + push 900, 931/931, 0 failures), so
+ * setUp + VM construction + tearDown are innocent and shared-state
+ * fallout to a later class is refuted. Round 10 proved the two
+ * creates are innocent (push 901 green; PR 902 green on the
+ * sanctioned re-run after the documented PR #99
  * GroupRepositoryTest harness-leak flake). Round 11 proved the
  * hang came back with the delete (push 903 + PR 904 both hit the
  * 10-minute step timeout) — and round 11 had NO poll loop, so the
- * poll loop is exonerated. This round drops the post-delete DB
- * read: if green, the hang is in the post-delete DB read (the
- * delete leaves the DB in a state where getAllTasksOnce blocks);
- * if it hangs, the hang is in the delete's execution or the pump.
- * On a TIMEOUT run no test-results XML exists (Gradle writes XML
- * only when the test task finishes), so the run conclusion +
- * timeout message are the evidence.
+ * poll loop is exonerated. Round 12 proved delete + pump with NO
+ * post-delete DB read still hung (PR 906 + push 905, both
+ * 10-minute timeouts), so the post-delete DB read is exonerated
+ * too. This round drops the pump as well: the delete coroutine is
+ * posted to Main and never runs — tearDown's store.clear()
+ * cancels it. If green, the pump (idleFor) is the hang (it runs
+ * the pending seed + delete coroutines on Main); if it hangs,
+ * the hang is in the delete call / its teardown interaction (a
+ * launch cannot block, so suspicion falls on store.clear() +
+ * db.close() racing the pending delete coroutine). On a TIMEOUT
+ * run no test-results XML exists (Gradle writes XML only when
+ * the test task finishes), so the run conclusion + timeout
+ * message are the evidence.
  *
  * The tap wiring itself (IconButton onClick → viewModel.deleteTask)
  * is NOT proven by this test — DEVICE-GATE item for the
@@ -107,9 +110,9 @@ class SampleTaskDeleteTest {
 
     @Test
     fun `deleting a sample removes only it`() {
-        // DIAGNOSTIC BISECT round 12 — creates + delete + one bounded
-        // pump, NO post-delete DB read. No poll loop, no Thread.sleep
-        // loop, no live uiState collection.
+        // DIAGNOSTIC BISECT round 13 — creates + delete call only,
+        // NO pump. No poll loop, no Thread.sleep loop, no live
+        // uiState collection, no post-delete DB read.
         val tasksViewModel = buildViewModel()
         assertNotNull(tasksViewModel)
 
@@ -135,11 +138,9 @@ class SampleTaskDeleteTest {
         assertTrue(before.any { it.title == "Real task" })
 
         tasksViewModel.deleteTask(sample)
-        // One bounded pump so the posted delete coroutine (Main →
-        // IO → Main) runs and resumes; 2s virtual is generous for
-        // the one-shot IO delete. Round 12: NO post-delete DB read —
-        // the test returns here.
-        Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(2000))
+        // DIAGNOSTIC BISECT round 13 — NO pump: the delete coroutine
+        // is posted to Main and never runs; tearDown's store.clear()
+        // cancels it. The test returns here.
         assertNotNull(tasksViewModel)
     }
 }
