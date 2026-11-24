@@ -2,9 +2,9 @@ name: Build Nudgy Android APK
 
 on:
   push:
-    branches: [ main, master, scratch/rebuild-v2, sprint0/**, sprint1/**, sprint2/**, sprint3/**, sprint4/**, sprint5/** ]
+    branches: [ main, master, scratch/rebuild-v2, sprint0/**, sprint1/**, sprint2/**, sprint3/**, sprint4/**, sprint5/**, sprint6/** ]
   pull_request:
-    branches: [ main, master, scratch/rebuild-v2, sprint0/**, sprint1/**, sprint2/**, sprint3/**, sprint4/**, sprint5/** ]
+    branches: [ main, master, scratch/rebuild-v2, sprint0/**, sprint1/**, sprint2/**, sprint3/**, sprint4/**, sprint5/**, sprint6/** ]
   workflow_dispatch:
     inputs:
       create_release:
@@ -169,7 +169,7 @@ jobs:
           path: build-artifacts/*
           retention-days: 3
       - name: Publish release build to GitHub Release
-        if: ${{ github.event_name == 'push' && (github.ref_name == 'scratch/rebuild-v2' || startsWith(github.ref_name, 'sprint0/') || startsWith(github.ref_name, 'sprint1/') || startsWith(github.ref_name, 'sprint2/') || startsWith(github.ref_name, 'sprint3/') || startsWith(github.ref_name, 'sprint4/') || startsWith(github.ref_name, 'sprint5/')) }}
+        if: ${{ github.event_name == 'push' && (github.ref_name == 'scratch/rebuild-v2' || startsWith(github.ref_name, 'sprint0/') || startsWith(github.ref_name, 'sprint1/') || startsWith(github.ref_name, 'sprint2/') || startsWith(github.ref_name, 'sprint3/') || startsWith(github.ref_name, 'sprint4/') || startsWith(github.ref_name, 'sprint5/') || startsWith(github.ref_name, 'sprint6/')) }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
