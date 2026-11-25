@@ -9,6 +9,10 @@ import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
+import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
+import com.nextgentool.nudgy.data.local.entity.GroupEntity
+import com.nextgentool.nudgy.data.repository.CalendarRepository
+import com.nextgentool.nudgy.data.repository.GroupRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.ui.navigation.NudgyRoute
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
@@ -80,6 +84,24 @@ class SearchScreenTest {
 
     private fun setSearchContent() {
         val viewModel = SearchViewModel(repository).also { store.put("search", it) }
+        composeRule.setContent {
+            NudgyTheme {
+                SearchScreen(viewModel = viewModel, onBackClick = {})
+            }
+        }
+    }
+
+    /**
+     * Step 2c — the fully wired ViewModel (schedules + notes +
+     * groups). The step-2b tests keep the task-only build above,
+     * which still passes unchanged.
+     */
+    private fun setWiredSearchContent() {
+        val viewModel = SearchViewModel(
+            repository,
+            calendarRepository = CalendarRepository(context, db),
+            groupRepository = GroupRepository(context, db)
+        ).also { store.put("search-wired", it) }
         composeRule.setContent {
             NudgyTheme {
                 SearchScreen(viewModel = viewModel, onBackClick = {})
@@ -162,5 +184,113 @@ class SearchScreenTest {
     fun `search route resolves from its string`() {
         assertEquals(NudgyRoute.Search, NudgyRoute.fromRoute("search"))
         assertTrue(NudgyRoute.all.contains(NudgyRoute.Search))
+    }
+
+    // ---- Sprint 6-4, step 2c: schedules, notes, groups ----
+
+    @Test
+    fun `typing a matching query renders the schedule result row`() {
+        runBlocking {
+            db.calendarDao().insertEvent(
+                CalendarEventEntity(
+                    id = "event-1",
+                    userId = repository.currentUserId(),
+                    title = "Dentist appointment",
+                    startEpochMillis = 1_700_000_000_000,
+                    endEpochMillis = 1_700_000_600_000,
+                    locationOrLink = "City Dental Clinic"
+                )
+            )
+        }
+        setWiredSearchContent()
+
+        composeRule.onNodeWithTag("search_field").performTextInput("dentist")
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("search_result_schedule_event-1").assertExists()
+        assertTrue(
+            "result row should show the event title, was: " +
+                nodeText("search_result_schedule_event-1"),
+            nodeText("search_result_schedule_event-1").contains("Dentist appointment")
+        )
+        // A real result replaces the Schedules empty state.
+        composeRule.onNodeWithTag("search_empty_schedules").assertDoesNotExist()
+    }
+
+    @Test
+    fun `typing a description-only query renders the note result row`() {
+        val task = runBlocking {
+            repository.createTask(
+                userId = repository.currentUserId(),
+                title = "Buy groceries",
+                description = "Weekly shop at the market"
+            )
+        }
+        setWiredSearchContent()
+
+        // "market" matches only the description — the note row shows
+        // it as its own group, and the Tasks group shows it too.
+        composeRule.onNodeWithTag("search_field").performTextInput("market")
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("search_result_note_${task.id}").assertExists()
+        assertTrue(
+            "note row should show the matching description, was: " +
+                nodeText("search_result_note_${task.id}"),
+            nodeText("search_result_note_${task.id}").contains("Weekly shop at the market")
+        )
+        composeRule.onNodeWithTag("search_result_task_${task.id}").assertExists()
+        composeRule.onNodeWithTag("search_empty_notes").assertDoesNotExist()
+    }
+
+    @Test
+    fun `typing a title-only query leaves the notes section empty`() {
+        val task = runBlocking {
+            repository.createTask(
+                userId = repository.currentUserId(),
+                title = "Buy groceries",
+                description = "Weekly shop at the market"
+            )
+        }
+        setWiredSearchContent()
+
+        // "groceries" matches only the title — the Tasks group shows
+        // the row, the Notes group honestly reports no results.
+        composeRule.onNodeWithTag("search_field").performTextInput("groceries")
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("search_result_task_${task.id}").assertExists()
+        assertTrue(
+            "notes empty state should report no results, was: " +
+                nodeText("search_empty_notes"),
+            nodeText("search_empty_notes").contains("No results")
+        )
+    }
+
+    @Test
+    fun `typing a matching query renders the group result row`() {
+        runBlocking {
+            db.groupDao().insertGroup(
+                GroupEntity(
+                    groupId = "g1",
+                    name = "Weekend Runners",
+                    code = "RUN123",
+                    creatorUid = repository.currentUserId()
+                )
+            )
+        }
+        setWiredSearchContent()
+
+        composeRule.onNodeWithTag("search_field").performTextInput("runners")
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("search_result_group_g1").assertExists()
+        assertTrue(
+            "result row should show the group name, was: " +
+                nodeText("search_result_group_g1"),
+            nodeText("search_result_group_g1").contains("Weekend Runners")
+        )
+        // A real result replaces the Groups empty state.
+        composeRule.onNodeWithTag("search_empty_groups").assertDoesNotExist()
     }
 }

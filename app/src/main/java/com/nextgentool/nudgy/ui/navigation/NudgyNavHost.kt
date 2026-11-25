@@ -274,6 +274,12 @@ fun NudgyNavHost(
     // (NudgyApp owns the state; this route only reports the tap).
     onShowOnboardingClick: () -> Unit = {}
 ) {
+    // Sprint 6-4 (step 2c) — a search tap on a group opens that
+    // group's detail: the same openGroupId mechanism as the
+    // notification tap (S5-3), but set locally by the Search
+    // destination instead of by MainActivity's launch intent.
+    // Cleared when the Groups destination consumes it (below).
+    var searchOpenGroupId by rememberSaveable { mutableStateOf<String?>(null) }
     NavHost(
         navController = navController,
         startDestination = TODAY_GRAPH_ROUTE,
@@ -336,17 +342,27 @@ fun NudgyNavHost(
             TemplatesScreen(onBack = { navController.popBackStack() })
         }
         // Sprint 6-4 — Global search (S6-4): the query lives in the
-        // SearchViewModel and the Tasks group shows the Room LIKE
-        // results (step 2b). Tap on a task result navigates to the
-        // Tasks screen, the task's home — there is no task-detail
-        // route (the detail sheet lives in TasksScreen behind
+        // SearchViewModel and the groups show the Room LIKE results
+        // (tasks in step 2b; schedules, notes and groups in step 2c).
+        // Tap on a task result navigates to the Tasks screen, the
+        // task's home — there is no task-detail route (the detail
+        // sheet lives in TasksScreen behind
         // TasksViewModel.selectTask), so a deep-link to one task's
-        // sheet is a follow-up, not this step. NOT a bottom
-        // destination (see NudgyRoute.all).
+        // sheet is a follow-up, not this step. Tap on a schedule
+        // result navigates to the Calendar screen the same way (a
+        // deep-link to one exact event is a follow-up too). Tap on a
+        // group result opens that group's detail through the S5-3
+        // openGroupId mechanism (set here, consumed by the Groups
+        // destination). NOT a bottom destination (see NudgyRoute.all).
         composable(NudgyRoute.Search.route) {
             SearchScreen(
                 onBackClick = { navController.popBackStack() },
-                onTaskClick = { navController.navigate(NudgyRoute.Tasks.route) }
+                onTaskClick = { navController.navigate(NudgyRoute.Tasks.route) },
+                onScheduleClick = { navigateTo(navController, NudgyRoute.Calendar) },
+                onGroupClick = { group ->
+                    searchOpenGroupId = group.groupId
+                    navigateTo(navController, NudgyRoute.Groups)
+                }
             )
         }
         // Sprint 2-1 — Calendar is wired: the real screen on the
@@ -576,8 +592,15 @@ fun NudgyNavHost(
                 onAssignGroupTask = { groupId, itemId, assigneeUid ->
                     groupsViewModel.assignGroupTask(groupId, itemId, assigneeUid)
                 },
-                openGroupId = pendingOpenGroupId,
-                onOpenGroupIdConsumed = onOpenGroupIdConsumed,
+                openGroupId = pendingOpenGroupId ?: searchOpenGroupId,
+                onOpenGroupIdConsumed = {
+                    // Sprint 6-4 (step 2c) — the search tap's id is
+                    // consumed the same way as the notification tap's
+                    // (S5-3): once, when the detail opens (or the id
+                    // proves stale).
+                    searchOpenGroupId = null
+                    onOpenGroupIdConsumed()
+                },
                 prefillJoinCode = groupsUiState.prefillJoinCode,
                 onPrefillJoinCodeConsumed = { groupsViewModel.consumePrefillJoinCode() }
             )

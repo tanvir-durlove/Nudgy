@@ -201,8 +201,9 @@ interface TaskDao {
     // spec Q5) + tag name. Tags are not a TaskEntity column — the tag
     // match JOINs tags ⨝ task_tags. DISTINCT: a task with several
     // matching tags must appear once. The LIKE pattern comes from
-    // TaskRepository (wildcards escaped) — see TaskRepository.likePattern.
-    // Query-only change: no schema change, no migration.
+    // the shared likePattern (wildcards escaped) — see
+    // data/repository/LikePattern.kt. Query-only change: no schema
+    // change, no migration.
     @Query(
         "SELECT DISTINCT t.* FROM tasks t " +
             "LEFT JOIN task_tags tt ON t.id = tt.taskId " +
@@ -260,6 +261,20 @@ interface CalendarDao {
 
     @Query("UPDATE calendar_events SET userId = :toUserId WHERE userId = :fromUserId")
     suspend fun reassignUser(fromUserId: String, toUserId: String)
+
+    // ---- Sprint 6-4 (step 2c, global search) ----
+    //
+    // One query for the Schedules section: title + location/link.
+    // The LIKE pattern comes from the shared likePattern (wildcards
+    // escaped) — see data/repository/LikePattern.kt. Query-only
+    // change: no schema change, no migration.
+    @Query(
+        "SELECT * FROM calendar_events WHERE userId = :userId " +
+            "AND (title LIKE :pattern ESCAPE '\\\\' COLLATE NOCASE " +
+            "OR locationOrLink LIKE :pattern ESCAPE '\\\\' COLLATE NOCASE) " +
+            "ORDER BY startEpochMillis ASC"
+    )
+    fun searchEventsFlow(userId: String, pattern: String): Flow<List<CalendarEventEntity>>
 }
 
 @Dao

@@ -316,6 +316,14 @@ class CalendarRepository(
     fun observeAllEvents(userId: String): Flow<List<CalendarEventEntity>> =
         calendarDao.getAllEventsFlow(userId)
 
+    /**
+     * Sprint 6-4 (step 2c) — global search over one user's calendar
+     * events: title and location/link, one grouped result. The LIKE
+     * pattern is the shared escaped one (see LikePattern.kt).
+     */
+    fun searchEvents(userId: String, query: String): Flow<List<CalendarEventEntity>> =
+        calendarDao.searchEventsFlow(userId, likePattern(query))
+
     fun hasCalendarPermissions(): Boolean {
         val read = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
         val write = ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) == PackageManager.PERMISSION_GRANTED
