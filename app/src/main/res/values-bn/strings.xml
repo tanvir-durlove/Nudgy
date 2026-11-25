@@ -176,4 +176,7 @@
     <string name="app_lock_title">Nudgy আনলক করুন</string>
     <string name="app_lock_subtitle">অ্যাপটি খুলতে আপনার ফিঙ্গারপ্রিন্ট, মুখ অথবা ডিভাইসের PIN ব্যবহার করুন</string>
     <string name="app_lock_unlock">আনলক করুন</string>
+
+    <!-- Privacy Policy in-app screen (step 5b) -->
+    <string name="privacy_policy_view_on_web">ওয়েবে দেখুন</string>
 </resources>

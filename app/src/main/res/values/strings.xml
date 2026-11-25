@@ -177,4 +177,7 @@
     <string name="app_lock_title">Unlock Nudgy</string>
     <string name="app_lock_subtitle">Use your fingerprint, face or device PIN to open the app</string>
     <string name="app_lock_unlock">Unlock</string>
+
+    <!-- Privacy Policy in-app screen (step 5b) -->
+    <string name="privacy_policy_view_on_web">View on the web</string>
 </resources>
