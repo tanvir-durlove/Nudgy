@@ -3,7 +3,6 @@ package com.nextgentool.nudgy.ui.components
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -39,7 +38,11 @@ import org.robolectric.annotation.Config
  *   is untouched) so all nine chips compose at once.
  * - Presence is asserted with assertExists, never
  *   assertIsDisplayed: chips overflowing the root surface are
- *   composed but not "displayed". NO waitForIdle() and NO
+ *   composed but not "displayed". assertExists is a MEMBER of
+ *   SemanticsNodeInteraction, not a top-level import — importing
+ *   it fails compilation (PR run 45638125296 failed exactly that
+ *   way; the import was removed, nothing else changed).
+ *   NO waitForIdle() and NO
  *   performScrollTo() (both hang this harness — OnboardingScreenTest
  *   KDoc, runs 851/852); rows are awaited with waitUntil
  *   (the SearchScreenTest pattern).
