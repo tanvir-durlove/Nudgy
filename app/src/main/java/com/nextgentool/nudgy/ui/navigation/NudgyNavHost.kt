@@ -111,7 +111,14 @@ fun NudgyApp(
     // intent); the Groups destination opens that group's detail and
     // consumes the id. Null in every other flow.
     openGroupId: String? = null,
-    onOpenGroupIdConsumed: () -> Unit = {}
+    onOpenGroupIdConsumed: () -> Unit = {},
+    // Sprint 6-5 (step 3b) — a pending widget "+" tap: MainActivity
+    // feeds the one-shot flag (from the widget's launch action); the
+    // app navigates to Today and the quick-add field focuses there,
+    // then the Today destination consumes the flag. False in every
+    // other flow.
+    openQuickAdd: Boolean = false,
+    onOpenQuickAddConsumed: () -> Unit = {}
 ) {
     val navController = rememberNavController()
     // Sprint 2-3 — share-to-task (Feature 12): the Activity-scoped
@@ -138,6 +145,14 @@ fun NudgyApp(
     LaunchedEffect(openGroupId) {
         if (openGroupId != null) {
             navigateTo(navController, NudgyRoute.Groups)
+        }
+    }
+    // Sprint 6-5 (step 3b) — a widget "+" tap navigates to the Today
+    // tab first (singleTop — a no-op when already on Today); the
+    // Today destination focuses the quick-add field and consumes it.
+    LaunchedEffect(openQuickAdd) {
+        if (openQuickAdd) {
+            navigateTo(navController, NudgyRoute.Today)
         }
     }
     // Sprint 6-0 — the theme is resolved here from the live mode
@@ -183,6 +198,11 @@ fun NudgyApp(
                 onInsertEventConsumed = { shareViewModel.consumeInsertEvent() },
                 pendingOpenGroupId = openGroupId,
                 onOpenGroupIdConsumed = onOpenGroupIdConsumed,
+                // Sprint 6-5 (step 3b) — the widget "+" quick-add
+                // (the Today destination focuses the field, then
+                // consumes the flag).
+                pendingOpenQuickAdd = openQuickAdd,
+                onOpenQuickAddConsumed = onOpenQuickAddConsumed,
                 // Sprint 6-3 — the Settings row opens the tutorial
                 // re-view (no sample offer, no re-seed).
                 onShowOnboardingClick = { showOnboarding = true }
@@ -271,6 +291,11 @@ fun NudgyNavHost(
     // Null in every other flow.
     pendingOpenGroupId: String? = null,
     onOpenGroupIdConsumed: () -> Unit = {},
+    // Sprint 6-5 (step 3b) — a pending widget "+" tap, passed to the
+    // Today destination (which focuses the quick-add field, then
+    // consumes it). False in every other flow.
+    pendingOpenQuickAdd: Boolean = false,
+    onOpenQuickAddConsumed: () -> Unit = {},
     // Sprint 6-3 — the Settings row opens the tutorial re-view
     // (NudgyApp owns the state; this route only reports the tap).
     onShowOnboardingClick: () -> Unit = {}
@@ -321,6 +346,11 @@ fun NudgyNavHost(
                     // global search screen (Q5). Plain navigate like
                     // the sibling entries: back pops to Today.
                     onSearchClick = { navController.navigate(NudgyRoute.Search.route) },
+                    // Sprint 6-5 (step 3b) — the widget "+" quick-add:
+                    // the quick-add field focuses on entry and
+                    // consumes the flag once.
+                    focusQuickAdd = pendingOpenQuickAdd,
+                    onFocusQuickAddConsumed = onOpenQuickAddConsumed,
                     habitViewModel = habitViewModel
                 )
             }

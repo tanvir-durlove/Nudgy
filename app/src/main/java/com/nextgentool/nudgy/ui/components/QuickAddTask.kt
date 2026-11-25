@@ -23,12 +23,16 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.input.ImeAction
@@ -61,6 +65,12 @@ import java.util.Locale
  * the card under the field offers due date/time and priority for the
  * just-created task — inline, no sheet (Feature 1). Picking a date
  * defaults to 09:00 local; the time button refines it.
+ *
+ * Sprint 6-5 (step 3b) — the widget "+" quick-add: `autofocus` focuses
+ * this field once on entry (keyboard up, ready to type) and consumes
+ * the one-shot signal via [onAutofocusConsumed], the same state
+ * pattern as the search deep-links (2e/2f). Defaults keep every
+ * existing call site unchanged — only the Today destination passes it.
  */
 @Composable
 fun QuickAddTask(
@@ -70,12 +80,28 @@ fun QuickAddTask(
     onLastCreatedDue: (Long) -> Unit,
     onLastCreatedPriority: (Priority) -> Unit,
     onDismissLastCreated: () -> Unit,
+    autofocus: Boolean = false,
+    onAutofocusConsumed: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var text by remember { mutableStateOf("") }
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
     val canCreate = text.isNotBlank() && !isCreating
+    // Sprint 6-5 (step 3b) — one-shot focus for the widget "+" entry:
+    // the field is laid out by the time this effect runs, so the
+    // request lands; the keyboard is shown explicitly (a programmatic
+    // focus does not always raise it on its own) and the signal is
+    // consumed at once so a later recomposition never re-focuses.
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    LaunchedEffect(autofocus) {
+        if (autofocus) {
+            focusRequester.requestFocus()
+            keyboardController?.show()
+            onAutofocusConsumed()
+        }
+    }
 
     fun submit() {
         if (!canCreate) return
@@ -107,6 +133,7 @@ fun QuickAddTask(
             shape = NudgyTokens.cardRadius,
             modifier = Modifier
                 .fillMaxWidth()
+                .focusRequester(focusRequester)
                 .testTag("quick_add_field")
         )
 

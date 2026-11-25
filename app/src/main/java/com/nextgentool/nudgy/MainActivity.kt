@@ -59,6 +59,18 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
+    companion object {
+        /**
+         * Sprint 6-5 (step 3b) — the widget "+" quick-add flag: the
+         * widget's launch action carries this boolean extra (via
+         * Glance ActionParameters, keyed by this name); MainActivity
+         * reads it into one-shot Compose state, never into the share
+         * flow. Same naming shape as GroupPollWorker's
+         * EXTRA_OPEN_GROUP_ID.
+         */
+        const val EXTRA_OPEN_QUICK_ADD = "nudgy_open_quick_add"
+    }
+
     private val shareIntentViewModel: ShareIntentViewModel by viewModels()
 
     // Sprint 5 fix round — the single auth seam (device test on ci-792:
@@ -83,6 +95,9 @@ class MainActivity : ComponentActivity() {
 
     /** Sprint 5-3 — pending group-notification tap (group id, one-shot). */
     private var openGroupId by mutableStateOf<String?>(null)
+
+    /** Sprint 6-5 (step 3b) — pending widget "+" tap (one-shot). */
+    private var openQuickAdd by mutableStateOf(false)
 
     /**
      * Sprint 6-2 — per-app UI language (spec §2 Q10=(a)): the base
@@ -154,7 +169,9 @@ class MainActivity : ComponentActivity() {
                 NudgyApp(
                     themeMode = themeMode,
                     openGroupId = openGroupId,
-                    onOpenGroupIdConsumed = { openGroupId = null }
+                    onOpenGroupIdConsumed = { openGroupId = null },
+                    openQuickAdd = openQuickAdd,
+                    onOpenQuickAddConsumed = { openQuickAdd = false }
                 )
             }
         }
@@ -178,11 +195,22 @@ class MainActivity : ComponentActivity() {
      * worker's launch intent carries the group id): it is read into
      * Compose state, never into the share flow, and consumed by the
      * Groups destination once the detail opens.
+     *
+     * Sprint 6-5 (step 3b) — a widget "+" tap also arrives here (the
+     * launch action carries EXTRA_OPEN_QUICK_ADD): it is read into
+     * Compose state the same way, never into the share flow, and
+     * consumed by the Today destination once the quick-add field
+     * focuses. The share flow does not claim this intent (it is not
+     * a SEND/VIEW/INSERT), so handleIntent returns false and the
+     * intent is left alone.
      */
     private fun handleIncomingIntent(intent: Intent?) {
         intent?.getStringExtra(GroupPollWorker.EXTRA_OPEN_GROUP_ID)
             ?.takeIf { it.isNotBlank() }
             ?.let { openGroupId = it }
+        if (intent?.getBooleanExtra(EXTRA_OPEN_QUICK_ADD, false) == true) {
+            openQuickAdd = true
+        }
         if (shareIntentViewModel.handleIntent(intent)) {
             setIntent(Intent())
         }
