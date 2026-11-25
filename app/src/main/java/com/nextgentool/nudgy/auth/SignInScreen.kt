@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.ui.components.MascotMood
+import com.nextgentool.nudgy.ui.components.NudgyLogoMark
 import com.nextgentool.nudgy.ui.components.NudgyMascot
 import com.nextgentool.nudgy.ui.theme.NudgyCanvas
 import com.nextgentool.nudgy.ui.theme.NudgyCard
@@ -214,14 +215,7 @@ fun SignInScreen(
                     },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(
-                    text = "NUDGY",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        letterSpacing = 2.sp,
-                        fontWeight = FontWeight.Bold
-                    ),
-                    color = NudgyPrimary
-                )
+                NudgyLogoMark()
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = "Things Get Done.",
