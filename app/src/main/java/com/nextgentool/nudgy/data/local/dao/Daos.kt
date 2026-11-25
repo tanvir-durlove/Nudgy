@@ -338,6 +338,11 @@ interface MemoryDao {
     @Query("SELECT * FROM nudgy_memories WHERE userId = :userId ORDER BY createdAtEpochMillis DESC")
     fun getMemoriesFlow(userId: String): Flow<List<NudgyMemoryEntity>>
 
+    // Sprint 6-6 (step 4c, restore) — existence check by id for the
+    // id-merge. Query-only change: no schema change, no migration.
+    @Query("SELECT * FROM nudgy_memories WHERE id = :id LIMIT 1")
+    suspend fun getMemoryById(id: String): NudgyMemoryEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMemory(memory: NudgyMemoryEntity)
 

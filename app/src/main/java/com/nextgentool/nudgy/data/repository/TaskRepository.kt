@@ -277,6 +277,46 @@ class TaskRepository @Inject constructor(
             )
         }
 
+    /**
+     * Sprint 6-6 (step 4c) — restore tasks from an export: id-merge.
+     * A row whose id already exists (under ANY user — ids are the
+     * primary key) is SKIPPED: the local row is never overwritten.
+     * Only missing ids are inserted, so restoring the same file
+     * twice inserts nothing the second time.
+     *
+     * The inserted rows arrive with the caller's userId already
+     * applied (see DataRestorer) — this method does not reassign.
+     * A restored task with a future reminder gets its alarm
+     * re-scheduled, exactly as [createTask] does; a past trigger is
+     * left alone (ReminderManager refuses it anyway). The widget is
+     * notified once at the end when anything was inserted.
+     *
+     * No cloud sync here: restored rows keep their exported
+     * isSyncedToCloud value, and the normal sync path picks up
+     * unsynced rows on its own schedule.
+     */
+    suspend fun restoreTasks(tasks: List<TaskEntity>): RestoreCounts =
+        withContext(Dispatchers.IO) {
+            var inserted = 0
+            var skipped = 0
+            for (task in tasks) {
+                if (taskDao.getTaskById(task.id) != null) {
+                    skipped++
+                    continue
+                }
+                taskDao.insertTask(task)
+                inserted++
+                if (task.reminderSet) {
+                    val trigger = task.reminderEpochMillis ?: task.dueDateEpochMillis
+                    if (trigger > System.currentTimeMillis()) {
+                        reminderManager.scheduleReminder(task.id, task.title, trigger)
+                    }
+                }
+            }
+            if (inserted > 0) notifyTasksChanged()
+            RestoreCounts(inserted = inserted, skipped = skipped)
+        }
+
     suspend fun updateTask(task: TaskEntity) = withContext(Dispatchers.IO) {
         // Group v1: group rows are edited through GroupRepository (cloud
         // write to the shared group item). This path is a defensive
