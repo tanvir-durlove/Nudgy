@@ -118,6 +118,24 @@ class TaskRepository @Inject constructor(
     fun observeTask(taskId: String): Flow<TaskEntity?> =
         taskDao.getTaskByIdFlow(taskId)
 
+    /**
+     * Sprint 6-4 (step 2b) — global search over one user's tasks: title,
+     * description ("notes", spec Q5) and tag name, one grouped result.
+     * The LIKE pattern escapes the wildcards so a typed '%' or '_' matches
+     * literally instead of matching everything.
+     */
+    fun searchTasks(userId: String, query: String): Flow<List<TaskEntity>> =
+        taskDao.searchTasksFlow(userId, likePattern(query))
+
+    /** LIKE pattern for a raw search string: escape '\', '%' and '_', then wrap in '%'. */
+    private fun likePattern(query: String): String {
+        val escaped = query
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        return "%$escaped%"
+    }
+
     fun observeTodayTasks(userId: String): Flow<List<TaskEntity>> {
         val (startOfDay, endOfDay) = getTodayBounds()
         return taskDao.getTasksForDayFlow(userId, startOfDay, endOfDay)

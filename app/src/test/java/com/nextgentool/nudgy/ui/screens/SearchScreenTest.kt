@@ -1,13 +1,23 @@
 package com.nextgentool.nudgy.ui.screens
 
+import android.content.Context
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTextInput
+import androidx.lifecycle.ViewModelStore
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
+import com.nextgentool.nudgy.data.local.NudgyDatabase
+import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.ui.navigation.NudgyRoute
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
+import com.nextgentool.nudgy.ui.viewmodel.SearchViewModel
+import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -19,10 +29,15 @@ import org.robolectric.annotation.Config
  * plus the four grouped sections from the prototype (Tasks /
  * Schedules / Notes / Groups), each with an honest empty state.
  *
- * Render-only: no ViewModel, no repository, no navigation — the
- * screen owns only its query text (rememberSaveable) until steps
- * 2b/2c wire the Room LIKE queries. The route registration is
- * covered by the pure unit test below (fromRoute resolves "search").
+ * Step 2b — the Tasks section is wired to the real SearchViewModel
+ * (Room LIKE results). The screen takes an explicit ViewModel here —
+ * the default hiltViewModel() has no Hilt in a unit test. The
+ * ViewModel is built inside each test (never in setUp — the init
+ * coroutines need the test Main), lives in a ViewModelStore cleared
+ * BEFORE the database closes, and in-flight Room IO is drained first
+ * (S4-1 round 7). groupAuth is null, so the init launches nothing.
+ * Seeding uses runBlocking on the repository (the S6-3-proven shape:
+ * test thread + Dispatchers.IO, no viewModelScope, no Main pump).
  *
  * Harness rules, all proven in this repo — do NOT "fix" them:
  * - NO performScrollTo(): it hangs the test worker on this harness
@@ -32,6 +47,8 @@ import org.robolectric.annotation.Config
  * - Text is read the PlanScreenTest way: fetchSemanticsNode() is a
  *   rule MEMBER (not a top-level import) and the text is matched by
  *   containment on SemanticsProperties.Text.
+ * - waitForIdle() is safe here: the SearchScreen has no always-on
+ *   animation (unlike the sign-in mascot — ShellScreensTest KDoc).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -40,10 +57,32 @@ class SearchScreenTest {
     @get:Rule
     val composeRule = createComposeRule()
 
+    private lateinit var context: Context
+    private lateinit var db: NudgyDatabase
+    private lateinit var repository: TaskRepository
+    private val store = ViewModelStore()
+
+    @Before
+    fun setUp() {
+        context = ApplicationProvider.getApplicationContext()
+        db = Room.inMemoryDatabaseBuilder(context, NudgyDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        repository = TaskRepository(context, db)
+    }
+
+    @After
+    fun tearDown() {
+        store.clear()
+        Thread.sleep(500)
+        db.close()
+    }
+
     private fun setSearchContent() {
+        val viewModel = SearchViewModel(repository).also { store.put("search", it) }
         composeRule.setContent {
             NudgyTheme {
-                SearchScreen(onBackClick = {})
+                SearchScreen(viewModel = viewModel, onBackClick = {})
             }
         }
     }
@@ -78,8 +117,8 @@ class SearchScreenTest {
         setSearchContent()
 
         composeRule.onNodeWithTag("search_field").performTextInput("buy")
-        // No query logic exists yet (steps 2b/2c) — so every section
-        // honestly reports no results, and no invented row appears.
+        // The database is empty — so every section honestly reports
+        // no results, and no invented row appears.
         listOf("tasks", "schedules", "notes", "groups").forEach { group ->
             assertTrue(
                 "empty state for $group should report no results, was: " +
@@ -87,6 +126,36 @@ class SearchScreenTest {
                 nodeText("search_empty_$group").contains("No results")
             )
         }
+    }
+
+    @Test
+    fun `typing a matching query renders the task result row`() {
+        val task = runBlocking {
+            repository.createTask(
+                userId = repository.currentUserId(),
+                title = "Buy groceries",
+                description = "Weekly shop at the market"
+            )
+        }
+        setSearchContent()
+
+        composeRule.onNodeWithTag("search_field").performTextInput("buy")
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("search_result_task_${task.id}").assertExists()
+        assertTrue(
+            "result row should show the task title, was: " +
+                nodeText("search_result_task_${task.id}"),
+            nodeText("search_result_task_${task.id}").contains("Buy groceries")
+        )
+        // A real result replaces the Tasks empty state; the other
+        // three sections still report no results.
+        composeRule.onNodeWithTag("search_empty_tasks").assertDoesNotExist()
+        assertTrue(
+            "schedules empty state should report no results, was: " +
+                nodeText("search_empty_schedules"),
+            nodeText("search_empty_schedules").contains("No results")
+        )
     }
 
     @Test

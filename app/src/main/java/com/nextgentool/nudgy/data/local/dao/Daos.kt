@@ -194,6 +194,26 @@ interface TaskDao {
     /** Deleting a project orphans its tasks (projectId -> NULL); tasks are never deleted. */
     @Query("UPDATE tasks SET projectId = NULL, updatedAtEpochMillis = :now WHERE projectId = :projectId")
     suspend fun clearProjectFromTasks(projectId: String, now: Long)
+
+    // ---- Sprint 6-4 (step 2b, global search) ----
+    //
+    // One query for the Tasks section: title + description ("notes",
+    // spec Q5) + tag name. Tags are not a TaskEntity column — the tag
+    // match JOINs tags ⨝ task_tags. DISTINCT: a task with several
+    // matching tags must appear once. The LIKE pattern comes from
+    // TaskRepository (wildcards escaped) — see TaskRepository.likePattern.
+    // Query-only change: no schema change, no migration.
+    @Query(
+        "SELECT DISTINCT t.* FROM tasks t " +
+            "LEFT JOIN task_tags tt ON t.id = tt.taskId " +
+            "LEFT JOIN tags g ON g.id = tt.tagId " +
+            "WHERE t.userId = :userId " +
+            "AND (t.title LIKE :pattern ESCAPE '\\' COLLATE NOCASE " +
+            "OR t.description LIKE :pattern ESCAPE '\\' COLLATE NOCASE " +
+            "OR g.name LIKE :pattern ESCAPE '\\' COLLATE NOCASE) " +
+            "ORDER BY t.dueDateEpochMillis ASC"
+    )
+    fun searchTasksFlow(userId: String, pattern: String): Flow<List<TaskEntity>>
 }
 
 @Dao
