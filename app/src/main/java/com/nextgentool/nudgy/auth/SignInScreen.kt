@@ -2,10 +2,6 @@ package com.nextgentool.nudgy.auth
 
 import android.app.Activity
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -19,20 +15,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PersonOutline
-import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -44,15 +35,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -61,28 +49,20 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nextgentool.nudgy.R
-import com.nextgentool.nudgy.ui.components.MascotMood
 import com.nextgentool.nudgy.ui.components.NudgyLogoMark
-import com.nextgentool.nudgy.ui.components.NudgyMascot
 import com.nextgentool.nudgy.ui.theme.NudgyCanvas
 import com.nextgentool.nudgy.ui.theme.NudgyCard
 import com.nextgentool.nudgy.ui.theme.NudgyCardBorder
 import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
-import com.nextgentool.nudgy.ui.theme.NudgyLavender
-import com.nextgentool.nudgy.ui.theme.NudgyLavenderBorder
 import com.nextgentool.nudgy.ui.theme.NudgyMuted
-import com.nextgentool.nudgy.ui.theme.NudgyPeach
-import com.nextgentool.nudgy.ui.theme.NudgyPeachBorder
 import com.nextgentool.nudgy.ui.theme.NudgyPrimary
-import com.nextgentool.nudgy.ui.theme.NudgyPrimaryLight
-import com.nextgentool.nudgy.ui.theme.NudgySage
-import com.nextgentool.nudgy.ui.theme.NudgySageBorder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 
 /**
- * SignInScreen — "Warm Welcome" redesign.
- * Hero: large mascot on a soft coral glow with floating feature chips.
+ * SignInScreen — Sprint 7: the prototype sign-in hero.
+ * Hero: the cascade logo mark + "Welcome to Nudgy" + sub-copy —
+ * no mascot, no floating chips (Sprint 7 spec §3.1).
  * Actions live in a bottom sheet: Google sign-in (official style),
  * then a plain "Continue as Guest" button (no toggle switch).
  * Copy uses planner framing only — Nudgy is a daily planner.
@@ -107,22 +87,11 @@ fun SignInScreen(
         }
     }
 
-    // Staggered entrance: hero -> headline -> action sheet
+    // Staggered entrance: hero -> action sheet
     val heroAnim = remember { Animatable(0f) }
-    val textAnim = remember { Animatable(0f) }
     val sheetAnim = remember { Animatable(0f) }
     LaunchedEffect(Unit) { heroAnim.animateTo(1f, tween(550)) }
-    LaunchedEffect(Unit) { delay(130); textAnim.animateTo(1f, tween(550)) }
     LaunchedEffect(Unit) { delay(260); sheetAnim.animateTo(1f, tween(550)) }
-
-    // Gentle mascot bob
-    val bobTransition = rememberInfiniteTransition(label = "mascotBob")
-    val bob by bobTransition.animateFloat(
-        initialValue = -5f,
-        targetValue = 5f,
-        animationSpec = infiniteRepeatable(tween(2100), RepeatMode.Reverse),
-        label = "bob"
-    )
 
     Box(
         modifier = modifier
@@ -135,101 +104,34 @@ fun SignInScreen(
                 .statusBarsPadding()
         ) {
 
-            // ---------- HERO ----------
-            Box(
+            // ---------- HERO (Sprint 7: prototype sign-in, no mascot) ----------
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
+                    .padding(horizontal = 32.dp)
                     .graphicsLayer {
                         alpha = heroAnim.value
                         translationY = (1f - heroAnim.value) * 48f
                     },
-                contentAlignment = Alignment.Center
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
-                // Fixed stage so the chips hug the mascot on every screen size
-                Box(
-                    modifier = Modifier.size(330.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    // Soft coral glow behind the mascot
-                    Box(
-                        modifier = Modifier
-                            .size(320.dp)
-                            .clip(CircleShape)
-                            .background(
-                                Brush.radialGradient(
-                                    colors = listOf(
-                                        NudgyPrimaryLight.copy(alpha = 0.50f),
-                                        NudgyPeach,
-                                        NudgyCanvas.copy(alpha = 0f)
-                                    )
-                                )
-                            )
-                    )
-
-                    Box(modifier = Modifier.offset(y = bob.dp)) {
-                        NudgyMascot(
-                            size = 148.dp,
-                            mood = MascotMood.IDLE
-                        )
-                    }
-
-                    FloatingChip(
-                        icon = Icons.Default.NotificationsActive,
-                        label = "Reminders",
-                        container = NudgyPeach,
-                        border = NudgyPeachBorder,
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .offset(x = 0.dp, y = 34.dp)
-                    )
-                    FloatingChip(
-                        icon = Icons.Default.CalendarMonth,
-                        label = "Calendar",
-                        container = NudgyLavender,
-                        border = NudgyLavenderBorder,
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .offset(x = 0.dp, y = (-30).dp)
-                    )
-                    FloatingChip(
-                        icon = Icons.Default.Timer,
-                        label = "Focus time",
-                        container = NudgySage,
-                        border = NudgySageBorder,
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .offset(x = 14.dp, y = (-26).dp)
-                    )
-                }
-            }
-
-            // ---------- HEADLINE ----------
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 32.dp)
-                    .graphicsLayer {
-                        alpha = textAnim.value
-                        translationY = (1f - textAnim.value) * 48f
-                    },
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                NudgyLogoMark()
-                Spacer(modifier = Modifier.height(6.dp))
+                NudgyLogoMark(width = 72.dp, height = 32.dp)
+                Spacer(modifier = Modifier.height(14.dp))
                 Text(
-                    text = "Things Get Done.",
+                    text = "Welcome to Nudgy",
                     style = MaterialTheme.typography.displayMedium.copy(
-                        fontSize = 34.sp,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Black
                     ),
                     color = NudgyCharcoal,
                     textAlign = TextAlign.Center
                 )
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Your daily planner for tasks, reminders, and focus. Small nudges — and things get done.",
-                    style = MaterialTheme.typography.bodyLarge,
+                    text = "Sign in to sync your tasks across devices, or start as a guest — everything works offline.",
+                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 14.sp),
                     color = NudgyMuted,
                     textAlign = TextAlign.Center
                 )
@@ -428,41 +330,5 @@ fun SignInScreen(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
-    }
-}
-
-@Composable
-private fun FloatingChip(
-    icon: ImageVector,
-    label: String,
-    container: Color,
-    border: Color,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(100.dp),
-        color = container,
-        border = BorderStroke(1.dp, border),
-        shadowElevation = 2.dp
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = NudgyCharcoal,
-                modifier = Modifier.size(14.dp)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = label,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = NudgyCharcoal
-            )
-        }
     }
 }
