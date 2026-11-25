@@ -105,6 +105,12 @@ fun TodayScreen(
     // magnifier in the hero card's action row. Defaults to no-op so
     // older call sites keep compiling.
     onSearchClick: () -> Unit = {},
+    // Sprint 6-5 (step 3b) — the widget "+" quick-add: the NavHost
+    // passes the one-shot focus signal here; the QuickAddTask field
+    // focuses on entry and consumes it. Defaults to no-op so older
+    // call sites keep compiling.
+    focusQuickAdd: Boolean = false,
+    onFocusQuickAddConsumed: () -> Unit = {},
     // Sprint 1-1 fix: the Today quick-add (Feature 1) shares TasksViewModel
     // with TasksScreen — a separate instance scoped to this destination,
     // same singleton repository, so the guards (empty title, double-tap)
@@ -329,7 +335,9 @@ fun TodayScreen(
             lastCreatedTask = lastCreated?.task,
             onLastCreatedDue = { tasksViewModel.setLastCreatedDue(it) },
             onLastCreatedPriority = { tasksViewModel.setLastCreatedPriority(it) },
-            onDismissLastCreated = { tasksViewModel.clearLastCreated() }
+            onDismissLastCreated = { tasksViewModel.clearLastCreated() },
+            autofocus = focusQuickAdd,
+            onAutofocusConsumed = onFocusQuickAddConsumed
         )
         Spacer(modifier = Modifier.height(12.dp))
         // All tasks — directly under the quick-add, visible on first

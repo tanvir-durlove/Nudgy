@@ -8,6 +8,8 @@ import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.LocalContext
+import androidx.glance.action.ActionParameters
+import androidx.glance.action.actionParametersOf
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
@@ -38,9 +40,10 @@ import com.nextgentool.nudgy.domain.todayDateString
  *
  * Scaffold + agenda only (read-only display). The widget reads a
  * fresh snapshot on every [provideGlance] — no Glance state
- * definition, no update scheduling yet; that wiring (refresh +
- * quick-add) is steps 3b/3c. Tap anywhere opens the app (the plain
- * default — tap-to-task is step 3b).
+ * definition, no update scheduling yet; that wiring (refresh) is
+ * step 3c. Tap anywhere opens the app (the plain default); the "+"
+ * row opens the app's quick-add directly (step 3b) and tapping an
+ * agenda row to open that task is a later follow-up, not this step.
  *
  * Brand tokens from the approved design: teal #0F766E, coral
  * #F97360, on a white card. Completed tasks render struck through
@@ -69,6 +72,25 @@ private val WidgetInk = Color(0xFF1F1F1F)
 
 // Muted grey for secondary text + completed tasks.
 private val WidgetMuted = Color(0xFF757575)
+
+/**
+ * Sprint 6-5 (step 3b) — the widget "+" quick-add flag, as a Glance
+ * action-parameters key. The key's NAME is MainActivity's intent
+ * extra ([MainActivity.EXTRA_OPEN_QUICK_ADD]): Glance adds action
+ * parameters to the launched activity's intent keyed by the parameter
+ * key name string, so the "+" action and MainActivity agree on the
+ * name by construction, not by a duplicated string.
+ */
+val OpenQuickAddKey = ActionParameters.Key<Boolean>(MainActivity.EXTRA_OPEN_QUICK_ADD)
+
+/**
+ * Sprint 6-5 (step 3b) — the parameters the widget "+" attaches to
+ * its launch action: a single true flag under [OpenQuickAddKey].
+ * Pure (no Context, no Glance rendering), so it is unit-testable —
+ * see WidgetQuickAddTest.
+ */
+fun quickAddActionParameters(): ActionParameters =
+    actionParametersOf(OpenQuickAddKey to true)
 
 class TodayWidget : GlanceAppWidget() {
 
@@ -182,6 +204,38 @@ private fun TodayWidgetContent(items: List<TodayWidgetItem>) {
                     )
                 )
             }
+        }
+        // Sprint 6-5 (step 3b) — the "+" quick-add: opens the app on
+        // the Today screen with the quick-add field focused (keyboard
+        // up), via the launch action's parameters (see
+        // [quickAddActionParameters]). This clickable nests inside
+        // the column's own open-the-app clickable — the innermost
+        // clickable wins for its bounds, so a tap here takes the
+        // quick-add path and a tap anywhere else takes the plain
+        // path. The nested-click routing is NOT provable on this
+        // harness (no Glance test infra) — the batch-end device test
+        // covers it.
+        Row(
+            modifier = GlanceModifier.fillMaxWidth().padding(top = 12.dp)
+                .clickable(actionStartActivity<MainActivity>(quickAddActionParameters())),
+            verticalAlignment = Alignment.Vertical.CenterVertically
+        ) {
+            Text(
+                text = "+",
+                style = TextStyle(
+                    color = ColorProvider(WidgetTeal),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            )
+            Spacer(modifier = GlanceModifier.width(8.dp))
+            Text(
+                text = context.getString(R.string.widget_today_add_task),
+                style = TextStyle(
+                    color = ColorProvider(WidgetTeal),
+                    fontSize = 14.sp
+                )
+            )
         }
     }
 }
