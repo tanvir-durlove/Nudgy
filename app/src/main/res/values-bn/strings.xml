@@ -39,6 +39,23 @@
     <string name="settings_section_weekly_review">সাপ্তাহিক পর্যালোচনা</string>
     <string name="settings_section_onboarding">টিউটোরিয়াল</string>
     <string name="settings_section_onboarding_sub">প্রথমবারের পরিচয় আবার দেখো</string>
+    <!-- Sprint 6-6 (step 4d) — app lock + backup & restore (spec §2 Q6/Q7, §8) -->
+    <string name="settings_section_app_lock">অ্যাপ লক</string>
+    <string name="settings_section_app_lock_sub">অ্যাপ খুলতে বায়োমেট্রিক বা PIN</string>
+    <string name="settings_app_lock_on_sub">লক আছে — ফিঙ্গারপ্রিন্ট, মুখ বা ডিভাইসের PIN</string>
+    <string name="settings_app_lock_off_sub">বন্ধ — যাচাই ছাড়াই ডেটা খোলে</string>
+    <string name="settings_app_lock_unavailable">এই ডিভাইসে ফিঙ্গারপ্রিন্ট, মুখ বা PIN সেট করা নেই</string>
+    <string name="settings_section_data">ব্যাকআপ ও রিস্টোর</string>
+    <string name="settings_section_data_sub">ফাইল হিসেবে ডেটা এক্সপোর্ট বা রিস্টোর করো</string>
+    <string name="settings_export_title">আমার ডেটা এক্সপোর্ট করো</string>
+    <string name="settings_export_sub">টাস্ক, শিডিউল আর স্মৃতি JSON ফাইল হিসেবে সেভ করো</string>
+    <string name="settings_restore_title">ফাইল থেকে রিস্টোর করো</string>
+    <string name="settings_restore_sub">Nudgy এক্সপোর্ট ফাইল মার্জ করো — ডুপ্লিকেট নয়</string>
+    <string name="settings_export_done">এক্সপোর্ট সেভ হয়েছে</string>
+    <string name="settings_export_failed">এক্সপোর্ট হয়নি</string>
+    <string name="settings_restore_done">%1$dটি নতুন রিস্টোর হয়েছে, %2$dটি আগেই ছিল</string>
+    <string name="settings_restore_not_export">এই ফাইলটা Nudgy এক্সপোর্ট নয়</string>
+    <string name="settings_restore_failed">ফাইলটা পড়া যায়নি</string>
 
     <!-- Sprint 6-3 — onboarding tutorial + sample tasks (spec §6) -->
     <string name="sample_chip">নমুনা</string>

@@ -40,6 +40,23 @@
     <string name="settings_section_weekly_review">Weekly review</string>
     <string name="settings_section_onboarding">Tutorial</string>
     <string name="settings_section_onboarding_sub">See the first-run tutorial again</string>
+    <!-- Sprint 6-6 (step 4d) — app lock + backup & restore (spec §2 Q6/Q7, §8) -->
+    <string name="settings_section_app_lock">App lock</string>
+    <string name="settings_section_app_lock_sub">Biometric or PIN to open the app</string>
+    <string name="settings_app_lock_on_sub">Locked — fingerprint, face or device PIN</string>
+    <string name="settings_app_lock_off_sub">Off — your data opens without a check</string>
+    <string name="settings_app_lock_unavailable">No fingerprint, face or PIN is set up on this device</string>
+    <string name="settings_section_data">Backup &amp; restore</string>
+    <string name="settings_section_data_sub">Export or restore your data as a file</string>
+    <string name="settings_export_title">Export my data</string>
+    <string name="settings_export_sub">Save tasks, schedules and memories as a JSON file</string>
+    <string name="settings_restore_title">Restore from a file</string>
+    <string name="settings_restore_sub">Merge a Nudgy export file — no duplicates</string>
+    <string name="settings_export_done">Export saved</string>
+    <string name="settings_export_failed">Export failed</string>
+    <string name="settings_restore_done">Restored %1$d new, %2$d already there</string>
+    <string name="settings_restore_not_export">That file is not a Nudgy export</string>
+    <string name="settings_restore_failed">Couldn\'t read that file</string>
 
     <!-- Sprint 6-3 — onboarding tutorial + sample tasks (spec §6) -->
     <string name="sample_chip">Sample</string>
