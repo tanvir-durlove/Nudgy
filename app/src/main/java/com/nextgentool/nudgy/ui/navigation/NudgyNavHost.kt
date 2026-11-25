@@ -69,6 +69,7 @@ import com.nextgentool.nudgy.ui.screens.HELP_FEEDBACK_EMAIL
 import com.nextgentool.nudgy.ui.screens.OnboardingScreen
 import com.nextgentool.nudgy.ui.screens.PRIVACY_POLICY_URL
 import com.nextgentool.nudgy.ui.screens.PlanScreen
+import com.nextgentool.nudgy.ui.screens.PrivacyPolicyScreen
 import com.nextgentool.nudgy.ui.screens.SearchScreen
 import com.nextgentool.nudgy.ui.screens.SettingsShell
 import com.nextgentool.nudgy.ui.screens.TasksScreen
@@ -471,6 +472,23 @@ fun NudgyNavHost(
                 }
             )
         }
+        // Step 5b — Privacy Policy as an in-app screen (polish
+        // item 2): the Settings privacy row navigates here instead
+        // of opening the browser. NOT a bottom destination (see
+        // NudgyRoute.all). Back pops to Settings; the footer row
+        // opens the hosted page in the browser as the canonical
+        // reference.
+        composable(NudgyRoute.PrivacyPolicy.route) {
+            val privacyContext = LocalContext.current
+            PrivacyPolicyScreen(
+                onBackClick = { navController.popBackStack() },
+                onWebClick = {
+                    privacyContext.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_POLICY_URL))
+                    )
+                },
+            )
+        }
         // Sprint 2-1 — Calendar is wired: the real screen on the
         // CalendarViewModel (Hilt). The route owns the permission
         // launcher; the ViewModel owns sync triggers and state. The
@@ -829,10 +847,11 @@ fun NudgyNavHost(
                 onCalendarSyncClick = { viewModel.syncCalendarNow() },
                 onSaveByokKey = { key -> viewModel.saveByokKey(key) },
                 onResetByokKey = { viewModel.resetByokKey() },
+                // Step 5b — the privacy row opens the in-app
+                // screen now (the hosted page stays reachable from
+                // the screen's footer row as the canonical reference).
                 onPrivacyClick = {
-                    context.startActivity(
-                        Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_POLICY_URL))
-                    )
+                    navController.navigate(NudgyRoute.PrivacyPolicy.route)
                 },
                 onHelpFeedbackClick = {
                     val mailIntent = Intent(
