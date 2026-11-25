@@ -107,6 +107,21 @@
             </intent-filter>
         </receiver>
 
+        <!-- Sprint 6-5 (step 3a) — the Today widget (Glance): one
+             widget, today's planned tasks, read from Room. Exported:
+             the system delivers APPWIDGET_UPDATE broadcasts to it. -->
+        <receiver
+            android:name=".widget.TodayWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_today_title">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/today_widget_info" />
+        </receiver>
+
         <!-- Sprint 1-4 — FileProvider for attachment opening (Feature 10).
              Files live in app-private storage (files/attachments/), so
              another app can only open one through a content Uri with a
