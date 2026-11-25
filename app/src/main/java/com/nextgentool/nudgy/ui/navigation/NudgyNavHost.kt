@@ -52,6 +52,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.navigation
 import androidx.navigation.compose.rememberNavController
 import com.nextgentool.nudgy.R
+import com.nextgentool.nudgy.domain.startOfDayMillis
 import com.nextgentool.nudgy.intent.IncomingIntent
 import com.nextgentool.nudgy.settings.AppLocale
 import com.nextgentool.nudgy.settings.SettingsPreferences
@@ -285,6 +286,15 @@ fun NudgyNavHost(
     // deep-link above. The Tasks destination selects the task and
     // consumes the id (below); the NavHost never clears it itself.
     var searchOpenTaskId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Sprint 6-4 (step 2f) — a search tap on a schedule opens that
+    // event's edit dialog: the same state pattern as the task
+    // deep-link above. The id alone is not enough — the Calendar
+    // list is day-scoped, so the event's day travels with it (the
+    // screen jumps the strip to that day, then selects the event
+    // once the day's list emits). Both are cleared when the
+    // Calendar destination consumes them (below).
+    var searchOpenEventId by rememberSaveable { mutableStateOf<String?>(null) }
+    var searchOpenEventDayMillis by rememberSaveable { mutableStateOf<Long?>(null) }
     NavHost(
         navController = navController,
         startDestination = TODAY_GRAPH_ROUTE,
@@ -363,12 +373,14 @@ fun NudgyNavHost(
         // it on entry, through the same state pattern as the group
         // deep-link below — there is no task-detail route (the sheet
         // lives in TasksScreen behind TasksViewModel.selectTask).
-        // Tap on a schedule result navigates to the Calendar screen
-        // the same way (a deep-link to one exact event is a
-        // follow-up, separate from the task deep-link). Tap on a
-        // group result opens that group's detail through the S5-3
-        // openGroupId mechanism (set here, consumed by the Groups
-        // destination). NOT a bottom destination (see NudgyRoute.all).
+        // Tap on a schedule result opens that event's edit dialog
+        // (step 2f): the id + the event's day are set here and the
+        // Calendar destination jumps to that day and selects the
+        // event once the day's list emits, through the same state
+        // pattern. Tap on a group result opens that group's detail
+        // through the S5-3 openGroupId mechanism (set here, consumed
+        // by the Groups destination). NOT a bottom destination (see
+        // NudgyRoute.all).
         composable(NudgyRoute.Search.route) {
             SearchScreen(
                 onBackClick = { navController.popBackStack() },
@@ -376,7 +388,11 @@ fun NudgyNavHost(
                     searchOpenTaskId = task.id
                     navController.navigate(NudgyRoute.Tasks.route)
                 },
-                onScheduleClick = { navigateTo(navController, NudgyRoute.Calendar) },
+                onScheduleClick = { event ->
+                    searchOpenEventId = event.id
+                    searchOpenEventDayMillis = startOfDayMillis(event.startEpochMillis)
+                    navigateTo(navController, NudgyRoute.Calendar)
+                },
                 onGroupClick = { group ->
                     searchOpenGroupId = group.groupId
                     navigateTo(navController, NudgyRoute.Groups)
@@ -440,7 +456,17 @@ fun NudgyNavHost(
                 pendingDateLink = pendingDateLink,
                 onDateLinkConsumed = onDateLinkConsumed,
                 pendingInsertEvent = pendingInsertEvent,
-                onInsertEventConsumed = onInsertEventConsumed
+                onInsertEventConsumed = onInsertEventConsumed,
+                // Sprint 6-4 (step 2f) — search deep-link: the id +
+                // day a search tap set (above) opens that event's
+                // edit dialog on entry; CalendarScreen consumes
+                // them once.
+                openEventId = searchOpenEventId,
+                openEventDayMillis = searchOpenEventDayMillis,
+                onOpenEventIdConsumed = {
+                    searchOpenEventId = null
+                    searchOpenEventDayMillis = null
+                }
             )
         }
         // Sprint 3-0 — Chat is wired: the real ChatScreen on the

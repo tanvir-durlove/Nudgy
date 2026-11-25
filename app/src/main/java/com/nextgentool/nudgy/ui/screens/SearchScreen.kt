@@ -59,12 +59,15 @@ import com.nextgentool.nudgy.ui.viewmodel.SearchViewModel
  * the calendar_events LIKE results (title / location), Notes shows
  * the description hits of the same task search as their own group,
  * and Groups shows the groups whose name matches. Tap on a schedule
- * row calls [onScheduleClick] (the NavHost navigates to the Calendar
- * screen); tap on a note row calls [onTaskClick] (the note IS its
+ * row calls [onScheduleClick] — the NavHost opens that event's edit
+ * dialog (step 2f): the id + the event's day are set on the NavHost's
+ * searchOpenEventId / searchOpenEventDayMillis state and the Calendar
+ * destination jumps to that day and selects the event once the day's
+ * list emits (CalendarScreen's day-scoped list needs the day, not
+ * just the id); tap on a note row calls [onTaskClick] (the note IS its
  * task, so it opens that task's sheet too); tap on a group row calls
  * [onGroupClick] (the NavHost opens that group's detail through the
- * S5-3 openGroupId mechanism). A deep-link to one exact calendar
- * event is still a follow-up, separate from the task deep-link.
+ * S5-3 openGroupId mechanism).
  *
  * The four groups follow the prototype's Search screen (Tasks /
  * Schedules / Notes / Groups). Notes here means task notes and
