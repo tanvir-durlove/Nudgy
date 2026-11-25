@@ -646,6 +646,34 @@ class CalendarRepository(
     }
 
     /**
+     * Sprint 6-6 (step 4c) — restore schedules from an export:
+     * id-merge, same rule as [TaskRepository.restoreTasks]: an id
+     * already present is skipped, only missing ids are inserted.
+     *
+     * Local-only, deliberately: unlike [addEvent] this does NOT
+     * export to Google Calendar and does NOT sync to Firestore —
+     * the rows are the user's own data coming back, and re-exporting
+     * them would duplicate the user's Google calendar entries and
+     * cloud rows. The stored googleCalendarEventId /
+     * isFromGoogleCalendar values are restored as-is, so the next
+     * sync heals the link.
+     */
+    suspend fun restoreEvents(events: List<CalendarEventEntity>): RestoreCounts =
+        withContext(Dispatchers.IO) {
+            var inserted = 0
+            var skipped = 0
+            for (event in events) {
+                if (calendarDao.getEventById(event.id) != null) {
+                    skipped++
+                    continue
+                }
+                calendarDao.insertEvent(event)
+                inserted++
+            }
+            RestoreCounts(inserted = inserted, skipped = skipped)
+        }
+
+    /**
      * Sprint 2-1 (Q8(a)) — edits a local event and pushes the edit to
      * Google Calendar by provider id.
      *

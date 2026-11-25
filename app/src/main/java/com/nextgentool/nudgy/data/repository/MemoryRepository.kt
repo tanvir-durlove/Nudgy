@@ -41,6 +41,30 @@ class MemoryRepository(
         syncMemoryToFirestore(userId, memory)
     }
 
+    /**
+     * Sprint 6-6 (step 4c) — restore memories from an export:
+     * id-merge, same rule as [TaskRepository.restoreTasks]: an id
+     * already present is skipped, only missing ids are inserted.
+     *
+     * Local-only, deliberately: unlike [addMemory] this does NOT
+     * sync to Firestore — the rows are the user's own data coming
+     * back, and re-syncing would duplicate the cloud rows.
+     */
+    suspend fun restoreMemories(memories: List<NudgyMemoryEntity>): RestoreCounts =
+        withContext(Dispatchers.IO) {
+            var inserted = 0
+            var skipped = 0
+            for (memory in memories) {
+                if (memoryDao.getMemoryById(memory.id) != null) {
+                    skipped++
+                    continue
+                }
+                memoryDao.insertMemory(memory)
+                inserted++
+            }
+            RestoreCounts(inserted = inserted, skipped = skipped)
+        }
+
     suspend fun deleteMemory(userId: String, memoryId: String) = withContext(Dispatchers.IO) {
         memoryDao.deleteMemoryByIdForUser(userId, memoryId)
         deleteMemoryFromFirestore(userId, memoryId)
