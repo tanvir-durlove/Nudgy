@@ -36,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -105,9 +106,28 @@ fun TasksScreen(
     onNavigateToTemplates: () -> Unit = {},
     // Sprint 3-5 — break the open task down (feature 20): the detail
     // sheet's button hands the task id to the chat's startSplit.
-    onSplitTask: (String) -> Unit = {}
+    onSplitTask: (String) -> Unit = {},
+    // Sprint 6-4 (step 2e) — search deep-link: the id of the task a
+    // search tap opened. Defaults to null so ordinary entries (Today,
+    // bottom nav) keep the list with no sheet. Consumed once by the
+    // LaunchedEffect below, same state pattern as GroupsScreen's
+    // openGroupId (S5-3).
+    openTaskId: String? = null,
+    onOpenTaskIdConsumed: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    // Sprint 6-4 (step 2e) — open the deep-linked task's detail
+    // sheet on entry. selectTask is a plain StateFlow set (no
+    // viewModelScope launch), so calling it here is safe; the sheet
+    // appears once the task list loads because selectedDetail
+    // derives from allTasks (unfiltered), so a task hidden by the
+    // current filter still opens. A stale id selects nothing.
+    LaunchedEffect(openTaskId) {
+        if (openTaskId != null) {
+            viewModel.selectTask(openTaskId)
+            onOpenTaskIdConsumed()
+        }
+    }
     var showSaveViewDialog by remember { mutableStateOf(false) }
     var saveViewName by remember { mutableStateOf("") }
     // Sprint 1-4 — List / Board toggle (Feature 5). Local UI state only.

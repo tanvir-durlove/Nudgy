@@ -48,10 +48,12 @@ import com.nextgentool.nudgy.ui.viewmodel.SearchViewModel
  * Step 2b — the Tasks section is wired to real data: the query lives
  * in the SearchViewModel and the Tasks group shows the Room LIKE
  * results (title / description / tag name). Tap on a task row calls
- * [onTaskClick] — the NavHost navigates to the Tasks screen, the
- * task's home. There is no task-detail route: the detail sheet lives
- * in TasksScreen behind TasksViewModel.selectTask, so a deep-link to
- * one task's sheet is a follow-up, not this step.
+ * [onTaskClick] — the NavHost opens that task's detail sheet (step
+ * 2e): the id is set on the NavHost's searchOpenTaskId state and the
+ * Tasks destination selects it on entry (TasksViewModel.selectTask).
+ * There is no task-detail route: the detail sheet lives in TasksScreen
+ * behind TasksViewModel.selectTask, so the deep-link uses the same
+ * state pattern as the group deep-link, not a route argument.
  *
  * Step 2c — the other three sections are wired too: Schedules shows
  * the calendar_events LIKE results (title / location), Notes shows
@@ -59,10 +61,10 @@ import com.nextgentool.nudgy.ui.viewmodel.SearchViewModel
  * and Groups shows the groups whose name matches. Tap on a schedule
  * row calls [onScheduleClick] (the NavHost navigates to the Calendar
  * screen); tap on a note row calls [onTaskClick] (the note IS its
- * task); tap on a group row calls [onGroupClick] (the NavHost opens
- * that group's detail through the S5-3 openGroupId mechanism). A
- * deep-link to one exact calendar event is a follow-up, same as the
- * task deep-link.
+ * task, so it opens that task's sheet too); tap on a group row calls
+ * [onGroupClick] (the NavHost opens that group's detail through the
+ * S5-3 openGroupId mechanism). A deep-link to one exact calendar
+ * event is still a follow-up, separate from the task deep-link.
  *
  * The four groups follow the prototype's Search screen (Tasks /
  * Schedules / Notes / Groups). Notes here means task notes and
