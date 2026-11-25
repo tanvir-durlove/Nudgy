@@ -63,6 +63,7 @@ import com.nextgentool.nudgy.ui.screens.HELP_FEEDBACK_EMAIL
 import com.nextgentool.nudgy.ui.screens.OnboardingScreen
 import com.nextgentool.nudgy.ui.screens.PRIVACY_POLICY_URL
 import com.nextgentool.nudgy.ui.screens.PlanScreen
+import com.nextgentool.nudgy.ui.screens.SearchScreen
 import com.nextgentool.nudgy.ui.screens.SettingsShell
 import com.nextgentool.nudgy.ui.screens.TasksScreen
 import com.nextgentool.nudgy.ui.screens.TemplatesScreen
@@ -333,6 +334,14 @@ fun NudgyNavHost(
         // Sprint 1-4 — Templates. NOT a bottom destination either.
         composable(NudgyRoute.Templates.route) {
             TemplatesScreen(onBack = { navController.popBackStack() })
+        }
+        // Sprint 6-4 — Global search (S6-4, step 2a): UI shell +
+        // navigation only. The query lives in the screen
+        // (rememberSaveable) until steps 2b/2c lift it into a
+        // SearchViewModel with the Room LIKE queries. NOT a bottom
+        // destination (see NudgyRoute.all).
+        composable(NudgyRoute.Search.route) {
+            SearchScreen(onBackClick = { navController.popBackStack() })
         }
         // Sprint 2-1 — Calendar is wired: the real screen on the
         // CalendarViewModel (Hilt). The route owns the permission
