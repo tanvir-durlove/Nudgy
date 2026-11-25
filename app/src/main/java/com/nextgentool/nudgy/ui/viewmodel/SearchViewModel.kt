@@ -5,7 +5,11 @@ import androidx.lifecycle.viewModelScope
 import com.nextgentool.nudgy.auth.AuthManager
 import com.nextgentool.nudgy.auth.GroupAuth
 import com.nextgentool.nudgy.auth.NudgyUser
+import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
+import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
+import com.nextgentool.nudgy.data.repository.CalendarRepository
+import com.nextgentool.nudgy.data.repository.GroupRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -35,6 +39,16 @@ import kotlinx.coroutines.launch
  * grouped result — "notes" means task notes/descriptions, spec Q5).
  * Schedules, Notes-as-own-section and Groups land in step 2c.
  *
+ * Step 2c — the remaining three groups are wired: schedules (the
+ * calendar_events LIKE query), notes (description hits of the same
+ * task search, as their own group) and groups (name filter over
+ * GroupRepository.observeGroups()). Tap targets: a schedule goes to
+ * the Calendar screen; a note goes to its task (same as the Tasks
+ * group); a group opens that group's detail through the S5-3
+ * openGroupId mechanism (the NavHost sets it from the search tap).
+ * A deep-link to one exact calendar event is a follow-up, same as
+ * the task deep-link from step 2b.
+ *
  * Live user (Sprint 5 fix round 4 — TasksViewModel pattern): the
  * fallback is the TaskRepository-derived user; the auth flow overrides
  * it the moment it emits a signed-in user. groupAuth is nullable with
@@ -45,7 +59,13 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class SearchViewModel @Inject constructor(
     private val repository: TaskRepository,
-    private val groupAuth: GroupAuth? = null
+    private val groupAuth: GroupAuth? = null,
+    // Step 2c — the schedule + group sources. Nullable with a
+    // default on purpose, same pattern as groupAuth (Hilt always
+    // injects the real repositories in production; tests that only
+    // cover tasks pass nothing and those flows stay empty).
+    private val calendarRepository: CalendarRepository? = null,
+    private val groupRepository: GroupRepository? = null
 ) : ViewModel() {
 
     private val fallbackUser: NudgyUser = run {
@@ -74,6 +94,38 @@ class SearchViewModel @Inject constructor(
                 if (query.isBlank()) flowOf(emptyList())
                 else repository.searchTasks(uid, query)
             }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Calendar events matching the query; empty while the query is blank (or with no calendar source). */
+    val scheduleResults: StateFlow<List<CalendarEventEntity>> =
+        combine(_query, userFlow) { query, user -> query to user.uid }
+            .flatMapLatest { (query, uid) ->
+                if (query.isBlank()) flowOf(emptyList())
+                else calendarRepository?.searchEvents(uid, query) ?: flowOf(emptyList())
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /**
+     * Step 2c — the Notes group: tasks whose DESCRIPTION matches the
+     * query, as their own group (spec Q5: notes = task notes /
+     * descriptions, NOT Memories text — the Tasks group already
+     * searches descriptions, this filters the same LIKE results to
+     * description hits only). The contains check is literal (no LIKE
+     * wildcards), so it agrees with the escaped SQL match.
+     */
+    val noteResults: StateFlow<List<TaskEntity>> =
+        combine(taskResults, _query) { tasks, query ->
+            if (query.isBlank()) emptyList()
+            else tasks.filter { it.description?.contains(query, ignoreCase = true) == true }
+        }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Groups whose name matches the query; empty while the query is blank (or with no group source). */
+    val groupResults: StateFlow<List<GroupEntity>> =
+        combine(_query, groupRepository?.observeGroups() ?: flowOf(emptyList())) { query, groups ->
+            if (query.isBlank()) emptyList()
+            else groups.filter { it.name.contains(query, ignoreCase = true) }
+        }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {

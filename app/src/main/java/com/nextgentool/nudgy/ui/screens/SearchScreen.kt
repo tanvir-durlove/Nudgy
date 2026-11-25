@@ -34,6 +34,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.nextgentool.nudgy.R
+import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
+import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.ui.theme.NudgyMuted
 import com.nextgentool.nudgy.ui.viewmodel.SearchViewModel
@@ -49,9 +51,18 @@ import com.nextgentool.nudgy.ui.viewmodel.SearchViewModel
  * [onTaskClick] — the NavHost navigates to the Tasks screen, the
  * task's home. There is no task-detail route: the detail sheet lives
  * in TasksScreen behind TasksViewModel.selectTask, so a deep-link to
- * one task's sheet is a follow-up, not this step. The other three
- * sections (Schedules / Notes / Groups) still show honest empty
- * states until step 2c wires them.
+ * one task's sheet is a follow-up, not this step.
+ *
+ * Step 2c — the other three sections are wired too: Schedules shows
+ * the calendar_events LIKE results (title / location), Notes shows
+ * the description hits of the same task search as their own group,
+ * and Groups shows the groups whose name matches. Tap on a schedule
+ * row calls [onScheduleClick] (the NavHost navigates to the Calendar
+ * screen); tap on a note row calls [onTaskClick] (the note IS its
+ * task); tap on a group row calls [onGroupClick] (the NavHost opens
+ * that group's detail through the S5-3 openGroupId mechanism). A
+ * deep-link to one exact calendar event is a follow-up, same as the
+ * task deep-link.
  *
  * The four groups follow the prototype's Search screen (Tasks /
  * Schedules / Notes / Groups). Notes here means task notes and
@@ -73,10 +84,15 @@ import com.nextgentool.nudgy.ui.viewmodel.SearchViewModel
 fun SearchScreen(
     viewModel: SearchViewModel = hiltViewModel(),
     onBackClick: () -> Unit,
-    onTaskClick: (TaskEntity) -> Unit = {}
+    onTaskClick: (TaskEntity) -> Unit = {},
+    onScheduleClick: (CalendarEventEntity) -> Unit = {},
+    onGroupClick: (GroupEntity) -> Unit = {}
 ) {
     val query by viewModel.query.collectAsState()
     val taskResults by viewModel.taskResults.collectAsState()
+    val scheduleResults by viewModel.scheduleResults.collectAsState()
+    val noteResults by viewModel.noteResults.collectAsState()
+    val groupResults by viewModel.groupResults.collectAsState()
     Scaffold(
         modifier = Modifier.testTag("search_screen"),
         topBar = {
@@ -111,16 +127,14 @@ fun SearchScreen(
             )
             Spacer(modifier = Modifier.height(16.dp))
             // Empty query: "type to search". A non-blank query with no
-            // matches: "no results" (the Tasks group is live since
-            // step 2b; the other groups still show it until step 2c
-            // wires them).
+            // matches: "no results" (every group is live since step
+            // 2c; a group with no matches still shows it).
             val emptyText = if (query.isBlank()) {
                 stringResource(R.string.search_type_to_search)
             } else {
                 stringResource(R.string.search_no_results)
             }
-            // Step 2b — the Tasks section is live (Room LIKE results);
-            // the other three sections stay empty until step 2c.
+            // Step 2b — the Tasks section is live (Room LIKE results).
             SearchTaskSection(
                 tasks = taskResults,
                 query = query,
@@ -128,25 +142,31 @@ fun SearchScreen(
                 onTaskClick = onTaskClick
             )
             Spacer(modifier = Modifier.height(20.dp))
-            SearchSection(
-                title = stringResource(R.string.search_section_schedules),
-                sectionTag = "search_section_schedules",
-                emptyTag = "search_empty_schedules",
-                emptyText = emptyText
+            // Step 2c — the Schedules section is live (calendar_events
+            // LIKE results).
+            SearchScheduleSection(
+                events = scheduleResults,
+                query = query,
+                emptyText = emptyText,
+                onScheduleClick = onScheduleClick
             )
             Spacer(modifier = Modifier.height(20.dp))
-            SearchSection(
-                title = stringResource(R.string.search_section_notes),
-                sectionTag = "search_section_notes",
-                emptyTag = "search_empty_notes",
-                emptyText = emptyText
+            // Step 2c — the Notes section is live (description hits of
+            // the task search, as their own group).
+            SearchNoteSection(
+                tasks = noteResults,
+                query = query,
+                emptyText = emptyText,
+                onTaskClick = onTaskClick
             )
             Spacer(modifier = Modifier.height(20.dp))
-            SearchSection(
-                title = stringResource(R.string.search_section_groups),
-                sectionTag = "search_section_groups",
-                emptyTag = "search_empty_groups",
-                emptyText = emptyText
+            // Step 2c — the Groups section is live (name filter over
+            // the observed groups).
+            SearchGroupSection(
+                groups = groupResults,
+                query = query,
+                emptyText = emptyText,
+                onGroupClick = onGroupClick
             )
         }
     }
@@ -222,26 +242,30 @@ private fun SearchTaskSection(
 }
 
 /**
- * One grouped result section: an uppercase, letter-spaced header in
- * the prototype's .searchgroup style, then the section's content —
- * for now only its honest empty state (step 2c puts real result rows
- * here). The header and the empty text carry their own testTags
- * (OUTSIDE any clickable row, so clickable-merging cannot hide them).
+ * Sprint 6-4, step 2c — the Schedules group, wired to real data: the
+ * calendar_events LIKE results (title / location). Same shape as the
+ * Tasks group: blank query or no matches show the honest empty
+ * state, with the same testTags the shell used
+ * (search_section_schedules, search_empty_schedules). A result row
+ * is one clickable Row carrying its own testTag
+ * (search_result_schedule_<id>) ON the clickable — a testTag inside
+ * a clickable row is invisible in the merged semantics tree, so the
+ * tag must live on the clickable itself, never on a child.
  */
 @Composable
-private fun SearchSection(
-    title: String,
-    sectionTag: String,
-    emptyTag: String,
-    emptyText: String
+private fun SearchScheduleSection(
+    events: List<CalendarEventEntity>,
+    query: String,
+    emptyText: String,
+    onScheduleClick: (CalendarEventEntity) -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .testTag(sectionTag)
+            .testTag("search_section_schedules")
     ) {
         Text(
-            text = title.uppercase(),
+            text = stringResource(R.string.search_section_schedules).uppercase(),
             style = MaterialTheme.typography.labelMedium.copy(
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.5.sp
@@ -249,11 +273,163 @@ private fun SearchSection(
             color = NudgyMuted
         )
         Spacer(modifier = Modifier.height(8.dp))
+        if (query.isBlank() || events.isEmpty()) {
+            Text(
+                text = emptyText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = NudgyMuted,
+                modifier = Modifier.testTag("search_empty_schedules")
+            )
+        } else {
+            events.forEach { event ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onScheduleClick(event) }
+                        .testTag("search_result_schedule_${event.id}")
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = event.title,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        event.locationOrLink?.takeIf { it.isNotBlank() }?.let { location ->
+                            Text(
+                                text = location,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = NudgyMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Sprint 6-4, step 2c — the Notes group: tasks whose DESCRIPTION
+ * matches the query, as their own group (spec Q5: notes = task notes
+ * / descriptions, NOT Memories text). Same shape as the Tasks group,
+ * with its own testTags (search_section_notes, search_empty_notes,
+ * search_result_note_<id> on the clickable Row). Tap goes to the
+ * task itself — the note IS its task.
+ */
+@Composable
+private fun SearchNoteSection(
+    tasks: List<TaskEntity>,
+    query: String,
+    emptyText: String,
+    onTaskClick: (TaskEntity) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("search_section_notes")
+    ) {
         Text(
-            text = emptyText,
-            style = MaterialTheme.typography.bodyMedium,
-            color = NudgyMuted,
-            modifier = Modifier.testTag(emptyTag)
+            text = stringResource(R.string.search_section_notes).uppercase(),
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.5.sp
+            ),
+            color = NudgyMuted
         )
+        Spacer(modifier = Modifier.height(8.dp))
+        if (query.isBlank() || tasks.isEmpty()) {
+            Text(
+                text = emptyText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = NudgyMuted,
+                modifier = Modifier.testTag("search_empty_notes")
+            )
+        } else {
+            tasks.forEach { task ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onTaskClick(task) }
+                        .testTag("search_result_note_${task.id}")
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = task.title,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        task.description?.takeIf { it.isNotBlank() }?.let { description ->
+                            Text(
+                                text = description,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = NudgyMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Sprint 6-4, step 2c — the Groups group: groups whose name matches
+ * the query (name filter over the observed groups). Same shape as
+ * the Tasks group, with its own testTags (search_section_groups,
+ * search_empty_groups, search_result_group_<groupId> on the
+ * clickable Row). Tap opens that group's detail (the NavHost sets
+ * the S5-3 openGroupId from the search tap).
+ */
+@Composable
+private fun SearchGroupSection(
+    groups: List<GroupEntity>,
+    query: String,
+    emptyText: String,
+    onGroupClick: (GroupEntity) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("search_section_groups")
+    ) {
+        Text(
+            text = stringResource(R.string.search_section_groups).uppercase(),
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.5.sp
+            ),
+            color = NudgyMuted
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        if (query.isBlank() || groups.isEmpty()) {
+            Text(
+                text = emptyText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = NudgyMuted,
+                modifier = Modifier.testTag("search_empty_groups")
+            )
+        } else {
+            groups.forEach { group ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onGroupClick(group) }
+                        .testTag("search_result_group_${group.groupId}")
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = group.name,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
+            }
+        }
     }
 }
