@@ -156,6 +156,18 @@ fun CalendarScreen(
     onDateLinkConsumed: () -> Unit = {},
     pendingInsertEvent: IncomingIntent.InsertEvent? = null,
     onInsertEventConsumed: () -> Unit = {},
+    // Sprint 6-4 (step 2f) — search deep-link: the id of the event a
+    // search tap opened, and the start-of-day of that event's day.
+    // The id alone is not enough — the `events` list is day-scoped
+    // (the ViewModel's dayEvents flow), so the screen must jump the
+    // strip to the event's day before the event can appear in the
+    // list. Defaults to null so ordinary entries (bottom nav, date
+    // link) behave exactly as before. Consumed once by the effects
+    // below, same state pattern as GroupsScreen's openGroupId (S5-3)
+    // and the task deep-link (2e).
+    openEventId: String? = null,
+    openEventDayMillis: Long? = null,
+    onOpenEventIdConsumed: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showAddEventDialog by remember { mutableStateOf(false) }
@@ -268,6 +280,47 @@ fun CalendarScreen(
         }
         eventPendingInsert = insert
         onInsertEventConsumed()
+    }
+
+    // Sprint 6-4 (step 2f) — search deep-link: jump to the event's
+    // day, once, the moment the id arrives (the S2-4 insert-effect
+    // pattern above). This effect never consumes — the select effect
+    // below consumes once the event appears (or proves stale) — so a
+    // re-entry with the same id cannot re-jump after consumption.
+    // A null day means the event is on the current day already.
+    LaunchedEffect(openEventId) {
+        if (openEventId == null) return@LaunchedEffect
+        openEventDayMillis?.let { jumpToDay(it, null) }
+    }
+
+    // Sprint 6-4 (step 2f) — open the deep-linked event's edit
+    // dialog once the day's events contain it. The list is
+    // day-scoped (the ViewModel's dayEvents flow), so the event
+    // only appears after the jump above moves the strip and the
+    // ViewModel re-emits — this effect re-runs on every events
+    // change until then. The edit dialog is the tap target: the
+    // row tap opens it for personal events only (Sprint 2-1), so
+    // a group event (groupId != null) jumps to its day but opens
+    // no dialog — same rule as the row tap and the delete rule.
+    // A stale id is consumed once the current day IS the event's
+    // day and the list still lacks it (the list is authoritative
+    // for that day); without a day, it is consumed at once —
+    // otherwise a later day change would re-run this effect and
+    // the jump effect above would yank the user back.
+    LaunchedEffect(openEventId, events) {
+        val id = openEventId ?: return@LaunchedEffect
+        val event = events.firstOrNull { it.id == id }
+        if (event != null) {
+            if (event.groupId == null) {
+                eventPendingEdit = event
+            }
+            onOpenEventIdConsumed()
+            return@LaunchedEffect
+        }
+        val day = openEventDayMillis
+        if (day == null || dayStartMillis == day) {
+            onOpenEventIdConsumed()
+        }
     }
 
     // Sprint 2-2 — drag-to-slot state machine (the Board's S1-4b
@@ -1192,7 +1245,12 @@ fun CalendarScreen(
                         onValueChange = { eventTitle = it },
                         label = { Text("Event Name") },
                         placeholder = { Text("e.g. Design review") },
-                        modifier = Modifier.fillMaxWidth(),
+                        // Sprint 6-4 (step 2f) — test seam: the deep-link
+                        // test asserts the dialog opened for THIS event
+                        // by reading the prefilled title field (the
+                        // title text also sits on the event row behind
+                        // the dialog, so text alone is ambiguous).
+                        modifier = Modifier.fillMaxWidth().testTag("edit_event_title_field"),
                         shape = MaterialTheme.shapes.medium,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = NudgyPrimary,
