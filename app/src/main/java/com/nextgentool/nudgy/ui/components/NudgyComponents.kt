@@ -74,14 +74,22 @@ import com.nextgentool.nudgy.ui.theme.NudgyPrimary
  * their bottom pivots, tops leaning right. Brand colors are the logo
  * hexes (coral #F97360, teal #0F766E) — NOT the darkened theme
  * primary (#CC3F27), so the mark matches the approved logo exactly.
+ *
+ * The default 55x24 is the top-bar / sign-in size. The drawing is
+ * vector-scaled (scale = size.width / 249.2f), so any size renders
+ * crisp — the splash passes 220x96 for the big centred mark. The
+ * size lives on the Canvas itself, so an outer size modifier would
+ * NOT resize it: pass [width]/[height] instead.
  */
 @Composable
 fun NudgyLogoMark(
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    width: Dp = 55.dp,
+    height: Dp = 24.dp
 ) {
     Canvas(
         modifier = modifier
-            .size(width = 55.dp, height = 24.dp)
+            .size(width = width, height = height)
             .semantics { contentDescription = "Nudgy logo" }
     ) {
         // Vector-space bounding box of the three rotated bars:

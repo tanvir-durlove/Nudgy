@@ -40,6 +40,7 @@ import com.nextgentool.nudgy.settings.AppLockGate
 import com.nextgentool.nudgy.settings.AppLockPrompt
 import com.nextgentool.nudgy.settings.SettingsPreferences
 import com.nextgentool.nudgy.settings.AppLocale
+import com.nextgentool.nudgy.ui.components.NudgySplashScreen
 import com.nextgentool.nudgy.ui.navigation.NudgyApp
 import com.nextgentool.nudgy.ui.screens.OnboardingScreen
 import com.nextgentool.nudgy.ui.viewmodel.OnboardingViewModel
@@ -162,6 +163,15 @@ class MainActivity : FragmentActivity() {
     private var promptOnResume = true
 
     /**
+     * Step 5a-wire — whether the launch splash is still showing.
+     * Set once in onCreate from [shouldShowSplash]: true only on a
+     * cold start, false on rotation / resume / process-death restore.
+     * Cleared by the splash's onFinished (which also fires the lock
+     * prompt, so the prompt never covers the brand moment).
+     */
+    private var showSplash by mutableStateOf(true)
+
+    /**
      * Sprint 6-2 — per-app UI language (spec §2 Q10=(a)): the base
      * context carries the stored language, so a fresh launch already
      * renders Settings/Today/Tasks in the chosen language (string
@@ -182,6 +192,10 @@ class MainActivity : FragmentActivity() {
         // startup (v1 MainActivity did the same); a guest stays guest.
         groupAuth.attemptSilentSignIn(lifecycleScope)
         handleIncomingIntent(intent)
+        // Step 5a-wire — the launch splash shows only on a cold
+        // start (see shouldShowSplash): never on rotation, resume,
+        // or a process-death restore.
+        showSplash = shouldShowSplash(savedInstanceState)
         setContent {
             // Sprint 6-0 — the theme mode is a live flow off the
             // store, not a value captured once at launch (the PR #101
@@ -209,7 +223,22 @@ class MainActivity : FragmentActivity() {
             // the app itself.
             val appLockEnabled by settingsPreferences.appLockEnabled.collectAsState()
             val unlocked by appLockGate.isUnlocked
-            if (appLockEnabled && !unlocked) {
+            // Step 5a-wire — the launch splash sits ABOVE every
+            // gate and BEFORE the app lock: it shows no user data
+            // (brand mark only), so there is no privacy reason to
+            // lock first, and hiding the brand moment behind the
+            // lock on every launch would be worse UX for no gain.
+            // The lock prompt is held until the splash finishes
+            // (see maybePromptForAppLock), so after ~950ms the
+            // lock overlay / sign-in / tutorial / app follows.
+            if (showSplash) {
+                NudgySplashScreen(
+                    onFinished = {
+                        showSplash = false
+                        maybePromptForAppLock()
+                    }
+                )
+            } else if (appLockEnabled && !unlocked) {
                 AppLockScreen(onUnlockClick = { promptForAppLock() })
             } else if (user == null) {
                 val isLoading by authManager.isLoading.collectAsState()
@@ -298,6 +327,11 @@ class MainActivity : FragmentActivity() {
      * prompt (first launch, or a return from background).
      */
     private fun maybePromptForAppLock() {
+        // Step 5a-wire — the system prompt must not cover the
+        // launch splash: while the splash is showing, hold the
+        // prompt (promptOnResume stays true) and let the splash's
+        // onFinished fire it instead.
+        if (showSplash) return
         if (!promptOnResume) return
         promptOnResume = false
         promptForAppLock()
@@ -373,6 +407,24 @@ class MainActivity : FragmentActivity() {
         }
     }
 }
+
+/**
+ * Step 5a-wire — the launch splash shows once per cold start, and
+ * never again in the same process lifetime:
+ * - fresh launch (savedInstanceState == null) → show it;
+ * - rotation (the Activity is recreated WITH saved state) → skip it,
+ *   the user is mid-session, not launching;
+ * - resume from background (no onCreate at all) → the showSplash
+ *   field is already false, skip it;
+ * - process-death restore (saved state comes back non-null) → skip
+ *   it, the user resumes where they were instead of replaying the
+ *   brand moment.
+ *
+ * Pure function on purpose (the repo's seam pattern): the rule is
+ * unit-testable without launching the @AndroidEntryPoint Activity.
+ */
+internal fun shouldShowSplash(savedInstanceState: Bundle?): Boolean =
+    savedInstanceState == null
 
 /**
  * Sprint 6-6 (step 4a) — the opaque lock overlay: the locked app
