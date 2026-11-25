@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -25,17 +24,21 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.nextgentool.nudgy.R
 import kotlinx.coroutines.delay
 
 /**
  * Animated launch splash, shown after the system splash is dismissed.
  * Cream background (always light, matching the launcher icon), the big bear
- * logo scaling in at the centre, then the NUDGY wordmark fading in below.
+ * logo scaling in at the centre, then the brand logo mark fading in below.
  * Takes ~950ms, then [onFinished] hands over to the main flow.
+ *
+ * Step 5a (polish item 1) — the wordmark below the bear is the brand
+ * logo mark (NudgyLogoMark, the tilted coral bar + two upright teal
+ * bars), not the plain-text "NUDGY". The bear image, layout and the
+ * fade/slide-in animation are untouched: the mark carries the same
+ * [textAlpha] / [textOffset] modifiers the text had.
  */
 @Composable
 fun NudgySplashScreen(
@@ -82,12 +85,7 @@ fun NudgySplashScreen(
                     .alpha(logoAlpha)
             )
             Spacer(modifier = Modifier.height(24.dp))
-            Text(
-                text = "NUDGY",
-                color = Color(0xFFEE4A40),
-                fontSize = 36.sp,
-                fontWeight = FontWeight.Black,
-                letterSpacing = 8.sp,
+            NudgyLogoMark(
                 modifier = Modifier
                     .alpha(textAlpha)
                     .graphicsLayer { translationY = textOffset }
