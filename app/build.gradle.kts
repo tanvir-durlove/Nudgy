@@ -124,6 +124,7 @@ dependencies {
   implementation(libs.user.messaging.platform)
   implementation(libs.androidx.credentials)
   implementation(libs.androidx.credentials.play.services)
+  implementation(libs.androidx.glance.appwidget)
   implementation(libs.googleid)
   implementation(libs.firebase.appcheck.recaptcha)
   implementation(libs.firebase.appcheck.debug)

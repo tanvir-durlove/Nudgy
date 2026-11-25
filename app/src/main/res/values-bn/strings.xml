@@ -146,4 +146,11 @@
     <string name="tasks_completed">শেষ হয়েছে (%1$d)</string>
     <string name="tasks_filter_all">সব</string>
     <string name="tasks_filter_group">গ্রুপ</string>
+
+    <!-- Today widget (S6-5, step 3a) -->
+    <string name="widget_today_title">আজ</string>
+    <string name="widget_today_description">আজকের পরিকল্পিত কাজগুলো</string>
+    <string name="widget_today_empty">আজকের জন্য কিছু পরিকল্পনা করা হয়নি</string>
+    <string name="widget_today_done_count">%1$d / %2$d শেষ</string>
+    <string name="widget_today_more">আরও +%1$dটি</string>
 </resources>

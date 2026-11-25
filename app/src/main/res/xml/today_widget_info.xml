@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sprint 6-5, step 3a — the Today widget (Glance): ONE widget,
+     today's planned tasks. updatePeriodMillis is 0 on purpose: the
+     app drives updates itself (step 3c) instead of the system
+     polling on a schedule. Resize is vertical-only; the content
+     caps at 5 rows + a "+N more" line so it fits a small widget. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_today_initial"
+    android:previewLayout="@layout/widget_today_initial"
+    android:description="@string/widget_today_description"
+    android:resizeMode="vertical"
+    android:widgetCategory="home_screen" />
