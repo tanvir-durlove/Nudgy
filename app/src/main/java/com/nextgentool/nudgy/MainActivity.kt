@@ -3,18 +3,41 @@ package com.nextgentool.nudgy
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.lifecycleScope
 import com.nextgentool.nudgy.auth.AuthManager
 import com.nextgentool.nudgy.auth.GroupAuth
 import com.nextgentool.nudgy.auth.SignInScreen
+import com.nextgentool.nudgy.settings.AppLockGate
+import com.nextgentool.nudgy.settings.AppLockPrompt
 import com.nextgentool.nudgy.settings.SettingsPreferences
 import com.nextgentool.nudgy.settings.AppLocale
 import com.nextgentool.nudgy.ui.navigation.NudgyApp
@@ -57,9 +80,18 @@ import kotlinx.coroutines.launch
  * singleTop) to ShareIntentViewModel, which decides what to claim.
  * The group-join deep link is NOT handled here — it still routes via
  * the NavHost deep link (GROUP_JOIN_DEEP_LINK).
+ *
+ * Sprint 6-6 (step 4a) — the optional app lock (spec §2 Q6=(a),
+ * §8): when the lock is ON, the system BiometricPrompt shows on
+ * launch and on every return from background (AppLockGate, in
+ * memory only — a process death restarts locked). The superclass
+ * is FragmentActivity, not ComponentActivity, because
+ * BiometricPrompt has no ComponentActivity constructor. The lock
+ * overlay sits above the sign-in/onboarding gates: a locked phone
+ * never shows the sign-in screen. Notifications are untouched.
  */
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     companion object {
         /**
@@ -114,6 +146,22 @@ class MainActivity : ComponentActivity() {
     private var openTaskId by mutableStateOf<String?>(null)
 
     /**
+     * Sprint 6-6 (step 4a) — the app-lock gate (in-memory only:
+     * unlocked this foreground session or not). Plain field, no
+     * Hilt — nothing else needs it.
+     */
+    private val appLockGate = AppLockGate()
+
+    /**
+     * Sprint 6-6 (step 4a) — whether the next onResume may show the
+     * lock prompt. True at first launch and after every real
+     * backgrounding (onStop); cleared the moment the prompt is
+     * shown, so a user cancel does NOT re-prompt instantly — the
+     * lock overlay stays up with its Unlock button instead.
+     */
+    private var promptOnResume = true
+
+    /**
      * Sprint 6-2 — per-app UI language (spec §2 Q10=(a)): the base
      * context carries the stored language, so a fresh launch already
      * renders Settings/Today/Tasks in the chosen language (string
@@ -155,7 +203,15 @@ class MainActivity : ComponentActivity() {
             // (same pattern as themeMode above: a value frozen at
             // construction would never follow the finish tap).
             val hasSeenOnboarding by settingsPreferences.hasSeenOnboarding.collectAsState()
-            if (user == null) {
+            // Sprint 6-6 (step 4a) — the app lock sits ABOVE every
+            // other gate: a locked phone shows only the opaque
+            // overlay, never the sign-in screen, the tutorial, or
+            // the app itself.
+            val appLockEnabled by settingsPreferences.appLockEnabled.collectAsState()
+            val unlocked by appLockGate.isUnlocked
+            if (appLockEnabled && !unlocked) {
+                AppLockScreen(onUnlockClick = { promptForAppLock() })
+            } else if (user == null) {
                 val isLoading by authManager.isLoading.collectAsState()
                 val errorMessage by authManager.errorMessage.collectAsState()
                 SignInScreen(
@@ -216,6 +272,52 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         lifecycleScope.launch { refreshTodayWidget(this@MainActivity) }
+        // Sprint 6-6 (step 4a) — the lock prompt on launch and on
+        // every return from background (guarded by promptOnResume,
+        // so a cancel does not re-prompt instantly).
+        maybePromptForAppLock()
+    }
+
+    /**
+     * Sprint 6-6 (step 4a) — a real backgrounding re-locks the app:
+     * the next foreground return prompts again. A rotation does NOT
+     * re-lock (isChangingConfigurations) — rotating is not leaving
+     * the app, and re-prompting on every rotation would be a defect.
+     */
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) {
+            appLockGate.onBackgrounded()
+            promptOnResume = true
+        }
+    }
+
+    /**
+     * Sprint 6-6 (step 4a) — the one-shot prompt trigger for
+     * onResume: only when the flag says this foregrounding may
+     * prompt (first launch, or a return from background).
+     */
+    private fun maybePromptForAppLock() {
+        if (!promptOnResume) return
+        promptOnResume = false
+        promptForAppLock()
+    }
+
+    /**
+     * Sprint 6-6 (step 4a) — shows the system prompt when the lock
+     * is ON and this session has not authenticated yet. No usable
+     * authenticator (no biometric enrolled AND no secure lock
+     * screen) fails OPEN — the gate records unlocked for the
+     * session rather than bricking the user out of their own data
+     * with no way in (see AppLockPrompt).
+     */
+    private fun promptForAppLock() {
+        if (!appLockGate.shouldPrompt(settingsPreferences.appLockEnabled.value)) return
+        if (!AppLockPrompt.canAuthenticate(this)) {
+            appLockGate.onAuthenticated()
+            return
+        }
+        AppLockPrompt.show(this, onSuccess = { appLockGate.onAuthenticated() })
     }
 
     /**
@@ -255,6 +357,54 @@ class MainActivity : ComponentActivity() {
             ?.let { openTaskId = it }
         if (shareIntentViewModel.handleIntent(intent)) {
             setIntent(Intent())
+        }
+    }
+}
+
+/**
+ * Sprint 6-6 (step 4a) — the opaque lock overlay: the locked app
+ * shows nothing but this (no task titles, no sign-in screen
+ * behind it). The prompt itself is triggered from onResume; this
+ * button is the retry after a user cancel. The testTags are for
+ * the batch-end device test — the prompt path is device-gated.
+ */
+@Composable
+private fun AppLockScreen(onUnlockClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .testTag("app_lock_screen"),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Lock,
+                contentDescription = null,
+                modifier = Modifier.size(64.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = stringResource(R.string.app_lock_title),
+                style = MaterialTheme.typography.titleLarge
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.app_lock_subtitle),
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(Modifier.height(24.dp))
+            Button(
+                onClick = onUnlockClick,
+                modifier = Modifier.testTag("app_lock_unlock_button")
+            ) {
+                Text(text = stringResource(R.string.app_lock_unlock))
+            }
         }
     }
 }
