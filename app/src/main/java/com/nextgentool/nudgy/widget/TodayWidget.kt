@@ -3,6 +3,8 @@ package com.nextgentool.nudgy.widget
 import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.LocalContext
@@ -25,8 +27,6 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextDecoration
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
-import androidx.glance.unit.dp
-import androidx.glance.unit.sp
 import com.nextgentool.nudgy.MainActivity
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.data.repository.TaskRepository
@@ -45,6 +45,13 @@ import com.nextgentool.nudgy.domain.todayDateString
  * Brand tokens from the approved design: teal #0F766E, coral
  * #F97360, on a white card. Completed tasks render struck through
  * and muted, the same convention as the Today timeline.
+ *
+ * Units: Glance has no `dp`/`sp` of its own (`androidx.glance.unit`
+ * holds only `ColorProvider`) — its layout and text APIs take the
+ * Compose UI units, so `dp`/`sp` come from
+ * `androidx.compose.ui.unit`. Do not "fix" these imports back to
+ * `androidx.glance.unit` — that does not compile (proven by the
+ * first PR run of step 3a).
  *
  * What is NOT covered by unit tests (honest limitation): the
  * Glance rendering itself — this harness cannot render a Glance
