@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -25,6 +26,7 @@ import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -99,6 +101,10 @@ fun TodayScreen(
     // the progress ring opens the week's summary. Defaults to no-op
     // so older call sites keep compiling.
     onWeeklyReviewClick: () -> Unit = {},
+    // Sprint 6-4: entry point to the global search screen (Q5) — the
+    // magnifier in the hero card's action row. Defaults to no-op so
+    // older call sites keep compiling.
+    onSearchClick: () -> Unit = {},
     // Sprint 1-1 fix: the Today quick-add (Feature 1) shares TasksViewModel
     // with TasksScreen — a separate instance scoped to this destination,
     // same singleton repository, so the guards (empty title, double-tap)
@@ -197,6 +203,19 @@ fun TodayScreen(
                         modifier = Modifier.testTag("focus_button")
                     ) {
                         Text(text = "Focus")
+                    }
+                    // Sprint 6-4 — global search entry point (Q5): the
+                    // magnifier opens the search screen. The testTag
+                    // lives ON the IconButton itself — a testTag inside
+                    // a clickable is invisible in the merged tree.
+                    IconButton(
+                        onClick = onSearchClick,
+                        modifier = Modifier.testTag("search_button")
+                    ) {
+                        Icon(
+                            Icons.Filled.Search,
+                            contentDescription = stringResource(R.string.search_title)
+                        )
                     }
                 }
             }

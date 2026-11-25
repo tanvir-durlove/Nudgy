@@ -302,6 +302,10 @@ fun NudgyNavHost(
                     // Sprint 4-4 — the progress ring opens the week's
                     // summary (spec §7, Q9=(a)).
                     onWeeklyReviewClick = { navController.navigate(NudgyRoute.WeeklyReview.route) },
+                    // Sprint 6-4 — the hero card's magnifier opens the
+                    // global search screen (Q5). Plain navigate like
+                    // the sibling entries: back pops to Today.
+                    onSearchClick = { navController.navigate(NudgyRoute.Search.route) },
                     habitViewModel = habitViewModel
                 )
             }
