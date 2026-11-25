@@ -43,6 +43,10 @@ sealed class NudgyRoute(val route: String) {
     /** Templates — NOT a bottom destination (reached from Tasks, S1-4). */
     data object Templates : NudgyRoute("templates")
 
+    /** Global search — NOT a bottom destination (reached from the
+     * top-bar magnifier, S6-4 step 2a; the magnifier itself is 2d). */
+    data object Search : NudgyRoute("search")
+
     /** Nested route inside the Today graph — not a bottom destination. */
     data object Plan : NudgyRoute("today/plan")
 
@@ -54,10 +58,10 @@ sealed class NudgyRoute(val route: String) {
         // NudgyRoute.getRoute:22). A get() evaluates after init completes.
         val startDestination: NudgyRoute get() = Today
 
-        // Tasks, Templates, Focus and WeeklyReview are in `all` (so
-        // fromRoute resolves and no bottom tab is highlighted there)
-        // but NOT in bottomNavEntries.
-        val all: List<NudgyRoute> get() = listOf(Today, Calendar, Chat, Groups, Settings, Tasks, Templates, Focus, WeeklyReview)
+        // Tasks, Templates, Focus, WeeklyReview and Search are in
+        // `all` (so fromRoute resolves and no bottom tab is
+        // highlighted there) but NOT in bottomNavEntries.
+        val all: List<NudgyRoute> get() = listOf(Today, Calendar, Chat, Groups, Settings, Tasks, Templates, Focus, WeeklyReview, Search)
 
         fun fromRoute(route: String?): NudgyRoute =
             all.firstOrNull { it.route == route } ?: Today

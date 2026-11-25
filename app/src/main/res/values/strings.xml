@@ -134,6 +134,16 @@
 
     <!-- Tasks screen headers -->
     <string name="tasks_search_hint">Search tasks</string>
+
+    <!-- Global search screen (S6-4) -->
+    <string name="search_title">Search</string>
+    <string name="search_hint">Search tasks, schedules, notes, groups…</string>
+    <string name="search_section_tasks">Tasks</string>
+    <string name="search_section_schedules">Schedules</string>
+    <string name="search_section_notes">Notes</string>
+    <string name="search_section_groups">Groups</string>
+    <string name="search_type_to_search">Type to search</string>
+    <string name="search_no_results">No results</string>
     <string name="tasks_completed">Completed (%1$d)</string>
     <string name="tasks_filter_all">All</string>
     <string name="tasks_filter_group">Group</string>

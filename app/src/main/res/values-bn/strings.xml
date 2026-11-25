@@ -133,6 +133,16 @@
 
     <!-- Tasks screen headers -->
     <string name="tasks_search_hint">টাস্ক খুঁজো</string>
+
+    <!-- Global search screen (S6-4) -->
+    <string name="search_title">খুঁজুন</string>
+    <string name="search_hint">টাস্ক, শিডিউল, নোট, গ্রুপ খুঁজুন…</string>
+    <string name="search_section_tasks">টাস্ক</string>
+    <string name="search_section_schedules">শিডিউল</string>
+    <string name="search_section_notes">নোট</string>
+    <string name="search_section_groups">গ্রুপ</string>
+    <string name="search_type_to_search">খুঁজতে লিখুন</string>
+    <string name="search_no_results">কোনো ফলাফল নেই</string>
     <string name="tasks_completed">শেষ হয়েছে (%1$d)</string>
     <string name="tasks_filter_all">সব</string>
     <string name="tasks_filter_group">গ্রুপ</string>
