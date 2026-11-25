@@ -335,13 +335,19 @@ fun NudgyNavHost(
         composable(NudgyRoute.Templates.route) {
             TemplatesScreen(onBack = { navController.popBackStack() })
         }
-        // Sprint 6-4 — Global search (S6-4, step 2a): UI shell +
-        // navigation only. The query lives in the screen
-        // (rememberSaveable) until steps 2b/2c lift it into a
-        // SearchViewModel with the Room LIKE queries. NOT a bottom
+        // Sprint 6-4 — Global search (S6-4): the query lives in the
+        // SearchViewModel and the Tasks group shows the Room LIKE
+        // results (step 2b). Tap on a task result navigates to the
+        // Tasks screen, the task's home — there is no task-detail
+        // route (the detail sheet lives in TasksScreen behind
+        // TasksViewModel.selectTask), so a deep-link to one task's
+        // sheet is a follow-up, not this step. NOT a bottom
         // destination (see NudgyRoute.all).
         composable(NudgyRoute.Search.route) {
-            SearchScreen(onBackClick = { navController.popBackStack() })
+            SearchScreen(
+                onBackClick = { navController.popBackStack() },
+                onTaskClick = { navController.navigate(NudgyRoute.Tasks.route) }
+            )
         }
         // Sprint 2-1 — Calendar is wired: the real screen on the
         // CalendarViewModel (Hilt). The route owns the permission
