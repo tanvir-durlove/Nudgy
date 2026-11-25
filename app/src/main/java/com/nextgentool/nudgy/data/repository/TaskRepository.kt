@@ -21,6 +21,7 @@ import com.nextgentool.nudgy.domain.model.parseTemplateDrafts
 import com.nextgentool.nudgy.domain.model.toTemplateJson
 import com.nextgentool.nudgy.domain.usecase.Recurrence
 import com.nextgentool.nudgy.reminders.ReminderManager
+import com.nextgentool.nudgy.widget.WidgetRefresher
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -69,12 +70,17 @@ data class DailyTaskStats(
  *
  * Constructor shape is frozen: ReminderReceiver builds
  * TaskRepository(context) directly, and ClientIntentPreFilterTest builds
- * TaskRepository(context, db). Both must keep compiling.
+ * TaskRepository(context, db). Both must keep compiling — so the
+ * Sprint 6-5 (step 3c) widget refresher is an OPTIONAL third
+ * parameter (default [WidgetRefresher.NoOp]): both frozen call sites
+ * keep compiling untouched, tests stay Glance-free, and Hilt
+ * supplies the system refresher via the TaskModule binding.
  */
 @Singleton
 class TaskRepository @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val database: NudgyDatabase = NudgyDatabase.getInstance(context)
+    private val database: NudgyDatabase = NudgyDatabase.getInstance(context),
+    private val widgetRefresher: WidgetRefresher = WidgetRefresher.NoOp
 ) {
     private val taskDao = database.taskDao()
     private val tagDao = database.tagDao()
@@ -105,6 +111,22 @@ class TaskRepository @Inject constructor(
     /** The user whose data this repository serves (guest when signed out). */
     fun currentUserId(): String =
         AuthManager.getActiveUserId(context).ifBlank { AuthManager.GUEST_USER_ID }
+
+    /**
+     * Sprint 6-5 (step 3c) — after a task mutation, re-provide the
+     * Today widget (the [WidgetRefresher] seam). Called once at the
+     * end of every task-mutating function below, after its write and
+     * reminder side effects — never on a no-op early return, so a
+     * missed row or an unchanged status costs no refresh. The
+     * refresher never throws (see WidgetRefresher), so a widget
+     * failure can never fail the mutation. Subtask/tag/project/
+     * template mutations need no call here: subtask helpers funnel
+     * through toggleTaskCompletion/deleteTask, and the rest touch no
+     * task row the widget displays.
+     */
+    private suspend fun notifyTasksChanged() {
+        widgetRefresher.refresh()
+    }
 
     // ------------------------------------------------------------------ reads
 
@@ -231,6 +253,7 @@ class TaskRepository @Inject constructor(
                 reminderManager.scheduleReminder(task.id, task.title, trigger)
             }
         }
+        notifyTasksChanged()
         task
     }
 
@@ -339,6 +362,7 @@ class TaskRepository @Inject constructor(
         if (resolvedIsCompleted && existing?.isCompleted == false) {
             maybeCreateNextOccurrence(resolved)
         }
+        notifyTasksChanged()
     }
 
     /**
@@ -436,6 +460,7 @@ class TaskRepository @Inject constructor(
                 reminderManager.scheduleReminder(task.id, task.title, trigger)
             }
         }
+        notifyTasksChanged()
     }
 
     /** Set the Board/status column directly (S1-4 drag); completion follows. */
@@ -463,6 +488,7 @@ class TaskRepository @Inject constructor(
             reminderManager.cancelReminder(fresh.id)
             maybeCreateNextOccurrence(fresh)
         }
+        notifyTasksChanged()
     }
 
     /**
@@ -543,6 +569,7 @@ class TaskRepository @Inject constructor(
             reminderManager.cancelReminder(fresh.id)
             maybeCreateNextOccurrence(fresh)
         }
+        notifyTasksChanged()
         true
     }
 
@@ -656,6 +683,7 @@ class TaskRepository @Inject constructor(
         // here first (S1-4, Feature 10: deleting a task deletes its files).
         deleteAttachmentFilesForTask(taskId)
         taskDao.deleteTaskByIdForUser(userId, taskId)
+        notifyTasksChanged()
     }
 
     suspend fun deleteTask(taskId: String) = withContext(Dispatchers.IO) {
@@ -667,6 +695,7 @@ class TaskRepository @Inject constructor(
         } else {
             taskDao.deleteTaskById(taskId)
         }
+        notifyTasksChanged()
     }
 
     /**
@@ -696,6 +725,7 @@ class TaskRepository @Inject constructor(
             )
         }
         reminderManager.scheduleReminder(taskId, existing.title, snoozeEpochMillis)
+        notifyTasksChanged()
     }
 
     suspend fun clearCompletedTasks(userId: String) = withContext(Dispatchers.IO) {
@@ -708,6 +738,7 @@ class TaskRepository @Inject constructor(
             .filter { it.groupId == null }
             .forEach { deleteAttachmentFilesForTask(it.id) }
         taskDao.deleteCompletedPersonalTasks(userId)
+        notifyTasksChanged()
     }
 
     // ---------------------------------------------------------------- subtasks

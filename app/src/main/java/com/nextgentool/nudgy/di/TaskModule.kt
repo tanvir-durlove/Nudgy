@@ -22,6 +22,7 @@ import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.focus.PomodoroAlarm
 import com.nextgentool.nudgy.focus.RealPomodoroAlarm
 import com.nextgentool.nudgy.reminders.ReminderManager
+import com.nextgentool.nudgy.widget.WidgetRefresher
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -116,6 +117,17 @@ object TaskModule {
     fun providePomodoroAlarm(
         @ApplicationContext context: Context
     ): PomodoroAlarm = RealPomodoroAlarm(context)
+
+    // Sprint 6-5 (step 3c) — the widget refresh seam: TaskRepository
+    // depends on the seam so tests can substitute a fake; production
+    // gets the real Glance re-provide. Same pattern as the Pomodoro
+    // alarm above. Manual constructions (ReminderReceiver, tests)
+    // take the NoOp default instead — no binding needed there.
+    @Provides
+    @Singleton
+    fun provideWidgetRefresher(
+        @ApplicationContext context: Context
+    ): WidgetRefresher = WidgetRefresher.system(context)
 
     @Provides
     @Singleton

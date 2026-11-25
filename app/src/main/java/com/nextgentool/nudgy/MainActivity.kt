@@ -21,10 +21,12 @@ import com.nextgentool.nudgy.ui.navigation.NudgyApp
 import com.nextgentool.nudgy.ui.screens.OnboardingScreen
 import com.nextgentool.nudgy.ui.viewmodel.OnboardingViewModel
 import com.nextgentool.nudgy.ui.viewmodel.ShareIntentViewModel
+import com.nextgentool.nudgy.widget.refreshTodayWidget
 import com.nextgentool.nudgy.work.GroupPollWorker
 import com.nextgentool.nudgy.work.MorningBriefWorker
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import kotlinx.coroutines.launch
 
 /**
  * Sprint 1-0 — the app root is now NudgyApp() (NavHost + bottom nav).
@@ -183,6 +185,23 @@ class MainActivity : ComponentActivity() {
         // intent — the new one would never be seen.
         setIntent(intent)
         handleIncomingIntent(intent)
+    }
+
+    /**
+     * Sprint 6-5 (step 3c) — the widget's day-boundary refresh (plus
+     * catch-up for background writes). The mutation hook in
+     * TaskRepository covers changes made while the app is open, but
+     * two cases need an app-open refresh: midnight rolling "today"
+     * over with no data change at all, and direct DAO writes that
+     * bypass TaskRepository (GroupRepository's group sync, the
+     * ReminderReceiver's direct completion). Re-providing on every
+     * foreground return is one Room read — the same cost as the
+     * Today screen loading — and it keeps the widget honest without
+     * a new scheduler (updatePeriodMillis stays 0).
+     */
+    override fun onResume() {
+        super.onResume()
+        lifecycleScope.launch { refreshTodayWidget(this@MainActivity) }
     }
 
     /**
