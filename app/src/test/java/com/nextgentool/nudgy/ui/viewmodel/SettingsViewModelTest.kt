@@ -2,6 +2,7 @@ package com.nextgentool.nudgy.ui.viewmodel
 
 import android.app.Activity
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -9,10 +10,12 @@ import com.nextgentool.nudgy.auth.AuthManager
 import com.nextgentool.nudgy.auth.GroupAuth
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.NudgyDatabase
+import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.data.repository.MemoryRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.settings.ByokKeyStore
 import com.nextgentool.nudgy.settings.CalendarConnection
+import com.nextgentool.nudgy.settings.DataRestorer
 import com.nextgentool.nudgy.settings.SettingsAccountActions
 import com.nextgentool.nudgy.settings.SettingsPreferences
 import kotlinx.coroutines.CoroutineScope
@@ -111,15 +114,22 @@ class SettingsViewModelTest {
         settingsPrefs: SettingsPreferences = SettingsPreferences(
             context.getSharedPreferences("test_s6_2_settings", Context.MODE_PRIVATE)
                 .also { it.edit().clear().commit() }
-        )
+        ),
+        // Sprint 6-6 (step 4d) — the export/restore repositories:
+        // null by default (the missing-repository outcome), so the
+        // guard tests can pass nulls explicitly without a real DB
+        // calendar repo.
+        memoryRepo: MemoryRepository? = memoryRepository,
+        calendarRepo: CalendarRepository? = null
     ): SettingsViewModel = SettingsViewModel(
         taskRepository = taskRepository,
-        memoryRepository = memoryRepository,
+        memoryRepository = memoryRepo,
         groupAuth = fakeAuth,
         accountActions = fakeActions,
         byokKeyStore = fakeByok,
         calendarConnection = fakeCalendar,
-        settingsPreferences = settingsPrefs
+        settingsPreferences = settingsPrefs,
+        calendarRepository = calendarRepo
     ).also { store.put("settings", it) }
 
     private fun flip(auth: FlipGroupAuth) {
@@ -300,6 +310,59 @@ class SettingsViewModelTest {
         val prefs = context.getSharedPreferences("test_s6_2_settings", Context.MODE_PRIVATE)
         assertFalse(prefs.getBoolean("morning_brief_enabled", true))
         assertFalse(prefs.getBoolean("sound_enabled", true))
+    }
+
+    // ---- App lock / export / restore (Sprint 6-6, step 4d) ----
+
+    /**
+     * The lock toggle persists through the store (the S6-2
+     * notification-toggles test's shape): default OFF (v1 had no
+     * lock), set ON/OFF round-trips the flow and the prefs. The
+     * write is synchronous — no viewModelScope.launch inside — so
+     * no runTest machinery is needed for the assertion itself.
+     */
+    @Test
+    fun `app lock toggle defaults OFF and persists through the store`() = vmTest {
+        val viewModel = buildViewModel()
+        assertFalse(viewModel.appLockEnabled.first())
+
+        viewModel.setAppLockEnabled(true)
+        assertTrue(viewModel.appLockEnabled.first())
+        val prefs = context.getSharedPreferences("test_s6_2_settings", Context.MODE_PRIVATE)
+        assertTrue(prefs.getBoolean("app_lock_enabled", false))
+
+        viewModel.setAppLockEnabled(false)
+        assertFalse(viewModel.appLockEnabled.first())
+        assertFalse(prefs.getBoolean("app_lock_enabled", true))
+    }
+
+    /**
+     * Export/restore fail closed when a repository is missing: the
+     * guard returns before any ContentResolver is touched, so no
+     * real file or picker is needed here. The happy paths are
+     * device-gated (SAF picker + Uri read/write — no file picker
+     * on the JVM); the merge logic below them is covered by
+     * DataExportTest / DataRestoreTest.
+     */
+    @Test
+    fun `export and restore fail closed when a repository is missing`() = vmTest {
+        val noCalendar = buildViewModel(calendarRepo = null)
+        val uri = Uri.parse("content://invalid/export.json")
+        assertFalse(noCalendar.exportToUri(context, uri))
+        assertEquals(
+            DataRestorer.RestoreOutcome.ReadFailed,
+            noCalendar.restoreFromUri(context, uri)
+        )
+
+        val noMemory = buildViewModel(
+            memoryRepo = null,
+            calendarRepo = CalendarRepository(context, db)
+        )
+        assertFalse(noMemory.exportToUri(context, uri))
+        assertEquals(
+            DataRestorer.RestoreOutcome.ReadFailed,
+            noMemory.restoreFromUri(context, uri)
+        )
     }
 
     @Test

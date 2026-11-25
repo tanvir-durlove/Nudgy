@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -52,9 +53,13 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.navigation
 import androidx.navigation.compose.rememberNavController
 import com.nextgentool.nudgy.R
+import com.nextgentool.nudgy.MainActivity
 import com.nextgentool.nudgy.domain.startOfDayMillis
 import com.nextgentool.nudgy.intent.IncomingIntent
 import com.nextgentool.nudgy.settings.AppLocale
+import com.nextgentool.nudgy.settings.AppLockPrompt
+import com.nextgentool.nudgy.settings.DataExporter
+import com.nextgentool.nudgy.settings.DataRestorer
 import com.nextgentool.nudgy.settings.SettingsPreferences
 import com.nextgentool.nudgy.ui.screens.CalendarScreen
 import com.nextgentool.nudgy.ui.screens.ChatScreen
@@ -78,6 +83,7 @@ import com.nextgentool.nudgy.ui.viewmodel.ChatViewModel
 import com.nextgentool.nudgy.ui.viewmodel.GroupsViewModel
 import com.nextgentool.nudgy.ui.viewmodel.HabitViewModel
 import com.nextgentool.nudgy.ui.viewmodel.SettingsViewModel
+import kotlinx.coroutines.launch
 import com.nextgentool.nudgy.ui.viewmodel.ShareIntentViewModel
 
 /**
@@ -733,6 +739,9 @@ fun NudgyNavHost(
             val soundEnabled by viewModel.soundEnabled.collectAsState()
             val settingsThemeMode by viewModel.themeMode.collectAsState()
             val settingsLanguage by viewModel.language.collectAsState()
+            // Sprint 6-6 (step 4d) — the app lock state (spec §2 Q6),
+            // live from the store.
+            val appLockEnabled by viewModel.appLockEnabled.collectAsState()
             val context = LocalContext.current
             LaunchedEffect(viewModel) {
                 viewModel.settingsError.collect { message ->
@@ -749,6 +758,48 @@ fun NudgyNavHost(
             ) { grants ->
                 if (grants.values.all { it }) {
                     viewModel.onCalendarPermissionGranted()
+                }
+            }
+            // Sprint 6-6 (step 4d) — the backup & restore pickers
+            // (spec §2 Q7): the route owns the launchers (the
+            // calendar permission launcher's pattern), the ViewModel
+            // owns the export/restore work. The pickers themselves
+            // are device-gated — CI compile + the batch-end device
+            // test.
+            val dataScope = rememberCoroutineScope()
+            val exportLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.StartActivityForResult()
+            ) { result ->
+                if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
+                val uri = result.data?.data ?: return@rememberLauncherForActivityResult
+                dataScope.launch {
+                    val ok = viewModel.exportToUri(context, uri)
+                    Toast.makeText(
+                        context,
+                        if (ok) context.getString(R.string.settings_export_done)
+                        else context.getString(R.string.settings_export_failed),
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+            val restoreLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.StartActivityForResult()
+            ) { result ->
+                if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
+                val uri = result.data?.data ?: return@rememberLauncherForActivityResult
+                dataScope.launch {
+                    val message = when (val outcome = viewModel.restoreFromUri(context, uri)) {
+                        is DataRestorer.RestoreOutcome.Restored -> context.getString(
+                            R.string.settings_restore_done,
+                            outcome.summary.totalInserted,
+                            outcome.summary.totalSkipped
+                        )
+                        DataRestorer.RestoreOutcome.NotAnExportFile ->
+                            context.getString(R.string.settings_restore_not_export)
+                        DataRestorer.RestoreOutcome.ReadFailed ->
+                            context.getString(R.string.settings_restore_failed)
+                    }
+                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                 }
             }
             SettingsShell(
@@ -808,6 +859,42 @@ fun NudgyNavHost(
                     // resources through a restart (AppLocale).
                     (context as? Activity)?.let { AppLocale.applyAndRecreate(it, code) }
                 },
+                // Sprint 6-6 (step 4d) — the app lock toggle + the
+                // backup & restore taps. Turning the lock ON asks
+                // for biometric/PIN once (the 4a KDoc's enable-time
+                // prompt — prove it is the owner); on success the
+                // session counts as unlocked, so the lock overlay
+                // does not appear at once. OFF writes at once: the
+                // user is already inside an unlocked session. When
+                // the device has no usable authenticator the toggle
+                // stays OFF with a toast — enabling a lock nobody
+                // can open would be worse than no lock.
+                appLockEnabled = appLockEnabled,
+                onAppLockChange = { enabled ->
+                    if (!enabled) {
+                        viewModel.setAppLockEnabled(false)
+                    } else {
+                        val activity = context as? FragmentActivity
+                        if (activity == null || !AppLockPrompt.canAuthenticate(activity)) {
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.settings_app_lock_unavailable),
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } else {
+                            AppLockPrompt.show(activity, onSuccess = {
+                                viewModel.setAppLockEnabled(true)
+                                (context as? MainActivity)?.markAppLockUnlocked()
+                            })
+                        }
+                    }
+                },
+                onExportClick = {
+                    exportLauncher.launch(
+                        DataExporter.createExportDocumentIntent(DataExporter.defaultFileName())
+                    )
+                },
+                onRestoreClick = { restoreLauncher.launch(DataRestorer.createOpenDocumentIntent()) },
                 // Sprint 6-3 — the tutorial re-view (spec §6): the
                 // row opens the same OnboardingScreen over the app.
                 onShowOnboardingClick = onShowOnboardingClick

@@ -321,6 +321,19 @@ class MainActivity : FragmentActivity() {
     }
 
     /**
+     * Sprint 6-6 (step 4d) — the Settings lock toggle's enable-time
+     * prompt succeeded: the user just proved ownership, so this
+     * foreground session counts as unlocked. Without this, turning
+     * the lock ON would show the lock overlay at once (the gate
+     * starts locked) and the user would authenticate a second time
+     * to dismiss it. Called from the Settings route only, never from
+     * the gate itself.
+     */
+    fun markAppLockUnlocked() {
+        appLockGate.onAuthenticated()
+    }
+
+    /**
      * Hands the intent to the share flow. When a NEW share is
      * accepted, the Activity's intent is cleared — a plain rotation
      * then never re-offers it (the ViewModel's SavedStateHandle flag

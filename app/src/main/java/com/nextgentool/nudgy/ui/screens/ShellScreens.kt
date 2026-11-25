@@ -166,6 +166,10 @@ private val SETTINGS_SECTIONS = listOf(
     SettingsSection("notifications", R.string.settings_section_notifications, R.string.settings_section_notifications_sub),
     SettingsSection("appearance", R.string.settings_section_appearance, R.string.settings_section_appearance_sub),
     SettingsSection("language", R.string.settings_section_language, R.string.settings_section_language_sub),
+    // Sprint 6-6 (step 4d) — the app lock + backup & restore rows
+    // (spec §2 Q6/Q7, §8): same section pattern, after language.
+    SettingsSection("app_lock", R.string.settings_section_app_lock, R.string.settings_section_app_lock_sub),
+    SettingsSection("data", R.string.settings_section_data, R.string.settings_section_data_sub),
     SettingsSection("calendar", R.string.settings_section_calendar, R.string.settings_section_calendar_sub),
     SettingsSection("gemini_key", R.string.settings_section_gemini_key, R.string.settings_section_gemini_key_sub),
     SettingsSection("privacy", R.string.settings_section_privacy, R.string.settings_section_privacy_sub),
@@ -266,6 +270,13 @@ fun SettingsShell(
     onSoundChange: (Boolean) -> Unit = {},
     onThemeModeChange: (String) -> Unit = {},
     onLanguageChange: (String) -> Unit = {},
+    // Sprint 6-6 (step 4d) — the app lock toggle + the backup &
+    // restore taps (spec §2 Q6/Q7, §8). Defaults keep the S6-0
+    // shell test (no params) rendering: lock OFF, taps no-op.
+    appLockEnabled: Boolean = false,
+    onAppLockChange: (Boolean) -> Unit = {},
+    onExportClick: () -> Unit = {},
+    onRestoreClick: () -> Unit = {},
     // Sprint 6-3 — the tutorial re-view (spec §6): opens the same
     // OnboardingScreen over the app; the row is inert in tests that
     // render the shell with no params (default no-op).
@@ -325,6 +336,14 @@ fun SettingsShell(
                 "language" -> SettingsLanguageRow(
                     language = language,
                     onClick = { showLanguageDialog = true }
+                )
+                "app_lock" -> SettingsAppLockRow(
+                    appLockEnabled = appLockEnabled,
+                    onAppLockChange = onAppLockChange
+                )
+                "data" -> SettingsDataRow(
+                    onExportClick = onExportClick,
+                    onRestoreClick = onRestoreClick
                 )
                 "calendar" -> SettingsCalendarRow(
                     connected = calendarConnected,

@@ -328,6 +328,67 @@ class SettingsRowsTest {
         assertEquals(listOf("bn"), codes)
     }
 
+    /**
+     * Sprint 6-6 (step 4d) — the App lock row (spec §2 Q6, §8).
+     *
+     * The switch reports the flip; the row's subtitle follows the
+     * stored preference (OFF by default). The "App lock" title
+     * repeats in the section header, so it is never asserted by
+     * text — the unique subtitles carry the assertions (the
+     * appearance/language duplicate-text lesson).
+     */
+    @Test
+    fun `app lock row shows the switch and toggling fires with the flipped value`() {
+        val changes = mutableListOf<Boolean>()
+        var locked by mutableStateOf(false)
+        composeRule.setContent {
+            NudgyTheme {
+                SettingsShell(
+                    appLockEnabled = locked,
+                    onAppLockChange = { changes += it }
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_row_app_lock").performScrollTo()
+        composeRule.onNodeWithText("Off — your data opens without a check").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_app_lock_switch").performClick()
+        assertEquals(listOf(true), changes)
+
+        composeRule.runOnIdle { locked = true }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Locked — fingerprint, face or device PIN").assertIsDisplayed()
+    }
+
+    /**
+     * Sprint 6-6 (step 4d) — the Backup & restore rows (spec §2 Q7,
+     * §8).
+     *
+     * The two inner rows fire their own callbacks (the SAF pickers
+     * themselves are device-gated — no file picker exists on the
+     * JVM — so the rows only report the tap here).
+     */
+    @Test
+    fun `backup and restore rows fire their callbacks`() {
+        var exports = 0
+        var restores = 0
+        composeRule.setContent {
+            NudgyTheme {
+                SettingsShell(
+                    onExportClick = { exports++ },
+                    onRestoreClick = { restores++ }
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_export_row").performScrollTo()
+        composeRule.onNodeWithText("Export my data").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_export_row").performClick()
+        composeRule.onNodeWithTag("settings_restore_row").performScrollTo().performClick()
+        assertEquals(1, exports)
+        assertEquals(1, restores)
+    }
+
     @Test
     fun `settings screen re-renders in Bengali when the locale context is Bengali`() {
         val context: android.content.Context =

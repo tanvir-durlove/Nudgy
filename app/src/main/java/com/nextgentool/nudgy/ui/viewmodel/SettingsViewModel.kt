@@ -1,16 +1,21 @@
 package com.nextgentool.nudgy.ui.viewmodel
 
 import android.app.Activity
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nextgentool.nudgy.auth.AuthManager
 import com.nextgentool.nudgy.auth.GroupAuth
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.NudgyMemoryEntity
+import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.data.repository.MemoryRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.settings.ByokKeyStore
 import com.nextgentool.nudgy.settings.CalendarConnection
+import com.nextgentool.nudgy.settings.DataExporter
+import com.nextgentool.nudgy.settings.DataRestorer
 import com.nextgentool.nudgy.settings.SettingsAccountActions
 import com.nextgentool.nudgy.settings.SettingsPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -72,7 +77,13 @@ class SettingsViewModel @Inject constructor(
     // change recomposes every collector with no restart. Nullable
     // with a default on purpose (the S6-1 seams' pattern): call
     // sites that don't pass one keep the previous defaults.
-    private val settingsPreferences: SettingsPreferences? = null
+    private val settingsPreferences: SettingsPreferences? = null,
+    // Sprint 6-6 (step 4d) — the calendar repository for export /
+    // restore (TaskModule provides it in production). Nullable with
+    // a default on purpose (the S6-1 seams' pattern): call sites
+    // that don't pass one get the missing-repository outcome
+    // (export false / restore ReadFailed) instead of a crash.
+    private val calendarRepository: CalendarRepository? = null
 ) : ViewModel() {
 
     /**
@@ -250,6 +261,57 @@ class SettingsViewModel @Inject constructor(
     /** The UI language ("en" | "bn"). */
     val language: StateFlow<String> =
         settingsPreferences?.language ?: MutableStateFlow(SettingsPreferences.LANGUAGE_ENGLISH)
+
+    // ---- App lock / export / restore (Sprint 6-6, spec §2 Q6/Q7, §8) ----
+
+    /**
+     * The optional app lock (step 4a key, default OFF). The Settings
+     * toggle (step 4d) is the only writer besides [setAppLockEnabled].
+     */
+    val appLockEnabled: StateFlow<Boolean> =
+        settingsPreferences?.appLockEnabled ?: MutableStateFlow(false)
+
+    /**
+     * Writes the lock preference. A plain synchronous write (no
+     * coroutine): the enable-time biometric/PIN prompt lives in the
+     * Settings route (it needs the FragmentActivity), and only calls
+     * this after the user proves ownership.
+     */
+    fun setAppLockEnabled(enabled: Boolean) {
+        settingsPreferences?.setAppLockEnabled(enabled)
+    }
+
+    /**
+     * Exports the live user's tasks + schedules + memories to a SAF
+     * document Uri (step 4b's [DataExporter]). Plain suspend
+     * function — no viewModelScope inside, so a test can call it
+     * with runBlocking. False when a repository is missing (nothing
+     * to collect) or the write fails — the caller toasts it, never a
+     * crash. The SAF picker itself is device-gated (no file picker
+     * on the JVM): the happy path is verified by CI compile + the
+     * batch-end device test; the merge logic below is covered by
+     * DataExportTest.
+     */
+    suspend fun exportToUri(context: Context, uri: Uri): Boolean {
+        val calendar = calendarRepository ?: return false
+        val memory = memoryRepository ?: return false
+        val export = DataExporter.collectExport(userId, taskRepository, calendar, memory)
+        return DataExporter.exportToUri(context, uri, export)
+    }
+
+    /**
+     * Restores a SAF document Uri into the database for the live
+     * user (step 4c's [DataRestorer]): id-merge, no duplicates, the
+     * restored rows take the restoring user's id. Plain suspend
+     * function, same testability note as [exportToUri]; the picker
+     * and the Uri read are device-gated, the merge itself is
+     * covered by DataRestoreTest.
+     */
+    suspend fun restoreFromUri(context: Context, uri: Uri): DataRestorer.RestoreOutcome {
+        val calendar = calendarRepository ?: return DataRestorer.RestoreOutcome.ReadFailed
+        val memory = memoryRepository ?: return DataRestorer.RestoreOutcome.ReadFailed
+        return DataRestorer.restoreFromUri(context, uri, userId, taskRepository, calendar, memory)
+    }
 
     /** Morning Brief ON/OFF — the worker no-ops while OFF (no re-schedule needed). */
     fun setMorningBriefEnabled(enabled: Boolean) {

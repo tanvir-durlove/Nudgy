@@ -349,3 +349,115 @@ fun SettingsLanguageRow(
         )
     }
 }
+
+/**
+ * Sprint 6-6 (step 4d) — the App lock row (spec §2 Q6=(a), §8).
+ *
+ * One Switch on the `appLockEnabled` preference (step 4a key,
+ * default OFF). The Switch is the only control: the enable-time
+ * biometric/PIN prompt lives in the Settings route — the row only
+ * reports the flip, and the row's state always follows the stored
+ * preference, so a cancelled prompt leaves the switch OFF.
+ * OFF needs no prompt: the user is already inside an unlocked
+ * session, and the lock gates entry, not its own removal.
+ */
+@Composable
+fun SettingsAppLockRow(
+    appLockEnabled: Boolean,
+    onAppLockChange: (Boolean) -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("settings_row_app_lock"),
+        shape = NudgyTokens.cardRadius,
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = NudgyTokens.cardElevation
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            SettingsRowTexts(
+                title = stringResource(R.string.settings_section_app_lock),
+                subtitle = if (appLockEnabled) {
+                    stringResource(R.string.settings_app_lock_on_sub)
+                } else {
+                    stringResource(R.string.settings_app_lock_off_sub)
+                }
+            )
+            Switch(
+                checked = appLockEnabled,
+                onCheckedChange = onAppLockChange,
+                modifier = Modifier.testTag("settings_app_lock_switch")
+            )
+        }
+    }
+}
+
+/**
+ * Sprint 6-6 (step 4d) — the Backup & restore row (spec §2 Q7=(a),
+ * §8).
+ *
+ * One card, two tappable rows (the notifications card's shape):
+ * Export writes the versioned JSON document to a file the user
+ * picks (step 4b), Restore merges one back with id-merge, no
+ * duplicates (step 4c). Each inner row carries its own clickable
+ * + testTag ON the clickable row itself (the clickable-merging
+ * rule) — the outer card has no onClick. The SAF pickers are
+ * device-gated; the rows only report the tap.
+ */
+@Composable
+fun SettingsDataRow(
+    onExportClick: () -> Unit,
+    onRestoreClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("settings_row_data"),
+        shape = NudgyTokens.cardRadius,
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = NudgyTokens.cardElevation
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onExportClick() }
+                    .testTag("settings_export_row")
+            ) {
+                SettingsRowTexts(
+                    title = stringResource(R.string.settings_export_title),
+                    subtitle = stringResource(R.string.settings_export_sub)
+                )
+                Text(
+                    text = "›",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = NudgyAccent
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onRestoreClick() }
+                    .testTag("settings_restore_row")
+            ) {
+                SettingsRowTexts(
+                    title = stringResource(R.string.settings_restore_title),
+                    subtitle = stringResource(R.string.settings_restore_sub)
+                )
+                Text(
+                    text = "›",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = NudgyAccent
+                )
+            }
+        }
+    }
+}

@@ -45,6 +45,9 @@ class ShellScreensTest {
             "notifications",
             "appearance",
             "language",
+            // Sprint 6-6 (step 4d) — the app lock + backup & restore rows.
+            "app_lock",
+            "data",
             "calendar",
             "gemini_key",
             "privacy",
