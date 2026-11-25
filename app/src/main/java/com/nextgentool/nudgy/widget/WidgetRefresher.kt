@@ -2,7 +2,7 @@ package com.nextgentool.nudgy.widget
 
 import android.content.Context
 import android.util.Log
-import androidx.glance.appwidget.GlanceAppWidget
+import androidx.glance.appwidget.GlanceAppWidgetManager
 
 /**
  * Sprint 6-5 (step 3c) — the widget refresh seam: after a task
@@ -13,10 +13,10 @@ import androidx.glance.appwidget.GlanceAppWidget
  *
  * The seam is a SAM interface so tests can substitute a recording
  * fake without touching Glance (there is no Glance test infra in
- * this repo, and a real [GlanceAppWidget.updateAll] inside a
- * repository test would depend on the Robolectric AppWidgetManager
- * shadow). Production gets the real implementation from the Hilt
- * binding (TaskModule.provideWidgetRefresher); manual constructions
+ * this repo, and a real Glance re-provide inside a repository test
+ * would depend on the Robolectric AppWidgetManager shadow). Production
+ * gets the real implementation from the Hilt binding
+ * (TaskModule.provideWidgetRefresher); manual constructions
  * (ReminderReceiver, tests) get [NoOp] by default.
  *
  * What this covers, instantly: every [com.nextgentool.nudgy.data.repository.TaskRepository]
@@ -49,13 +49,20 @@ fun interface WidgetRefresher {
 }
 
 /**
- * Re-provide the Today widget for all placed instances (Glance
- * [GlanceAppWidget.updateAll]). When no widget is placed this is a
+ * Re-provide the Today widget for all placed instances: look up the
+ * placed ids through [GlanceAppWidgetManager] and update each one
+ * (Glance has no updateAll — the per-id update IS the API; the
+ * first PR run of step 3c proved updateAll does not resolve).
+ * When no widget is placed the id list is empty, so this is a
  * cheap no-op. Never throws — see [WidgetRefresher].
  */
 suspend fun refreshTodayWidget(context: Context) {
     try {
-        TodayWidget().updateAll(context)
+        val manager = GlanceAppWidgetManager(context)
+        val widget = TodayWidget()
+        manager.getGlanceIds(TodayWidget::class.java).forEach { glanceId ->
+            widget.update(context, glanceId)
+        }
     } catch (e: Exception) {
         Log.w("WidgetRefresher", "Today widget refresh failed: ${e.message}")
     }

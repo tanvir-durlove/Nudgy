@@ -29,9 +29,9 @@ import java.util.concurrent.atomic.AtomicInteger
  * What this does NOT prove (honest limitation, same as steps
  * 3a/3b): the Glance rendering itself — this harness cannot
  * render a Glance widget (no Glance test infra in this repo), so
- * the re-provide path (WidgetRefresher.system → updateAll) is
- * verified by CI compile + the batch-end device test. The
- * MainActivity.onResume refresh is likewise not covered here
+ * the re-provide path (WidgetRefresher.system → GlanceAppWidgetManager
+ * + per-id update) is verified by CI compile + the batch-end
+ * device test. The MainActivity.onResume refresh is likewise not
  * (MainActivity is @AndroidEntryPoint and not launchable without
  * Hilt test infra) — its one line is verified by reading + CI
  * compile.
