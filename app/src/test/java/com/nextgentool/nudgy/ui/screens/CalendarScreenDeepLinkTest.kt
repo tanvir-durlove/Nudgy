@@ -31,9 +31,12 @@ import org.robolectric.annotation.Config
  * title field `edit_event_title_field`) appears for that event; the
  * screen jumps the week strip to the event's day first (the list is
  * day-scoped, so the event only appears once the day's list emits —
- * the test simulates that emission by updating the events list after
- * composition); a stale id opens nothing and is consumed; a group
- * event jumps to its day but opens no dialog (the row-tap rule from
+ * the other-day test simulates that emission by updating the events
+ * list after composition; the group test passes the event in the
+ * static list, which is enough — the group rule never looks at the
+ * day, and the wait-for-emission path is proven by the other-day
+ * test); a stale id opens nothing and is consumed; a group event
+ * jumps to its day but opens no dialog (the row-tap rule from
  * Sprint 2-1: group rows are never edited from here). The screen is
  * rendered directly (the CalendarScreenTest pattern: pure params, no
  * ViewModel, no Room).
@@ -178,26 +181,33 @@ class CalendarScreenDeepLinkTest {
 
     @Test
     fun `group event jumps to its day but opens no edit dialog`() {
+        // The event is in the list from the start (no emission to
+        // wait for): the group rule is day-agnostic — the effect
+        // finds the event on entry and consumes without opening the
+        // dialog. The wait-for-emission path is proven by the
+        // other-day test above (same first-run logic, which never
+        // looks at groupId); the jump itself is group-agnostic too
+        // (same jumpToDay call for every event).
         val event = sampleEvent(daysAhead = 1, groupId = "g1")
-        val eventsState = mutableStateOf<List<CalendarEventEntity>>(emptyList())
         val consumed = mutableStateOf(false)
         composeRule.setContent {
             CalendarScreen(
-                events = eventsState.value,
+                events = listOf(event),
                 openEventId = event.id,
                 openEventDayMillis = startOfDayMillis(event.startEpochMillis),
                 onOpenEventIdConsumed = { consumed.value = true }
             )
         }
+        // The strip jumps to the event's day (the jump effect runs
+        // on entry, before any list exists for that day).
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText(scheduleTitle(daysAhead = 1))
                 .fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText(scheduleTitle(daysAhead = 1)).assertExists()
-        // The day's list emits and the id is consumed — but the
-        // edit dialog never opens for a group event (the row-tap
-        // rule from Sprint 2-1: group rows are never edited here).
-        composeRule.runOnUiThread { eventsState.value = listOf(event) }
+        // The id is consumed — but the edit dialog never opens for
+        // a group event (the row-tap rule from Sprint 2-1: group
+        // rows are never edited here).
         composeRule.waitUntil(timeoutMillis = 10_000) { consumed.value }
         composeRule.onNodeWithText("Edit event").assertDoesNotExist()
     }
