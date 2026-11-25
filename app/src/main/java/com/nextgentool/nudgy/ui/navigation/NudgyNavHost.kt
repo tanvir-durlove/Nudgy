@@ -280,6 +280,11 @@ fun NudgyNavHost(
     // destination instead of by MainActivity's launch intent.
     // Cleared when the Groups destination consumes it (below).
     var searchOpenGroupId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Sprint 6-4 (step 2e) — a search tap on a task opens that
+    // task's detail sheet: the same state pattern as the group
+    // deep-link above. The Tasks destination selects the task and
+    // consumes the id (below); the NavHost never clears it itself.
+    var searchOpenTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     NavHost(
         navController = navController,
         startDestination = TODAY_GRAPH_ROUTE,
@@ -330,6 +335,11 @@ fun NudgyNavHost(
             TasksScreen(
                 onBackClick = { navController.popBackStack() },
                 onNavigateToTemplates = { navController.navigate(NudgyRoute.Templates.route) },
+                // Sprint 6-4 (step 2e) — search deep-link: the id a
+                // search tap set (above) opens that task's detail
+                // sheet on entry; TasksScreen consumes it once.
+                openTaskId = searchOpenTaskId,
+                onOpenTaskIdConsumed = { searchOpenTaskId = null },
                 // Sprint 3-5 — the detail sheet's "Break down" button:
                 // the split starts at once on the shared ChatViewModel
                 // and the user lands on Chat, where the preview card
@@ -348,20 +358,24 @@ fun NudgyNavHost(
         // Sprint 6-4 — Global search (S6-4): the query lives in the
         // SearchViewModel and the groups show the Room LIKE results
         // (tasks in step 2b; schedules, notes and groups in step 2c).
-        // Tap on a task result navigates to the Tasks screen, the
-        // task's home — there is no task-detail route (the detail
-        // sheet lives in TasksScreen behind
-        // TasksViewModel.selectTask), so a deep-link to one task's
-        // sheet is a follow-up, not this step. Tap on a schedule
-        // result navigates to the Calendar screen the same way (a
-        // deep-link to one exact event is a follow-up too). Tap on a
+        // Tap on a task result opens that task's detail sheet (step
+        // 2e): the id is set here and the Tasks destination selects
+        // it on entry, through the same state pattern as the group
+        // deep-link below — there is no task-detail route (the sheet
+        // lives in TasksScreen behind TasksViewModel.selectTask).
+        // Tap on a schedule result navigates to the Calendar screen
+        // the same way (a deep-link to one exact event is a
+        // follow-up, separate from the task deep-link). Tap on a
         // group result opens that group's detail through the S5-3
         // openGroupId mechanism (set here, consumed by the Groups
         // destination). NOT a bottom destination (see NudgyRoute.all).
         composable(NudgyRoute.Search.route) {
             SearchScreen(
                 onBackClick = { navController.popBackStack() },
-                onTaskClick = { navController.navigate(NudgyRoute.Tasks.route) },
+                onTaskClick = { task ->
+                    searchOpenTaskId = task.id
+                    navController.navigate(NudgyRoute.Tasks.route)
+                },
                 onScheduleClick = { navigateTo(navController, NudgyRoute.Calendar) },
                 onGroupClick = { group ->
                     searchOpenGroupId = group.groupId
