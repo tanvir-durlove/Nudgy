@@ -4,6 +4,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import com.nextgentool.nudgy.ui.navigation.NudgyRoute
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
 import org.junit.Assert.assertEquals
@@ -81,9 +83,18 @@ class PrivacyPolicyScreenTest {
 
     @Test
     fun `web link row fires its callback`() {
+        // The footer row sits below the fold in the scrollable
+        // Column, so a coordinate-based performClick cannot reach
+        // it (the click lands outside the viewport); performScrollTo
+        // hangs the test worker on this harness (OnboardingScreenTest
+        // KDoc, runs 851/852). The semantics OnClick action invokes
+        // the row's clickable directly, no coordinates involved.
+        // (PR run 45622471005 failed exactly this test with
+        // performClick; the row itself was fine.)
         var webClicked = false
         setContent(onWebClick = { webClicked = true })
-        composeRule.onNodeWithTag("privacy_web_link").performClick()
+        composeRule.onNodeWithTag("privacy_web_link")
+            .performSemanticsAction(SemanticsActions.OnClick)
         assertTrue(webClicked)
     }
 
