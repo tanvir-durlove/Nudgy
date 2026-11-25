@@ -3,6 +3,7 @@ package com.nextgentool.nudgy.ui.screens
 import android.content.Context
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTextInput
 import androidx.lifecycle.ViewModelStore
@@ -51,8 +52,14 @@ import org.robolectric.annotation.Config
  * - Text is read the PlanScreenTest way: fetchSemanticsNode() is a
  *   rule MEMBER (not a top-level import) and the text is matched by
  *   containment on SemanticsProperties.Text.
- * - waitForIdle() is safe here: the SearchScreen has no always-on
- *   animation (unlike the sign-in mascot — ShellScreensTest KDoc).
+ * - Result rows are awaited with waitUntil (see waitForRow), NOT
+ *   waitForIdle(): the Room LIKE results stream in on Dispatchers.IO
+ *   and waitForIdle does not wait for background IO, so a row can
+ *   still be missing when it returns — the step-2c PR run lost three
+ *   row assertions that way (schedule, note, task). The waitUntil
+ *   condition touches the Compose tree itself (the PlanScreenTest
+ *   rule: a waitUntil whose condition never touches the tree does
+ *   not pump the looper).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -115,6 +122,20 @@ class SearchScreenTest {
         return node.config[SemanticsProperties.Text].toString()
     }
 
+    /**
+     * Step 2c fix round — wait for a result row to appear instead of
+     * waitForIdle(): the Room LIKE results stream in on
+     * Dispatchers.IO and waitForIdle does not wait for background IO,
+     * so a row can still be missing when it returns (the step-2c PR
+     * run lost three row assertions that way). The condition polls the
+     * tree itself, so the looper pumps (PlanScreenTest rule).
+     */
+    private fun waitForRow(tag: String) {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
     @Test
     fun `search screen shows all four grouped sections with type-to-search empty states`() {
         setSearchContent()
@@ -162,7 +183,7 @@ class SearchScreenTest {
         setSearchContent()
 
         composeRule.onNodeWithTag("search_field").performTextInput("buy")
-        composeRule.waitForIdle()
+        waitForRow("search_result_task_${task.id}")
 
         composeRule.onNodeWithTag("search_result_task_${task.id}").assertExists()
         assertTrue(
@@ -205,7 +226,7 @@ class SearchScreenTest {
         setWiredSearchContent()
 
         composeRule.onNodeWithTag("search_field").performTextInput("dentist")
-        composeRule.waitForIdle()
+        waitForRow("search_result_schedule_event-1")
 
         composeRule.onNodeWithTag("search_result_schedule_event-1").assertExists()
         assertTrue(
@@ -231,7 +252,7 @@ class SearchScreenTest {
         // "market" matches only the description — the note row shows
         // it as its own group, and the Tasks group shows it too.
         composeRule.onNodeWithTag("search_field").performTextInput("market")
-        composeRule.waitForIdle()
+        waitForRow("search_result_note_${task.id}")
 
         composeRule.onNodeWithTag("search_result_note_${task.id}").assertExists()
         assertTrue(
@@ -257,7 +278,7 @@ class SearchScreenTest {
         // "groceries" matches only the title — the Tasks group shows
         // the row, the Notes group honestly reports no results.
         composeRule.onNodeWithTag("search_field").performTextInput("groceries")
-        composeRule.waitForIdle()
+        waitForRow("search_result_task_${task.id}")
 
         composeRule.onNodeWithTag("search_result_task_${task.id}").assertExists()
         assertTrue(
@@ -282,7 +303,7 @@ class SearchScreenTest {
         setWiredSearchContent()
 
         composeRule.onNodeWithTag("search_field").performTextInput("runners")
-        composeRule.waitForIdle()
+        waitForRow("search_result_group_g1")
 
         composeRule.onNodeWithTag("search_result_group_g1").assertExists()
         assertTrue(

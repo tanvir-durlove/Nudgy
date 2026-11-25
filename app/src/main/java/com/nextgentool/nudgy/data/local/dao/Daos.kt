@@ -270,8 +270,8 @@ interface CalendarDao {
     // change: no schema change, no migration.
     @Query(
         "SELECT * FROM calendar_events WHERE userId = :userId " +
-            "AND (title LIKE :pattern ESCAPE '\\\\' COLLATE NOCASE " +
-            "OR locationOrLink LIKE :pattern ESCAPE '\\\\' COLLATE NOCASE) " +
+            "AND (title LIKE :pattern ESCAPE '\\' COLLATE NOCASE " +
+            "OR locationOrLink LIKE :pattern ESCAPE '\\' COLLATE NOCASE) " +
             "ORDER BY startEpochMillis ASC"
     )
     fun searchEventsFlow(userId: String, pattern: String): Flow<List<CalendarEventEntity>>
