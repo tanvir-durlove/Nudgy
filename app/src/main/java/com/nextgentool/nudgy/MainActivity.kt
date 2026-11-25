@@ -71,6 +71,15 @@ class MainActivity : ComponentActivity() {
          * EXTRA_OPEN_GROUP_ID.
          */
         const val EXTRA_OPEN_QUICK_ADD = "nudgy_open_quick_add"
+
+        /**
+         * Sprint 6-5 (step 3d) — the widget agenda-row tap: the row's
+         * launch action carries this task-id extra (via Glance
+         * ActionParameters, keyed by this name); MainActivity reads
+         * it into one-shot Compose state, never into the share flow.
+         * Same naming shape as EXTRA_OPEN_QUICK_ADD above.
+         */
+        const val EXTRA_OPEN_TASK_ID = "nudgy_open_task_id"
     }
 
     private val shareIntentViewModel: ShareIntentViewModel by viewModels()
@@ -100,6 +109,9 @@ class MainActivity : ComponentActivity() {
 
     /** Sprint 6-5 (step 3b) — pending widget "+" tap (one-shot). */
     private var openQuickAdd by mutableStateOf(false)
+
+    /** Sprint 6-5 (step 3d) — pending widget agenda-row tap (task id, one-shot). */
+    private var openTaskId by mutableStateOf<String?>(null)
 
     /**
      * Sprint 6-2 — per-app UI language (spec §2 Q10=(a)): the base
@@ -173,7 +185,9 @@ class MainActivity : ComponentActivity() {
                     openGroupId = openGroupId,
                     onOpenGroupIdConsumed = { openGroupId = null },
                     openQuickAdd = openQuickAdd,
-                    onOpenQuickAddConsumed = { openQuickAdd = false }
+                    onOpenQuickAddConsumed = { openQuickAdd = false },
+                    openTaskId = openTaskId,
+                    onOpenTaskIdConsumed = { openTaskId = null }
                 )
             }
         }
@@ -222,6 +236,12 @@ class MainActivity : ComponentActivity() {
      * focuses. The share flow does not claim this intent (it is not
      * a SEND/VIEW/INSERT), so handleIntent returns false and the
      * intent is left alone.
+     *
+     * Sprint 6-5 (step 3d) — a widget agenda-row tap also arrives
+     * here (the launch action carries EXTRA_OPEN_TASK_ID): it is
+     * read into Compose state the same way, never into the share
+     * flow, and consumed by the Tasks destination once the detail
+     * sheet opens — the same 2e deep-link path the search tap uses.
      */
     private fun handleIncomingIntent(intent: Intent?) {
         intent?.getStringExtra(GroupPollWorker.EXTRA_OPEN_GROUP_ID)
@@ -230,6 +250,9 @@ class MainActivity : ComponentActivity() {
         if (intent?.getBooleanExtra(EXTRA_OPEN_QUICK_ADD, false) == true) {
             openQuickAdd = true
         }
+        intent?.getStringExtra(EXTRA_OPEN_TASK_ID)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { openTaskId = it }
         if (shareIntentViewModel.handleIntent(intent)) {
             setIntent(Intent())
         }

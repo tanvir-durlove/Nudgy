@@ -118,7 +118,15 @@ fun NudgyApp(
     // then the Today destination consumes the flag. False in every
     // other flow.
     openQuickAdd: Boolean = false,
-    onOpenQuickAddConsumed: () -> Unit = {}
+    onOpenQuickAddConsumed: () -> Unit = {},
+    // Sprint 6-5 (step 3d) — a pending widget agenda-row tap:
+    // MainActivity feeds the tapped task id (from the row's launch
+    // action); the app navigates to Tasks and the detail sheet
+    // opens there, then the Tasks destination consumes the id —
+    // the same 2e deep-link path the search tap uses. Null in
+    // every other flow.
+    openTaskId: String? = null,
+    onOpenTaskIdConsumed: () -> Unit = {}
 ) {
     val navController = rememberNavController()
     // Sprint 2-3 — share-to-task (Feature 12): the Activity-scoped
@@ -153,6 +161,16 @@ fun NudgyApp(
     LaunchedEffect(openQuickAdd) {
         if (openQuickAdd) {
             navigateTo(navController, NudgyRoute.Today)
+        }
+    }
+    // Sprint 6-5 (step 3d) — a widget agenda-row tap navigates to
+    // the Tasks screen first (singleTop — a no-op when already on
+    // Tasks); the Tasks destination opens the detail sheet and
+    // consumes the id. Same pattern as the group and "+" effects
+    // above, and the same 2e deep-link path the search tap uses.
+    LaunchedEffect(openTaskId) {
+        if (openTaskId != null) {
+            navigateTo(navController, NudgyRoute.Tasks)
         }
     }
     // Sprint 6-0 — the theme is resolved here from the live mode
@@ -203,6 +221,11 @@ fun NudgyApp(
                 // consumes the flag).
                 pendingOpenQuickAdd = openQuickAdd,
                 onOpenQuickAddConsumed = onOpenQuickAddConsumed,
+                // Sprint 6-5 (step 3d) — the widget agenda-row tap
+                // (the Tasks destination opens the detail sheet,
+                // then consumes the id).
+                pendingOpenTaskId = openTaskId,
+                onOpenTaskIdConsumed = onOpenTaskIdConsumed,
                 // Sprint 6-3 — the Settings row opens the tutorial
                 // re-view (no sample offer, no re-seed).
                 onShowOnboardingClick = { showOnboarding = true }
@@ -296,6 +319,11 @@ fun NudgyNavHost(
     // consumes it). False in every other flow.
     pendingOpenQuickAdd: Boolean = false,
     onOpenQuickAddConsumed: () -> Unit = {},
+    // Sprint 6-5 (step 3d) — a pending widget agenda-row tap, passed
+    // to the Tasks destination (which opens the detail sheet, then
+    // consumes it). Null in every other flow.
+    pendingOpenTaskId: String? = null,
+    onOpenTaskIdConsumed: () -> Unit = {},
     // Sprint 6-3 — the Settings row opens the tutorial re-view
     // (NudgyApp owns the state; this route only reports the tap).
     onShowOnboardingClick: () -> Unit = {}
@@ -378,8 +406,16 @@ fun NudgyNavHost(
                 // Sprint 6-4 (step 2e) — search deep-link: the id a
                 // search tap set (above) opens that task's detail
                 // sheet on entry; TasksScreen consumes it once.
-                openTaskId = searchOpenTaskId,
-                onOpenTaskIdConsumed = { searchOpenTaskId = null },
+                // Sprint 6-5 (step 3d) — the widget agenda-row tap
+                // feeds the SAME openTaskId (pendingOpenTaskId): one
+                // source wins when both are set, and consuming
+                // clears both — the two can never be set at once
+                // (one user tap at a time), so nothing is lost.
+                openTaskId = searchOpenTaskId ?: pendingOpenTaskId,
+                onOpenTaskIdConsumed = {
+                    searchOpenTaskId = null
+                    onOpenTaskIdConsumed()
+                },
                 // Sprint 3-5 — the detail sheet's "Break down" button:
                 // the split starts at once on the shared ChatViewModel
                 // and the user lands on Chat, where the preview card

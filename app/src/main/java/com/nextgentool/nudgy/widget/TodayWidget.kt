@@ -43,7 +43,7 @@ import com.nextgentool.nudgy.domain.todayDateString
  * definition, no update scheduling yet; that wiring (refresh) is
  * step 3c. Tap anywhere opens the app (the plain default); the "+"
  * row opens the app's quick-add directly (step 3b) and tapping an
- * agenda row to open that task is a later follow-up, not this step.
+ * agenda row opens that task's detail sheet (step 3d).
  *
  * Brand tokens from the approved design: teal #0F766E, coral
  * #F97360, on a white card. Completed tasks render struck through
@@ -91,6 +91,26 @@ val OpenQuickAddKey = ActionParameters.Key<Boolean>(MainActivity.EXTRA_OPEN_QUIC
  */
 fun quickAddActionParameters(): ActionParameters =
     actionParametersOf(OpenQuickAddKey to true)
+
+/**
+ * Sprint 6-5 (step 3d) — the widget agenda-row tap, as a Glance
+ * action-parameters key. The key's NAME is MainActivity's intent
+ * extra ([MainActivity.EXTRA_OPEN_TASK_ID]): Glance adds action
+ * parameters to the launched activity's intent keyed by the parameter
+ * key name string, so the row action and MainActivity agree on the
+ * name by construction, not by a duplicated string — the same
+ * pattern as [OpenQuickAddKey] above.
+ */
+val OpenTaskKey = ActionParameters.Key<String>(MainActivity.EXTRA_OPEN_TASK_ID)
+
+/**
+ * Sprint 6-5 (step 3d) — the parameters an agenda row attaches to
+ * its launch action: the tapped task's id under [OpenTaskKey].
+ * Pure (no Context, no Glance rendering), so it is unit-testable —
+ * see WidgetTapToTaskTest.
+ */
+fun openTaskActionParameters(taskId: String): ActionParameters =
+    actionParametersOf(OpenTaskKey to taskId)
 
 class TodayWidget : GlanceAppWidget() {
 
@@ -160,8 +180,24 @@ private fun TodayWidgetContent(items: List<TodayWidgetItem>) {
             )
         } else {
             items.take(TODAY_WIDGET_MAX_ITEMS).forEach { item ->
+                // Sprint 6-5 (step 3d) — tap-to-task: a tap on this
+                // row opens the app on that task's detail sheet, via
+                // the launch action's parameters (see
+                // [openTaskActionParameters]) and the same 2e
+                // deep-link path the search tap uses. This clickable
+                // nests inside the column's own open-the-app
+                // clickable — the innermost clickable wins for its
+                // bounds, so a tap here takes the task path and a tap
+                // anywhere else takes the plain path. The nested-click
+                // routing is NOT provable on this harness (no Glance
+                // test infra) — the batch-end device test covers it.
                 Row(
-                    modifier = GlanceModifier.fillMaxWidth().padding(top = 8.dp),
+                    modifier = GlanceModifier.fillMaxWidth().padding(top = 8.dp)
+                        .clickable(
+                            actionStartActivity<MainActivity>(
+                                openTaskActionParameters(item.id)
+                            )
+                        ),
                     verticalAlignment = Alignment.Vertical.CenterVertically
                 ) {
                     if (item.timeLabel != null) {
