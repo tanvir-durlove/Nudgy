@@ -72,6 +72,19 @@ class SettingsPreferences(private val prefs: SharedPreferences) {
     /** Sprint 6-2 — reminder sound + vibration. Default ON (v1's initial state). */
     val soundEnabled: StateFlow<Boolean> = _soundEnabled.asStateFlow()
 
+    private val _appLockEnabled = MutableStateFlow(
+        prefs.getBoolean(KEY_APP_LOCK_ENABLED, false)
+    )
+
+    /**
+     * Sprint 6-6 (step 4a) — the optional app lock (spec §2 Q6=(a),
+     * §8). Default OFF (v1 had no lock at all — SILENT). When ON,
+     * MainActivity shows the system BiometricPrompt on launch and
+     * on every return from background; the Settings toggle itself
+     * (step 4d) is the only writer besides this setter.
+     */
+    val appLockEnabled: StateFlow<Boolean> = _appLockEnabled.asStateFlow()
+
     fun setMorningBriefEnabled(enabled: Boolean) {
         if (enabled == _morningBriefEnabled.value) return
         _morningBriefEnabled.value = enabled
@@ -82,6 +95,12 @@ class SettingsPreferences(private val prefs: SharedPreferences) {
         if (enabled == _soundEnabled.value) return
         _soundEnabled.value = enabled
         prefs.edit().putBoolean(KEY_SOUND_ENABLED, enabled).apply()
+    }
+
+    fun setAppLockEnabled(enabled: Boolean) {
+        if (enabled == _appLockEnabled.value) return
+        _appLockEnabled.value = enabled
+        prefs.edit().putBoolean(KEY_APP_LOCK_ENABLED, enabled).apply()
     }
 
     /**
@@ -116,6 +135,7 @@ class SettingsPreferences(private val prefs: SharedPreferences) {
         const val KEY_HAS_SEEN_ONBOARDING = "has_seen_onboarding"
         const val KEY_MORNING_BRIEF = "morning_brief_enabled"
         const val KEY_SOUND_ENABLED = "sound_enabled"
+        const val KEY_APP_LOCK_ENABLED = "app_lock_enabled"
 
         /**
          * Static readers for Context-only callers (ReminderReceiver,
@@ -129,6 +149,10 @@ class SettingsPreferences(private val prefs: SharedPreferences) {
         fun isSoundEnabled(context: Context): Boolean =
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .getBoolean(KEY_SOUND_ENABLED, true)
+
+        fun isAppLockEnabled(context: Context): Boolean =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(KEY_APP_LOCK_ENABLED, false)
 
         const val THEME_SYSTEM = "system"
         const val THEME_LIGHT = "light"

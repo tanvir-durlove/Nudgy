@@ -113,6 +113,40 @@ class SettingsPreferencesTest {
         assertTrue(SettingsPreferences(prefs).soundEnabled.value)
     }
 
+    // ---- Sprint 6-6 (step 4a) — the app lock (spec §2 Q6=(a)) ----
+
+    @Test
+    fun `app lock defaults OFF (v1 had no lock)`() {
+        assertFalse(store.appLockEnabled.value)
+    }
+
+    @Test
+    fun `setAppLockEnabled persists and a rebuilt store reads it back`() {
+        store.setAppLockEnabled(true)
+        assertTrue(store.appLockEnabled.value)
+        assertTrue(prefs.getBoolean("app_lock_enabled", false))
+        assertTrue(SettingsPreferences(prefs).appLockEnabled.value)
+
+        store.setAppLockEnabled(false)
+        assertFalse(SettingsPreferences(prefs).appLockEnabled.value)
+    }
+
+    @Test
+    fun `static app-lock reader matches the store (same key, same default)`() {
+        val context: Context = ApplicationProvider.getApplicationContext()
+        // The static reader reads the real "nudgy_settings" file —
+        // write then restore, so no other test's leftovers (and no
+        // ordering) can affect the assertions.
+        val realPrefs = context.getSharedPreferences(
+            SettingsPreferences.PREFS_NAME, Context.MODE_PRIVATE
+        )
+        assertFalse(SettingsPreferences.isAppLockEnabled(context))
+        realPrefs.edit().putBoolean("app_lock_enabled", true).commit()
+        assertTrue(SettingsPreferences.isAppLockEnabled(context))
+        realPrefs.edit().putBoolean("app_lock_enabled", false).commit()
+        assertFalse(SettingsPreferences.isAppLockEnabled(context))
+    }
+
     @Test
     fun `static readers match the store (same keys, same defaults)`() {
         val context: Context = ApplicationProvider.getApplicationContext()

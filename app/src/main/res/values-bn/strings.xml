@@ -154,4 +154,9 @@
     <string name="widget_today_done_count">%1$d / %2$d শেষ</string>
     <string name="widget_today_more">আরও +%1$dটি</string>
     <string name="widget_today_add_task">কাজ যোগ করুন</string>
+
+    <!-- App lock (S6-6, step 4a) -->
+    <string name="app_lock_title">Nudgy আনলক করুন</string>
+    <string name="app_lock_subtitle">অ্যাপটি খুলতে আপনার ফিঙ্গারপ্রিন্ট, মুখ অথবা ডিভাইসের PIN ব্যবহার করুন</string>
+    <string name="app_lock_unlock">আনলক করুন</string>
 </resources>
