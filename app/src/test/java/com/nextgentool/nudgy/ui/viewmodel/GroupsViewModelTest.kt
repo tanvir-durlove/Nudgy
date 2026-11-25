@@ -123,6 +123,20 @@ class GroupsViewModelTest {
     private suspend fun GroupsViewModel.awaitGroup(name: String): GroupsUiState =
         uiState.first { state -> state.groups.any { it.name == name } }
 
+    /**
+     * Test-side fix (open item, same class as the LiveUserViewModelFlipTest
+     * flip flake): await the TASK, not just the group.
+     * [GroupsViewModel.createGroupTask] is a fire-and-forget
+     * viewModelScope.launch, so awaiting only the group — created two lines
+     * earlier by the suspend [GroupsViewModel.createGroup] — does not
+     * guarantee the async task write has landed; `.single` on
+     * [GroupsUiState.allTasks] could throw NoSuchElementException before it
+     * does (merge run 45546482001 attempt 1 failed exactly this way, and
+     * passed on the re-run).
+     */
+    private suspend fun GroupsViewModel.awaitGroupTask(groupId: String): GroupsUiState =
+        uiState.first { state -> state.allTasks.any { it.groupId == groupId } }
+
     // ---- Create ----
 
     @Test
@@ -317,7 +331,7 @@ class GroupsViewModelTest {
             entity.groupId, "Homework", "Chapter 3",
             5000L, Priority.HIGH, TaskCategory.WORK, true
         )
-        val state = viewModel.awaitGroup("DIU 41")
+        val state = viewModel.awaitGroupTask(entity.groupId)
         val task = state.allTasks.single { it.groupId == entity.groupId }
         assertEquals("Homework", task.title)
         assertEquals("TASK", fake.items[entity.groupId]?.get(task.id)?.get("kind"))
