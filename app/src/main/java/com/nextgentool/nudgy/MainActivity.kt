@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.lifecycleScope
@@ -183,6 +184,26 @@ class MainActivity : FragmentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // S7-DIAG — install the androidx SplashScreen API BEFORE
+        // super.onCreate() (the required order). Without this call the
+        // system splash still shows (from the theme attrs) but
+        // postSplashScreenTheme NEVER applies, so MainActivity ran the
+        // Splash theme for its whole life instead of swapping to
+        // Theme.MyApplication (NoActionBar) after launch.
+        //
+        // DIAGNOSTIC — device verdict needed, not proven by this change
+        // alone: this is the prime suspect for the black "Nudgy" bar on
+        // fresh open (D1) and may also affect the launch insets (D2 —
+        // clipped hero + missing bottom nav). The compiled resources
+        // show BOTH themes are NoActionBar/NoTitle, so the theme swap
+        // is not a certain bar fix — the device build must confirm
+        // whether the bar (and the launch layout) is gone. If the bar
+        // survives, the hypothesis is refuted and the next step is a
+        // build that isolates the nav (force it visible) instead.
+        // No setKeepOnScreenCondition: the system splash dismisses on
+        // the first frame as before; the Compose brand splash
+        // (NudgySplashScreen, ~950ms) still follows it unchanged.
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         // Sprint 6-2 — the Morning Brief schedule (spec §2 Q8=(a)):
         // KEEP, safe on every launch; the worker no-ops while the
