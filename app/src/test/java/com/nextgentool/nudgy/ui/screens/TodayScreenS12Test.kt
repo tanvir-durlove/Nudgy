@@ -1,6 +1,7 @@
 package com.nextgentool.nudgy.ui.screens
 
 import android.content.Context
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -137,6 +138,12 @@ class TodayScreenS12Test {
         }
     }
 
+    /** The text of the node with this testTag, as "[text]" (S15 pattern). */
+    private fun nodeText(tag: String): String {
+        val node = composeRule.onNodeWithTag(tag).fetchSemanticsNode()
+        return node.config[SemanticsProperties.Text].toString()
+    }
+
     private fun createTask(title: String, due: Long) = runBlocking {
         repository.createTask(
             userId = repository.currentUserId(),
@@ -271,7 +278,11 @@ class TodayScreenS12Test {
             composeRule.onAllNodesWithText("Plan your day?")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("Plan your day?").assertIsDisplayed()
+        // assertExists, not assertIsDisplayed: S7-2a moved the nudge
+        // inside the Today tab after My Day (prototype order), so on
+        // Robolectric's short viewport it sits below the fold — it
+        // exists, but is not displayed until scrolled to.
+        composeRule.onNodeWithText("Plan your day?").assertExists()
         planTask("Planned task", at(0, 9), 60)
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("Plan your day?")
@@ -289,7 +300,11 @@ class TodayScreenS12Test {
             composeRule.onAllNodesWithText("Nothing planned for today yet")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("0%").assertIsDisplayed()
+        // Scoped to the donut itself: the This-week rate statbox also
+        // shows "0%" on an empty day, so a bare global "0%" matches
+        // two nodes.
+        composeRule.onNodeWithTag("progress_ring").assertIsDisplayed()
+        assertTrue(nodeText("progress_ring").contains("0%"))
         // Below the fold on Robolectric's short viewport (hero +
         // quick-add + ghost buttons + tabs sit above it) — scroll first;
         // on a real phone it is on first paint.

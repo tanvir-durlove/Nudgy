@@ -58,10 +58,12 @@ class DarkPaletteTest {
     @Test
     fun `light palette token values are the approved ones`() {
         val light = nudgyPaletteFor(false)
-        assertEquals(Color(0xFF1C1B1F), light.charcoal)
-        assertEquals(Color(0xFF6F6A72), light.muted)
+        // S7-2a / spec §4 prototype tokens: ink #111827, sub #475569,
+        // background #F4F6F5 (card and accent unchanged).
+        assertEquals(Color(0xFF111827), light.charcoal)
+        assertEquals(Color(0xFF475569), light.muted)
         assertEquals(Color(0xFFFFFFFF), light.card)
-        assertEquals(Color(0xFFFBF9F4), light.canvas)
+        assertEquals(Color(0xFFF4F6F5), light.canvas)
         assertEquals(Color(0xFFCC3F27), light.accent)
     }
 

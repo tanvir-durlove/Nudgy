@@ -1,10 +1,11 @@
 package com.nextgentool.nudgy.ui.screens
 
 import android.content.Context
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -29,6 +30,7 @@ import com.nextgentool.nudgy.ui.viewmodel.TasksViewModel
 import com.nextgentool.nudgy.ui.viewmodel.TodayViewModel
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -125,6 +127,22 @@ class TodayMyDayNoSwitcherTest {
     }
 
     /**
+     * True when [text] appears in the semantics Text of [node] or any
+     * of its descendants. A Plan-picked task with a planned start
+     * renders in BOTH My Day and the Timeline (correct product
+     * behaviour), so a bare global text assertion finds two nodes —
+     * scope to the section instead. SemanticsConfiguration has no
+     * getOrNull in Compose 1.7: contains + [] below, as in
+     * PlanScreenTest's traversalIndex.
+     */
+    private fun subtreeHasText(node: SemanticsNode, text: String): Boolean {
+        if (node.config.contains(SemanticsProperties.Text) &&
+            node.config[SemanticsProperties.Text].toString().contains(text)
+        ) return true
+        return node.children.any { subtreeHasText(it, text) }
+    }
+
+    /**
      * A Plan-picked task in My Day (HIGH, due today noon).
      * Returns the task id. Needed even for the no-switcher test: with an
      * empty My Day, Today shows "Nothing planned for today yet" instead
@@ -150,7 +168,11 @@ class TodayMyDayNoSwitcherTest {
         composeRule.onNodeWithTag("my_day_view_mode_matrix").assertDoesNotExist()
         composeRule.onNodeWithTag("eisenhower_matrix").assertDoesNotExist()
         // The task still renders — as a plain list row, not a quadrant.
-        composeRule.onNodeWithText("Call the bank").assertExists()
+        // Scoped to the My Day section: it also renders as a Timeline
+        // block (correct product behaviour), so a bare global assertion
+        // would find two nodes.
+        val section = composeRule.onNodeWithTag("my_day_section").fetchSemanticsNode()
+        assertTrue(subtreeHasText(section, "Call the bank"))
     }
 
     @Test
@@ -158,7 +180,10 @@ class TodayMyDayNoSwitcherTest {
         val createdId = seedMyDayTask("Call the bank")
         setTodayContent()
 
-        composeRule.onNodeWithText("Call the bank").assertExists()
+        // Scoped to the My Day section (see the test above: the task
+        // also renders as a Timeline block).
+        val section = composeRule.onNodeWithTag("my_day_section").fetchSemanticsNode()
+        assertTrue(subtreeHasText(section, "Call the bank"))
         composeRule.onNodeWithTag("matrix_count_Q1").assertDoesNotExist()
         composeRule.onNodeWithTag("matrix_card_$createdId").assertDoesNotExist()
     }

@@ -165,7 +165,9 @@ class TodayScreenS7Test {
         composeRule.onNodeWithText("Focus").assertExists()
         composeRule.onNodeWithTag("search_button").assertExists()
         // The ring shows 0% on an empty day, with the "of My Day" line.
-        composeRule.onNodeWithText("0%").assertExists()
+        // Scoped to the donut: the This-week rate statbox also shows
+        // "0%" on an empty day, so a bare global "0%" matches two nodes.
+        assertTrue(nodeText("progress_ring").contains("0%"))
         composeRule.onNodeWithText("of My Day").assertExists()
         // Quick-add card: label + field + Save (no "+" icon here —
         // the icon belongs to the Tasks screen's variant).
