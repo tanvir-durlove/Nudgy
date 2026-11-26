@@ -115,6 +115,10 @@ class TemplatesScreenTest {
         ).assertExists()
         // The first built-in card renders at the top of the list.
         composeRule.onNodeWithText("কাজ").assertIsDisplayed()
+        // The ghost button is the item after the 3 built-in cards, so
+        // it is NOT composed until the list scrolls to it (LazyColumn
+        // composes only the visible window) — scroll first.
+        composeRule.onNodeWithTag("templates_list").performScrollToIndex(3)
         // The ghost button replaced the FAB: it carries the moved
         // testTag, and the FAB's "New template" icon is gone.
         composeRule.onNodeWithTag("new_template_button").assertExists()
@@ -150,11 +154,20 @@ class TemplatesScreenTest {
             .performTextInput("Weekend reset")
         composeRule.onNodeWithTag("create_template_task_0")
             .performTextInput("Tidy the desk")
+        // The typed text must land in the fields — if it did not, the
+        // Save button stays disabled (isValid is false) and the click
+        // below is a silent no-op, so assert here, not at the waitUntil.
+        composeRule.onNodeWithText("Weekend reset").assertExists()
+        composeRule.onNodeWithText("Tidy the desk").assertExists()
         // The Save button sits at the bottom of the tall card, below
         // the fold — invoke its semantics action, never a coordinate
         // click (the PR #130 pattern).
         composeRule.onNodeWithTag("create_template_save")
             .performSemanticsAction(SemanticsActions.OnClick)
+        // A successful Save closes the card at once; if the card is
+        // still there, the click never ran.
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("create_template_card").assertDoesNotExist()
         // The create runs through the real ViewModel + Room; wait for
         // the Flow to carry it, then it is the first card (Latin
         // "Weekend" sorts before the Bengali built-in names).
@@ -162,8 +175,6 @@ class TemplatesScreenTest {
             viewModel.templates.value.any { it.name == "Weekend reset" }
         }
         composeRule.onNodeWithText("Weekend reset").assertExists()
-        // The card closes after a save.
-        composeRule.onNodeWithTag("create_template_card").assertDoesNotExist()
     }
 
     @Test

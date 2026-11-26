@@ -102,6 +102,16 @@ class SettingsViewModelTest {
         try {
             block()
         } finally {
+            // Sprint 7 — the resetMain race (the PR #128 / FocusViewModelTest
+            // pattern, same stack): the ViewModel is still alive here; its
+            // init coroutines do Room work on real Dispatchers.IO threads
+            // and resume back onto Main from those threads, so resetMain()
+            // must wait until the scope is cancelled and the IO drained —
+            // otherwise a resume in flight throws "Dispatchers.Main is used
+            // concurrently with setting it". The tearDown drain runs AFTER
+            // resetMain, too late to help — so cancel + drain HERE, first.
+            store.clear()
+            Thread.sleep(500)
             Dispatchers.resetMain()
         }
     }
