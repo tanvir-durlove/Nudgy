@@ -140,7 +140,11 @@ class CalendarScreenTest {
                 isCalendarConnected = false
             )
         }
-        composeRule.onNodeWithText("Allow access").assertIsDisplayed()
+        // Sprint 7 — the month grid card above pushes the sync card
+        // below the fold on the test surface, so assertIsDisplayed
+        // fails for a composed-but-not-visible node; assertExists
+        // still fails if the card is genuinely missing.
+        composeRule.onNodeWithText("Allow access").assertExists()
     }
 
     @Test
@@ -153,7 +157,9 @@ class CalendarScreenTest {
                 isSyncing = true
             )
         }
-        composeRule.onNodeWithText("Syncing…").assertIsDisplayed()
+        // Sprint 7 — same below-the-fold reason as the test above:
+        // the grid pushes the sync card out of the test viewport.
+        composeRule.onNodeWithText("Syncing…").assertExists()
     }
 
     // ------------------------------------------------------ Sprint 2-4
@@ -395,8 +401,13 @@ class CalendarScreenTest {
         }
         // The note under the grid (prototype-verbatim).
         composeRule.onNodeWithText("Weeks run Monday–Sunday. Dots mark days with tasks or events.").assertExists()
-        composeRule.onNodeWithTag("calendar_month_dot_$plusTwoStr").assertExists()
-        composeRule.onNodeWithTag("calendar_month_dot_$plusThreeStr").assertDoesNotExist()
+        // The dot lives inside the clickable day cell, so
+        // Modifier.clickable merges it out of the merged tree (the
+        // S6-3 lesson) — read it from the unmerged tree. The
+        // assertDoesNotExist needs it too: a merged-tree lookup
+        // would pass even if a dot existed.
+        composeRule.onNodeWithTag("calendar_month_dot_$plusTwoStr", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithTag("calendar_month_dot_$plusThreeStr", useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test
@@ -413,6 +424,69 @@ class CalendarScreenTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("calendar_month_day_$plusTwoStr")
             .performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            selectedDay != -1L &&
+                startOfDayMillis(selectedDay) == startOfDayMillis(plusTwo.timeInMillis)
+        }
+    }
+
+    // TEMPORARY DIAGNOSTIC (fix round 1) — `tapping a grid day
+    // selects it` times out on waitUntil, so this probes the click
+    // path with an independently observable outcome: Dec 1 2026 is
+    // a dim day in the November grid, and tapping it must move the
+    // header month to December. If this passes, the semantics-action
+    // click lands and the Nov 28 case is the mystery; if it fails,
+    // clicks do not land on grid cells at all. Remove once the cause
+    // is known.
+    @Test
+    fun `DIAGNOSTIC grid tap on a next-month dim day moves the month`() {
+        val dec1 = Calendar.getInstance().apply {
+            set(2026, Calendar.DECEMBER, 1, 0, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        var selectedDay = -1L
+        composeRule.setContent {
+            CalendarScreen(
+                events = emptyList(),
+                onSelectDay = { selectedDay = it }
+            )
+        }
+        composeRule.waitForIdle()
+        // The cell node must exist AND carry an OnClick action — if it
+        // does not, performSemanticsAction silently no-ops.
+        val node = composeRule.onNodeWithTag("calendar_month_day_2026-12-01")
+            .fetchSemanticsNode()
+        assertTrue(
+            "grid cell has no OnClick action",
+            node.config.contains(SemanticsActions.OnClick)
+        )
+        composeRule.onNodeWithTag("calendar_month_day_2026-12-01")
+            .performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.waitForIdle()
+        // If the click landed, the header month follows the selection.
+        composeRule.onNodeWithText("December 2026").assertExists()
+        assertTrue(startOfDayMillis(selectedDay) == startOfDayMillis(dec1.timeInMillis))
+    }
+
+    // TEMPORARY DIAGNOSTIC (fix round 1) — the same tap as `tapping
+    // a grid day selects it`, but with performClick (the path the
+    // sync-pill and seg tests use successfully) instead of
+    // performSemanticsAction. If this passes while the original times
+    // out, the semantics-action call is the problem, not the cell.
+    // Remove once the cause is known.
+    @Test
+    fun `DIAGNOSTIC grid tap with performClick selects the day`() {
+        val plusTwo = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, 2) }
+        val plusTwoStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(plusTwo.time)
+        var selectedDay = -1L
+        composeRule.setContent {
+            CalendarScreen(
+                events = emptyList(),
+                onSelectDay = { selectedDay = it }
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("calendar_month_day_$plusTwoStr").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) {
             selectedDay != -1L &&
                 startOfDayMillis(selectedDay) == startOfDayMillis(plusTwo.timeInMillis)
