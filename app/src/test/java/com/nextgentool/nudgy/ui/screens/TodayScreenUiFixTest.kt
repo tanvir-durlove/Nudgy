@@ -3,9 +3,7 @@ package com.nextgentool.nudgy.ui.screens
 import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -58,6 +56,12 @@ import org.robolectric.annotation.Config
  * words changed to "Nothing planned for today yet". The rest of the
  * pins (Saved card, All tasks, Timeline hidden on an empty day) are
  * unchanged.
+ *
+ * S7-2a UPDATE (2026-11-25): the prototype rebuild — the All-tasks
+ * entry is a ghost button (tag `all_tasks_button`), the quick-add
+ * has a teal Save button instead of the "+" icon, and the weekly
+ * review card no longer renders on Today (its lists live on the
+ * WeeklyReview screen), so a timed task's title never repeats here.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -169,13 +173,14 @@ class TodayScreenUiFixTest {
     fun `All tasks entry sits under the quick-add and opens the list`() {
         var opened = false
         setTodayContent(onAllTasksClick = { opened = true })
-        // The nudge card sits above the quick-add now, so on Robolectric's
-        // short viewport the row needs a scroll to be asserted displayed —
-        // on a real phone it is on first paint (hero + nudge + quick-add
-        // are ~450dp). What this pins is placement (directly under the
-        // quick-add, never below the Timeline) + the tap working.
+        // The ghost-button row sits directly under the quick-add card,
+        // so on Robolectric's short viewport it needs a scroll to be
+        // asserted displayed — on a real phone it is on first paint
+        // (hero + quick-add are ~450dp). What this pins is placement
+        // (directly under the quick-add, never below the Timeline) +
+        // the tap working.
         composeRule.onNodeWithText("All tasks").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithTag("all_tasks_row").performClick()
+        composeRule.onNodeWithTag("all_tasks_button").performClick()
         assertTrue(opened)
     }
 
@@ -184,7 +189,9 @@ class TodayScreenUiFixTest {
         setTodayContent()
         composeRule.onNodeWithTag("quick_add_field").performScrollTo()
         composeRule.onNodeWithTag("quick_add_field").performTextInput("Buy milk")
-        composeRule.onNodeWithContentDescription("Add task").performClick()
+        // S7-2a — Today saves with the teal Save button (the "+"
+        // icon belongs to the Tasks screen's variant now).
+        composeRule.onNodeWithTag("quick_add_save_button").performClick()
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("Saved: Buy milk")
                 .fetchSemanticsNodes().isNotEmpty()
@@ -207,27 +214,14 @@ class TodayScreenUiFixTest {
             composeRule.onAllNodesWithText("Nothing planned for today yet")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        // Below the fold on Robolectric's short viewport (hero + nudge
-        // + quick-add + All tasks + tabs sit above it) — scroll first;
+        // Below the fold on Robolectric's short viewport (hero +
+        // quick-add + ghost buttons + tabs sit above it) — scroll first;
         // on a real phone it is on first paint.
         composeRule.onNodeWithText("Nothing planned for today yet").performScrollTo().assertIsDisplayed()
         assertTrue(
             composeRule.onAllNodesWithText("Timeline")
                 .fetchSemanticsNodes().isEmpty()
         )
-    }
-
-    /**
-     * Title matches outside the Weekly review card. A missed task's
-     * title repeats in the review (S1-5b: missed = due time passed),
-     * so a bare text count is clock-dependent — the review row is
-     * pinned by its testTag instead and subtracted.
-     */
-    private fun nonReviewCount(text: String, taskId: String): Int {
-        val total = composeRule.onAllNodesWithText(text).fetchSemanticsNodes().size
-        val inReview = composeRule.onAllNodesWithTag("weekly_review_row_$taskId")
-            .fetchSemanticsNodes().size
-        return total - inReview
     }
 
     @Test
@@ -240,7 +234,7 @@ class TodayScreenUiFixTest {
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
         }.timeInMillis
-        val dentist = runBlocking {
+        runBlocking {
             repository.createTask(
                 userId = repository.currentUserId(),
                 title = "Dentist",
@@ -254,11 +248,14 @@ class TodayScreenUiFixTest {
         }
         composeRule.onNodeWithText("Timeline").performScrollTo().assertIsDisplayed()
         // S1-2: My Day is Plan-picked only, so the timed task appears in
-        // the Timeline ONLY (count 1, not 2 as in S1-1). S1-5b: once its
-        // due time passes it also repeats in the review card's Missed
-        // section, so count outside the review only. (No scroll-to-row
-        // check here: Compose 1.7 has no onFirst() on the collection,
-        // and onNodeWithText would throw once the review repeats it.)
-        assertEquals(1, nonReviewCount("Dentist", dentist.id))
+        // the Timeline ONLY (count 1, not 2 as in S1-1). S7-2a: the
+        // weekly review card no longer renders on Today, so even once
+        // its due time passes the title cannot repeat here — a bare
+        // count is exact. (No scroll-to-row check here: Compose 1.7 has
+        // no onFirst() on the collection.)
+        assertEquals(
+            1,
+            composeRule.onAllNodesWithText("Dentist").fetchSemanticsNodes().size
+        )
     }
 }

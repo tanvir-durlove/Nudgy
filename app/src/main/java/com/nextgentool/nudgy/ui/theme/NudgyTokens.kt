@@ -15,8 +15,8 @@ import androidx.compose.ui.unit.dp
  * custom font files in this rebuild.
  */
 object NudgyTokens {
-    /** Card corner radius (Figma: 20-24px). */
-    val cardRadius = RoundedCornerShape(20.dp)
+    /** Card corner radius (prototype: 22px). */
+    val cardRadius = RoundedCornerShape(22.dp)
 
     /** Generous screen padding (Figma: 16-20px). */
     val screenPadding = 16.dp

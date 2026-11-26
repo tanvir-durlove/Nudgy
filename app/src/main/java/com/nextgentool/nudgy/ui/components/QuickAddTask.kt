@@ -2,6 +2,7 @@ package com.nextgentool.nudgy.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,6 +14,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -71,6 +74,11 @@ import java.util.Locale
  * the one-shot signal via [onAutofocusConsumed], the same state
  * pattern as the search deep-links (2e/2f). Defaults keep every
  * existing call site unchanged — only the Today destination passes it.
+ *
+ * Sprint 7-2a — the Today quick-add card pairs the field with a
+ * teal Save button (prototype); `showSaveButton` turns that on and
+ * hides the trailing "+" icon. Defaults keep every existing call
+ * site unchanged — only Today passes it.
  */
 @Composable
 fun QuickAddTask(
@@ -82,6 +90,7 @@ fun QuickAddTask(
     onDismissLastCreated: () -> Unit,
     autofocus: Boolean = false,
     onAutofocusConsumed: () -> Unit = {},
+    showSaveButton: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     var text by remember { mutableStateOf("") }
@@ -110,32 +119,70 @@ fun QuickAddTask(
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        OutlinedTextField(
-            value = text,
-            onValueChange = { text = it },
-            placeholder = { Text("Add task", color = NudgyMuted) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { submit() }),
-            trailingIcon = {
-                IconButton(onClick = { submit() }, enabled = canCreate) {
-                    Icon(
-                        imageVector = Icons.Filled.Add,
-                        contentDescription = "Add task",
-                        tint = if (canCreate) {
-                            colorResource(R.color.nudgy_teal)
-                        } else {
-                            NudgyMuted
+        // Sprint 7-2a — one field definition, two layouts: the Save
+        // variant (Today card) puts a teal Save button beside the
+        // field and drops the trailing "+" icon; the default keeps
+        // the "+" icon (Tasks screen). The write path, the guards
+        // and the autofocus contract are identical in both.
+        @Composable
+        fun field(fieldModifier: Modifier) {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                placeholder = { Text("Add task", color = NudgyMuted) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { submit() }),
+                trailingIcon = if (showSaveButton) {
+                    null
+                } else {
+                    {
+                        IconButton(onClick = { submit() }, enabled = canCreate) {
+                            Icon(
+                                imageVector = Icons.Filled.Add,
+                                contentDescription = "Add task",
+                                tint = if (canCreate) {
+                                    colorResource(R.color.nudgy_teal)
+                                } else {
+                                    NudgyMuted
+                                }
+                            )
                         }
-                    )
+                    }
+                },
+                shape = NudgyTokens.cardRadius,
+                modifier = fieldModifier
+                    .focusRequester(focusRequester)
+                    .testTag("quick_add_field")
+            )
+        }
+        if (showSaveButton) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                field(Modifier.weight(1f))
+                Button(
+                    onClick = { submit() },
+                    enabled = canCreate,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colorResource(R.color.nudgy_teal),
+                        contentColor = colorResource(R.color.nudgy_cream)
+                    ),
+                    contentPadding = PaddingValues(
+                        horizontal = 20.dp,
+                        vertical = 10.dp
+                    ),
+                    modifier = Modifier
+                        .height(56.dp)
+                        .testTag("quick_add_save_button")
+                ) {
+                    Text("Save")
                 }
-            },
-            shape = NudgyTokens.cardRadius,
-            modifier = Modifier
-                .fillMaxWidth()
-                .focusRequester(focusRequester)
-                .testTag("quick_add_field")
-        )
+            }
+        } else {
+            field(Modifier.fillMaxWidth())
+        }
 
         if (lastCreatedTask != null) {
             Spacer(modifier = Modifier.height(8.dp))
