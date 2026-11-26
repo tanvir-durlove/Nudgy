@@ -1,7 +1,10 @@
 package com.nextgentool.nudgy.ui.screens
 
 import android.content.Context
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.fetchSemanticsNode
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -9,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
@@ -37,6 +41,7 @@ import java.util.Locale
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -45,7 +50,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Sprint 1-5 — smoke tests for the Weekly review card + the
+ * Sprint 1-5 — smoke tests for the This week section + the
  * estimate / actual editor (Features 17, 18).
  *
  * Manually-constructed ViewModels over real in-memory Room (no Hilt),
@@ -53,6 +58,12 @@ import org.robolectric.annotation.Config
  * relative to the CURRENT week (the ViewModel uses the real clock),
  * so the test holds on any day: a mid-week instant is always inside
  * [weekStart, now].
+ *
+ * Sprint 7-2a — Today shows the four This-week statboxes, not the
+ * review card's task lists: the lists live on the WeeklyReview screen
+ * (WeeklyReviewScreenTest), so these tests pin the counts here. The
+ * Feature 18 actual-time display ("45 min" on a finished row) is
+ * pinned on the WeeklyReview screen, where the card lives now.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -141,14 +152,20 @@ class S15SmokeTest {
         return minOf(weekStart + maxOf(1L, (now - weekStart) / 2), now)
     }
 
+    /** The text of the node with this testTag, as "[text]". */
+    private fun nodeText(tag: String): String {
+        val node = composeRule.onNodeWithTag(tag).fetchSemanticsNode()
+        return node.config[SemanticsProperties.Text].toString()
+    }
+
     @Test
-    fun `Weekly review card renders the three sections with real tasks`() {
+    fun `This week section shows the four statboxes with real tasks`() {
         val midWeek = midWeekInstant()
         val mondayDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
             .format(mondayOfThisWeek())
         // Missed needs a due day that is over: yesterday 09:00. On a
         // Monday there is no such day inside this week (the week just
-        // started), so the test then pins the empty state instead.
+        // started), so Missed stays 0 — the rate then reads 100%.
         val yesterdayNine = Calendar.getInstance().apply {
             add(Calendar.DAY_OF_MONTH, -1)
             set(Calendar.HOUR_OF_DAY, 9)
@@ -157,15 +174,13 @@ class S15SmokeTest {
             set(Calendar.MILLISECOND, 0)
         }.timeInMillis
         val canMiss = yesterdayNine >= mondayOfThisWeek()
-        val finished: TaskEntity
-        val missed: TaskEntity?
-        val slipped: TaskEntity
         runBlocking {
-            finished = repository.createTask(
+            val finished = repository.createTask(
                 userId = userId,
                 title = "Finished task",
                 // No due date: it must not land in the Timeline or
-                // Upcoming too, or the title would match twice.
+                // Upcoming — the statboxes are the only place its
+                // completion surfaces on Today.
                 dueEpochMillis = TaskRepository.NO_DUE_DATE
             )
             repository.updateTask(
@@ -176,62 +191,58 @@ class S15SmokeTest {
                     actualMinutes = 45
                 )
             )
-            missed = if (canMiss) {
+            if (canMiss) {
                 repository.createTask(
                     userId = userId,
                     title = "Missed task",
                     dueEpochMillis = yesterdayNine
                 )
-            } else {
-                null
             }
-            slipped = repository.createTask(
+            val slipped = repository.createTask(
                 userId = userId,
                 title = "Slipped task",
                 // No due date: the default due is "now", and under the
                 // S1-5b missed rule (due time passed) a task due "now"
-                // would also land in Missed — the same review row tag
-                // would then match twice and the tag assertion below
-                // would throw. A slipped task needs no due to slip.
+                // would also land in Missed. A slipped task needs no
+                // due to slip.
                 dueEpochMillis = TaskRepository.NO_DUE_DATE
             )
             repository.updateTask(slipped.copy(carriedOverFromDate = mondayDate))
         }
+        var reviewClicked = false
         composeRule.setContent {
             TodayScreen(
                 onPlanClick = {},
                 onAllTasksClick = {},
+                onWeeklyReviewClick = { reviewClicked = true },
                 tasksViewModel = tasksViewModel,
                 todayViewModel = todayViewModel
             )
         }
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Add task")
+            composeRule.onAllNodesWithTag("this_week_section")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithTag("weekly_review_card").performScrollTo()
-        composeRule.onNodeWithText("Weekly review").assertIsDisplayed()
-        composeRule.onNodeWithText("Finished").assertIsDisplayed()
-        // Pin the rows by testTag: the titles can also appear in the
-        // Timeline / carry-over banner, so a bare text match would
-        // throw on duplicates.
-        composeRule.onNodeWithTag("weekly_review_row_${finished.id}").assertExists()
-        // Feature 18: the hand-written actual surfaces on the row.
-        composeRule.onNodeWithText("45 min").assertIsDisplayed()
-        composeRule.onNodeWithText("Missed").assertIsDisplayed()
-        if (canMiss) {
-            composeRule.onNodeWithTag("weekly_review_row_${missed!!.id}").assertExists()
-        } else {
-            // Monday: no day of this week is over yet, so nothing can
-            // be missed — the empty state is the correct behaviour.
-            composeRule.onNodeWithText("Nothing missed").assertIsDisplayed()
-        }
-        composeRule.onNodeWithText("Slipped").assertIsDisplayed()
-        composeRule.onNodeWithTag("weekly_review_row_${slipped.id}").assertExists()
+        composeRule.onNodeWithTag("this_week_section").assertExists()
+        composeRule.onNodeWithText("This week").assertExists()
+        assertTrue(nodeText("this_week_done_value").contains("[1]"))
+        assertTrue(
+            nodeText("this_week_missed_value").contains(if (canMiss) "[1]" else "[0]")
+        )
+        assertTrue(nodeText("this_week_carried_value").contains("[1]"))
+        // Rate = finished / (finished + missed): 1/1 = 100% on a
+        // Monday, 1/2 = 50% once a day of the week is over.
+        assertTrue(
+            nodeText("this_week_rate_value").contains(if (canMiss) "[50%]" else "[100%]")
+        )
+        // "See full statistics" opens the review screen.
+        composeRule.onNodeWithTag("see_full_statistics")
+            .performSemanticsAction(SemanticsActions.OnClick)
+        assertTrue(reviewClicked)
     }
 
     @Test
-    fun `Weekly review card renders empty sections when nothing happened`() {
+    fun `This week section shows zeros when nothing happened`() {
         composeRule.setContent {
             TodayScreen(
                 onPlanClick = {},
@@ -241,14 +252,16 @@ class S15SmokeTest {
             )
         }
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Add task")
+            composeRule.onAllNodesWithTag("this_week_section")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithTag("weekly_review_card").performScrollTo()
-        composeRule.onNodeWithText("Weekly review").assertIsDisplayed()
-        composeRule.onNodeWithText("Nothing finished yet").assertIsDisplayed()
-        composeRule.onNodeWithText("Nothing missed").assertIsDisplayed()
-        composeRule.onNodeWithText("Nothing slipped").assertIsDisplayed()
+        composeRule.onNodeWithTag("this_week_section").assertExists()
+        composeRule.onNodeWithText("This week").assertExists()
+        assertTrue(nodeText("this_week_done_value").contains("[0]"))
+        assertTrue(nodeText("this_week_missed_value").contains("[0]"))
+        assertTrue(nodeText("this_week_carried_value").contains("[0]"))
+        assertTrue(nodeText("this_week_rate_value").contains("[0%]"))
+        composeRule.onNodeWithTag("see_full_statistics").assertExists()
     }
 
     @Test

@@ -137,6 +137,8 @@
     <!-- Today screen headers -->
     <string name="today_tab_today">Today</string>
     <string name="today_tab_upcoming">Upcoming</string>
+    <!-- Sprint 7-2a — the prototype labels the tab with its scope. -->
+    <string name="today_tab_upcoming_7days">Upcoming · 7 days</string>
     <string name="today_my_day">My Day</string>
     <string name="today_view_list">List</string>
     <string name="today_view_board">Board</string>

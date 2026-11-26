@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -154,8 +153,8 @@ class TodayScreenS12Test {
                 // Date-only due (local midnight): the slot comes from
                 // plannedStart, and a date-only today task is never
                 // missed (S1-5b) — so its title stays exactly two
-                // renderings (My Day + Timeline), never a third in
-                // the review card, whatever time the test runs at.
+                // renderings (My Day + Timeline), whatever time the
+                // test runs at.
                 dueEpochMillis = startOfTodayMillis()
             )
             val today = java.text.SimpleDateFormat(
@@ -170,23 +169,10 @@ class TodayScreenS12Test {
             )
         }
 
-    /**
-     * Title matches outside the Weekly review card. A missed task's
-     * title repeats in the review (S1-5b: missed = due time passed),
-     * so a bare text count is clock-dependent — the review row is
-     * pinned by its testTag instead and subtracted.
-     */
-    private fun nonReviewCount(text: String, taskId: String): Int {
-        val total = composeRule.onAllNodesWithText(text).fetchSemanticsNodes().size
-        val inReview = composeRule.onAllNodesWithTag("weekly_review_row_$taskId")
-            .fetchSemanticsNodes().size
-        return total - inReview
-    }
-
     @Test
     fun `My Day shows planned tasks, Timeline shows timed tasks and events`() {
         planTask("Planned task", at(0, 9), 60)
-        val timed = createTask("Timed task", at(0, 15))
+        createTask("Timed task", at(0, 15))
         createTask("Untimed task", startOfTodayMillis())
         runBlocking {
             db.calendarDao().insertEvent(
@@ -206,15 +192,19 @@ class TodayScreenS12Test {
         }
         composeRule.onAllNodesWithText("Planned task").assertCountEquals(2)
         // The timed task is in the Timeline only (My Day is picked-only).
-        // S1-5b: once its due time passes it also repeats in the review
-        // card's Missed section, so count outside the review only.
-        assertEquals(1, nonReviewCount("Timed task", timed.id))
+        // S7-2a: the weekly review card no longer renders on Today, so
+        // even once its due time passes the title cannot repeat here —
+        // a bare count is exact.
+        assertEquals(
+            1,
+            composeRule.onAllNodesWithText("Timed task").fetchSemanticsNodes().size
+        )
         // The untimed task is in the Timeline's Anytime group.
         composeRule.onNodeWithText("Anytime").performScrollTo().assertIsDisplayed()
         composeRule.onAllNodesWithText("Untimed task").assertCountEquals(1)
         // The event and the now-line are on the Timeline.
         composeRule.onNodeWithText("Team meeting").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Now", substring = true).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("NOW", substring = true).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Timeline").performScrollTo().assertIsDisplayed()
     }
 
@@ -246,7 +236,7 @@ class TodayScreenS12Test {
 
     @Test
     fun `Upcoming tab groups by day and lists no-date tasks`() {
-        val todayTask = createTask("Today task", at(0, 11))
+        createTask("Today task", at(0, 11))
         createTask("Tomorrow task", at(1, 11))
         createTask("No-date task", TaskRepository.NO_DUE_DATE)
         setTodayContent()
@@ -263,26 +253,28 @@ class TodayScreenS12Test {
         // under "Today" — they never vanish from the app. "Today" is
         // two nodes (the Today tab + the day-group header), so count.
         composeRule.onAllNodesWithText("Today").assertCountEquals(2)
-        // S1-5b: once its due time (11:00) passes, "Today task" also
-        // repeats in the review card's Missed section, so a bare
-        // single match would throw — count outside the review instead.
-        // (No scroll-to-row check: Compose 1.7 has no onFirst(), and
-        // onNodeWithText throws on two matches once the review
-        // repeats it.)
-        assertEquals(1, nonReviewCount("Today task", todayTask.id))
+        // S7-2a: the weekly review card no longer renders on Today, so
+        // even once its due time (11:00) passes, "Today task" cannot
+        // repeat here — a bare count is exact. (No scroll-to-row check:
+        // Compose 1.7 has no onFirst(), and onNodeWithText throws on
+        // two matches.)
+        assertEquals(
+            1,
+            composeRule.onAllNodesWithText("Today task").fetchSemanticsNodes().size
+        )
     }
 
     @Test
     fun `nudge card shows when nothing is planned and hides after planning`() {
         setTodayContent()
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("আজকের দিন সাজাবে?")
+            composeRule.onAllNodesWithText("Plan your day?")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("আজকের দিন সাজাবে?").assertIsDisplayed()
+        composeRule.onNodeWithText("Plan your day?").assertIsDisplayed()
         planTask("Planned task", at(0, 9), 60)
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("আজকের দিন সাজাবে?")
+            composeRule.onAllNodesWithText("Plan your day?")
                 .fetchSemanticsNodes().isEmpty()
         }
     }
@@ -298,8 +290,8 @@ class TodayScreenS12Test {
                 .fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText("0%").assertIsDisplayed()
-        // Below the fold on Robolectric's short viewport (hero + nudge
-        // + quick-add + All tasks + tabs sit above it) — scroll first;
+        // Below the fold on Robolectric's short viewport (hero +
+        // quick-add + ghost buttons + tabs sit above it) — scroll first;
         // on a real phone it is on first paint.
         composeRule.onNodeWithText("Nothing planned for today yet").performScrollTo().assertIsDisplayed()
     }
@@ -309,15 +301,17 @@ class TodayScreenS12Test {
         val first = createTask("First", at(0, 9))
         createTask("Second", at(0, 10))
         setTodayContent()
+        // S7-2a — the count lives inside the hero date line now
+        // ("Monday, Nov 16 · 0 of 2 done"), so match it as a substring.
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("0 of 2 done")
+            composeRule.onAllNodesWithText("0 of 2 done", substring = true)
                 .fetchSemanticsNodes().isNotEmpty()
         }
         todayViewModel.toggleTask(first)
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("1 of 2 done")
+            composeRule.onAllNodesWithText("1 of 2 done", substring = true)
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("1 of 2 done").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("1 of 2 done", substring = true).performScrollTo().assertIsDisplayed()
     }
 }

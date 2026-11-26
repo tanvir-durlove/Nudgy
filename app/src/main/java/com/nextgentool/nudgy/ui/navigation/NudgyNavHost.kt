@@ -373,6 +373,8 @@ fun NudgyNavHost(
                 TodayScreen(
                     onPlanClick = { navController.navigate(NudgyRoute.Plan.route) },
                     onAllTasksClick = { navController.navigate(NudgyRoute.Tasks.route) },
+                    // Sprint 7-2a — the Templates ghost button on Today.
+                    onTemplatesClick = { navController.navigate(NudgyRoute.Templates.route) },
                     onFocusClick = { navController.navigate(NudgyRoute.Focus.route) },
                     // Sprint 4-4 — the progress ring opens the week's
                     // summary (spec §7, Q9=(a)).

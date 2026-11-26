@@ -11,7 +11,7 @@ import androidx.compose.ui.unit.sp
 // are static vals, so they cannot read the theme-aware token getters in
 // Color.kt (those only work inside @Composable functions). The hexes below
 // mirror the light/dark palettes — keep them in sync with Color.kt.
-// Light text 0xFF1C1B1F, light muted 0xFF6F6A72 (5.01:1 on canvas).
+// Light text 0xFF111827, light muted 0xFF475569 (7.0:1 on canvas).
 // Dark text 0xFFF5F1EA, dark muted 0xFFB8B2A8 (7.89:1 on background).
 private fun nudgyTypeRoles(text: Color, muted: Color) =
     Typography(
@@ -135,8 +135,8 @@ private fun nudgyTypeRoles(text: Color, muted: Color) =
     )
 
 val Typography = nudgyTypeRoles(
-    text = Color(0xFF1C1B1F),
-    muted = Color(0xFF6F6A72)
+    text = Color(0xFF111827),
+    muted = Color(0xFF475569)
 )
 
 val TypographyDark = nudgyTypeRoles(

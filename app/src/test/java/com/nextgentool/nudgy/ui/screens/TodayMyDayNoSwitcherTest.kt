@@ -1,12 +1,10 @@
 package com.nextgentool.nudgy.ui.screens
 
 import android.content.Context
-import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.onNodeWithText
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -39,16 +37,21 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Sprint 4-3 — the Eisenhower Matrix renders inside Today as the third
- * My Day view (spec §6, Q10=(a)). Renders Today with
- * MANUALLY-constructed ViewModels (real in-memory Room repository, no
- * Hilt), copying the HabitsInTodayTest setup: the Matrix chip is in the
- * My Day toggle next to List / Board, and a Plan-picked task shows in
- * its quadrant when the Matrix view is selected.
+ * Sprint 7-2a — My Day has NO List / Board / Matrix switcher on Today
+ * (spec Q3(a)): Board lives on the Tasks screen, Matrix gets its own
+ * screen later in the sprint. Renders Today with MANUALLY-constructed
+ * ViewModels (real in-memory Room repository, no Hilt), copying the
+ * HabitsInTodayTest setup: a Plan-picked task renders as a plain list
+ * row, and no view-mode chip or matrix exists anywhere on the screen.
+ *
+ * This file was MatrixInTodayTest (Sprint 4-3: the Matrix as the third
+ * My Day view). The Matrix component itself is untouched — only its
+ * entry point on Today is removed; EisenhowerMatrixTest still covers
+ * the component, and its own screen lands later in Sprint 7.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
-class MatrixInTodayTest {
+class TodayMyDayNoSwitcherTest {
 
     @get:Rule
     val composeRule = createComposeRule()
@@ -121,21 +124,11 @@ class MatrixInTodayTest {
         }
     }
 
-    private fun selectMatrixView() {
-        composeRule.onNodeWithTag("my_day_view_mode_matrix")
-            .performScrollTo().performClick()
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Do first")
-                .fetchSemanticsNodes().isNotEmpty()
-        }
-    }
-
     /**
-     * A Plan-picked task in My Day (HIGH, due today noon → Q1).
-     * Returns the task id. Needed even for the chip test: with an empty
-     * My Day, Today shows "Nothing planned for today yet" instead of
-     * ANY view (List / Board / Matrix alike) — so the matrix only
-     * renders once a task is planned.
+     * A Plan-picked task in My Day (HIGH, due today noon).
+     * Returns the task id. Needed even for the no-switcher test: with an
+     * empty My Day, Today shows "Nothing planned for today yet" instead
+     * of the list — so the rows only render once a task is planned.
      */
     private fun seedMyDayTask(title: String): String = runBlocking {
         val noonToday = startOfDayMillis(System.currentTimeMillis()) + 12 * 60 * 60 * 1000L
@@ -148,32 +141,33 @@ class MatrixInTodayTest {
     }
 
     @Test
-    fun `the Matrix chip sits in the My Day toggle next to List and Board`() {
+    fun `My Day has no List Board Matrix switcher`() {
         seedMyDayTask("Call the bank")
         setTodayContent()
 
-        composeRule.onNodeWithTag("my_day_view_mode_list").assertExists()
-        composeRule.onNodeWithTag("my_day_view_mode_board").assertExists()
-        composeRule.onNodeWithTag("my_day_view_mode_matrix").assertExists()
-
-        selectMatrixView()
-        composeRule.onNodeWithTag("eisenhower_matrix").assertExists()
+        composeRule.onNodeWithTag("my_day_view_mode_list").assertDoesNotExist()
+        composeRule.onNodeWithTag("my_day_view_mode_board").assertDoesNotExist()
+        composeRule.onNodeWithTag("my_day_view_mode_matrix").assertDoesNotExist()
+        composeRule.onNodeWithTag("eisenhower_matrix").assertDoesNotExist()
+        // The task still renders — as a plain list row, not a quadrant.
+        composeRule.onNodeWithText("Call the bank").assertExists()
     }
 
     @Test
-    fun `a Plan-picked HIGH task due today shows in Q1 of the Matrix`() {
+    fun `a Plan-picked task renders as a plain list row in My Day`() {
         val createdId = seedMyDayTask("Call the bank")
         setTodayContent()
-        selectMatrixView()
 
-        composeRule.onNodeWithTag("matrix_count_Q1").assertTextEquals("1")
-        composeRule.onNodeWithTag("matrix_card_$createdId").assertExists()
+        composeRule.onNodeWithText("Call the bank").assertExists()
+        composeRule.onNodeWithTag("matrix_count_Q1").assertDoesNotExist()
+        composeRule.onNodeWithTag("matrix_card_$createdId").assertDoesNotExist()
     }
 
     @Test
     fun `the Tasks screen toggle stays List and Board only`() {
-        // The Matrix lives in Today only (spec §6/Q10) — the Tasks
-        // screen must not gain a third chip.
+        // The Matrix has no entry point on Today (S7 Q3(a) — its own
+        // screen lands later in Sprint 7) and must not gain one on
+        // the Tasks screen either.
         composeRule.setContent {
             TasksScreen(viewModel = tasksViewModel)
         }

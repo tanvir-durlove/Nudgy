@@ -57,7 +57,12 @@ class WeeklyReviewScreenTest {
 
     @Test
     fun `the screen shows the summary, focus minutes and streaks`() {
-        val finished = TaskEntity(id = "t1", userId = "u1", title = "Finished task")
+        val finished = TaskEntity(
+            id = "t1",
+            userId = "u1",
+            title = "Finished task",
+            actualMinutes = 45
+        )
         composeRule.setContent {
             WeeklyReviewScreenContent(
                 review = review(finished = listOf(finished)),
@@ -75,6 +80,10 @@ class WeeklyReviewScreenTest {
         composeRule.onNodeWithTag("weekly_review_best_streak").assertIsDisplayed()
         composeRule.onNodeWithText("5 days").assertIsDisplayed()
         composeRule.onNodeWithTag("weekly_review_row_t1").assertExists()
+        // Feature 18 (Sprint 7-2a — moved here from the S15 smoke
+        // test: the card no longer renders on Today): the hand-written
+        // actual time surfaces on the finished row.
+        composeRule.onNodeWithText("45 min").assertIsDisplayed()
     }
 
     @Test

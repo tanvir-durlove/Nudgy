@@ -9,7 +9,8 @@ import androidx.compose.ui.graphics.Color
 // Contrast (verified programmatically, WCAG ratios):
 //   White on NudgyPrimary 4.87:1, NudgyPrimary on Canvas 4.63:1
 //   NudgyPrimaryDark on Canvas 5.20:1, on Peach 4.95:1
-//   NudgyMuted (light) on Canvas 5.01:1, on white 5.28:1
+//   NudgyMuted (light) on Canvas 7.0:1, on white 7.5:1 (S7-2a:
+//   darkened from #6F6A72 to the prototype's #475569).
 val NudgyPrimary = Color(0xFFCC3F27)      // Iconic coral primary (darkened from 0xFFF06449 for contrast)
 val NudgyPrimaryLight = Color(0xFFFF8E78) // Highlight coral
 val NudgyCardBorder = Color(0xFFECE7DE)   // Subtle warm border (hairlines; visible on both themes)
@@ -52,10 +53,10 @@ internal data class NudgyPalette(
 
 private val NudgyLightPalette = NudgyPalette(
     isDark = false,
-    canvas = Color(0xFFFBF9F4),       // Warm linen off-white background
+    canvas = Color(0xFFF4F6F5),       // Prototype background #F4F6F5 (S7-2a; was warm linen #FBF9F4)
     card = Color(0xFFFFFFFF),         // Crisp pure white cards
-    charcoal = Color(0xFF1C1B1F),     // Primary text & active dark pills
-    muted = Color(0xFF6F6A72),        // Secondary text & captions (darkened from 0xFF79747E)
+    charcoal = Color(0xFF111827),     // Prototype ink #111827 (S7-2a; was #1C1B1F)
+    muted = Color(0xFF475569),        // Prototype sub #475569 (S7-2a; was #6F6A72)
     peach = Color(0xFFFDF1F0),        // Meeting cards & tags
     lavender = Color(0xFFF1F0FD),     // Deep work / focus time cards
     sage = Color(0xFFEBF7F0),         // Daily progress card & complete badges
