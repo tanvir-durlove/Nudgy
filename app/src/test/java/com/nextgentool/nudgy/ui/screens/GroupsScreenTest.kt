@@ -268,6 +268,12 @@ class GroupsScreenTest {
             GroupResult.Ok(group())
         })
 
+        // The button sits below the fold (join card above it): scroll
+        // it into view first — a below-fold performClick did not
+        // reliably deliver here (run 1002 opened the card, run 1003
+        // did not, identical click code), while the displayed chip
+        // and Join clicks worked both runs.
+        composeRule.onNodeWithText("Create a group").performScrollTo()
         composeRule.onNodeWithText("Create a group").performClick()
         composeRule.waitForIdle()
         // The card opens below the fold (title + intro + row + note +
@@ -293,6 +299,8 @@ class GroupsScreenTest {
         render()
 
         composeRule.onNodeWithText("New group").assertDoesNotExist()
+        // Below the fold — scroll into view first (see the test above).
+        composeRule.onNodeWithText("Create a group").performScrollTo()
         composeRule.onNodeWithText("Create a group").performClick()
         composeRule.waitForIdle()
         // Below the fold once open (see the test above) — assertExists.
