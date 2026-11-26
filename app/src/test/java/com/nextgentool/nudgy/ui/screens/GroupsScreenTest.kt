@@ -10,6 +10,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import com.nextgentool.nudgy.auth.NudgyUser
+import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.repository.GroupActivityEntry
@@ -54,6 +55,12 @@ import org.robolectric.annotation.Config
  * with groupWorkEnabled=true — the creator sees Delete group, members
  * see Leave group; both open a confirm dialog that fires the
  * callback. The buttons are not rendered at all when the flag is off.
+ *
+ * Sprint 7 — the detail restyle (spec §4, prototype scr-group-detail):
+ * backbar with the group name + RolePill, the pinned notice card with
+ * the inline send card (the sheet is gone), the tasks seg + .task rows
+ * with donechips, the cream invite codebox. The list tests above are
+ * untouched.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -82,6 +89,7 @@ class GroupsScreenTest {
         user: NudgyUser = memberUser,
         groups: List<GroupEntity> = listOf(group()),
         allTasks: List<TaskEntity> = emptyList(),
+        allEvents: List<CalendarEventEntity> = emptyList(),
         completions: Map<String, GroupCompletion> = emptyMap(),
         membersOverride: List<GroupMember>? = null,
         groupTasksEnabled: Boolean = false,
@@ -111,7 +119,7 @@ class GroupsScreenTest {
                     user = user,
                     groups = groups,
                     allTasks = allTasks,
-                    allEvents = emptyList(),
+                    allEvents = allEvents,
                     onCreateGroup = onCreateGroup,
                     onJoinGroup = onJoinGroup,
                     onObserveMembers = { flowOf(shownMembers) },
@@ -186,11 +194,14 @@ class GroupsScreenTest {
         composeRule.onNodeWithTag("group_add_task_g-1").assertIsDisplayed()
         composeRule.onNodeWithText("+ Add task").assertIsDisplayed()
         composeRule.onNodeWithText("+ Add task").performClick()
+        // Sprint 7 — the detail-only sec-title is the open signal
+        // (the old "All groups" back text is gone); the backbar tag
+        // is asserted right after.
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("All groups")
+            composeRule.onAllNodesWithText("Group tasks & schedules")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("All groups").assertIsDisplayed()
+        composeRule.onNodeWithTag("group_detail_backbar").assertIsDisplayed()
     }
 
     @Test
@@ -232,7 +243,9 @@ class GroupsScreenTest {
         // rendering + members flow are deterministic once open.
         render(initialSelectedGroup = group())
 
-        composeRule.onNodeWithText("All groups").assertIsDisplayed()
+        // Sprint 7 — the detail backbar (group name + RolePill) is the
+        // open signal now; the old "All groups" back text is gone.
+        composeRule.onNodeWithTag("group_detail_backbar").assertIsDisplayed()
         // Members arrive via the observed flow — wait for them like
         // ChatScreenSmokeTest waits for the seeded welcome message.
         composeRule.waitUntil(timeoutMillis = 10_000) {
@@ -390,8 +403,8 @@ class GroupsScreenTest {
             initialSelectedGroup = group()
         )
 
-        composeRule.onNodeWithText("Add task").assertExists()
-        composeRule.onNodeWithText("Add schedule").assertExists()
+        composeRule.onNodeWithText("+ Add task").assertExists()
+        composeRule.onNodeWithText("+ Add schedule").assertExists()
         composeRule.onNodeWithText("Group tasks and notices").assertDoesNotExist()
         composeRule.onNodeWithText("১/২ করেছে").assertExists()
         composeRule.onNodeWithText("Homework").assertExists()
@@ -406,8 +419,8 @@ class GroupsScreenTest {
             initialSelectedGroup = group()
         )
 
-        composeRule.onNodeWithText("Add task").assertDoesNotExist()
-        composeRule.onNodeWithText("Add schedule").assertDoesNotExist()
+        composeRule.onNodeWithText("+ Add task").assertDoesNotExist()
+        composeRule.onNodeWithText("+ Add schedule").assertDoesNotExist()
         composeRule.onNodeWithText("১/২ করেছে").assertExists()
     }
 
@@ -491,7 +504,7 @@ class GroupsScreenTest {
             initialSelectedGroup = group()
         )
 
-        composeRule.onNodeWithText("Add task").performScrollTo().performClick()
+        composeRule.onNodeWithText("+ Add task").performScrollTo().performClick()
         composeRule.waitForIdle()
 
         composeRule.onNodeWithText("Post a group task").assertIsDisplayed()
@@ -521,7 +534,7 @@ class GroupsScreenTest {
         composeRule.onNodeWithTag("notices_card").assertExists()
         composeRule.onNodeWithText("Class at 10").assertExists()
         composeRule.onNodeWithText("Moved to 11").assertExists()
-        composeRule.onNodeWithText("Send notice").assertDoesNotExist()
+        composeRule.onNodeWithText("Post a new notice").assertDoesNotExist()
     }
 
     @Test
@@ -536,8 +549,14 @@ class GroupsScreenTest {
         composeRule.onNodeWithText("No notices yet.").assertExists()
     }
 
+    // Sprint 7 — the send flow lives in the inline card on the
+    // Notices card now (prototype scr-group-detail), not in a sheet:
+    // same validation (blank → disabled) and the same callback. The
+    // field sits below the fold — scroll it into view before typing
+    // (the silent-drop trap) and scroll the submit into view before
+    // tapping it (the below-fold click lesson).
     @Test
-    fun `creator sends a notice through the sheet`() {
+    fun `creator sends a notice through the inline card`() {
         val sent = mutableListOf<Pair<String, String>>()
         render(
             user = creator,
@@ -549,11 +568,109 @@ class GroupsScreenTest {
 
         composeRule.onNodeWithTag("send_notice_open").performScrollTo().performClick()
         composeRule.waitForIdle()
+        composeRule.onNodeWithTag("send_notice_field").performScrollTo()
+        composeRule.onNodeWithTag("send_notice_field").assertIsDisplayed()
         composeRule.onNodeWithTag("send_notice_field").performTextInput("Class at 10")
-        composeRule.onNodeWithTag("send_notice_submit").performClick()
+        assertEquals(
+            2,
+            composeRule.onAllNodesWithText("Class at 10").fetchSemanticsNodes().size
+        )
+        composeRule.onNodeWithTag("send_notice_submit").performScrollTo().performClick()
         composeRule.waitForIdle()
 
         assertEquals(listOf("g-1" to "Class at 10"), sent)
+    }
+
+    // ---- Sprint 7: group detail restyle (spec §4, prototype
+    // scr-group-detail) — backbar, pinned notice, tasks seg +
+    // .task rows, invite codebox. The list tests above are untouched.
+
+    @Test
+    fun `detail backbar shows the group name and the role pill`() {
+        render(user = creator, initialSelectedGroup = group())
+
+        composeRule.onNodeWithTag("group_detail_backbar").assertIsDisplayed()
+        composeRule.onNodeWithText("DIU 41").assertIsDisplayed()
+        composeRule.onNodeWithText("You are admin").assertIsDisplayed()
+    }
+
+    @Test
+    fun `detail shows the pinned notice with the prototype copy`() {
+        render(
+            user = creator,
+            groupNoticesEnabled = true,
+            noticesOverride = listOf(notice("n-1", "Class at 10", 2_000L)),
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithText("Group notice").assertExists()
+        composeRule.onNodeWithText("From the admin").assertExists()
+        composeRule.onNodeWithText("Class at 10").assertExists()
+        composeRule.onNodeWithText(
+            "stays pinned at the top of the group", substring = true
+        ).assertExists()
+        composeRule.onNodeWithText("Post a new notice").assertExists()
+    }
+
+    @Test
+    fun `detail shows the tasks sec-title and intro`() {
+        render(
+            user = creator,
+            groupTasksEnabled = true,
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithText("Group tasks & schedules").assertExists()
+        composeRule.onNodeWithText(
+            "Tap a “done” chip on a task to see who has finished it.",
+            substring = true
+        ).assertExists()
+        // The "Members · N" sec-title needs the observed member flow —
+        // wait for a member row first, like the detail test above.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Ayesha")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("Members · 2").assertExists()
+    }
+
+    @Test
+    fun `detail invite card shows the join code and share copy`() {
+        render(initialSelectedGroup = group())
+
+        composeRule.onNodeWithText("Invite members").assertExists()
+        composeRule.onNodeWithText("JOIN CODE").assertExists()
+        composeRule.onNodeWithText("K7Q2XA").assertExists()
+        composeRule.onNodeWithText("Share code").assertExists()
+        composeRule.onNodeWithText("Copy").assertExists()
+        composeRule.onNodeWithText(
+            "Members who leave can rejoin with the same code.",
+            substring = true
+        ).assertExists()
+    }
+
+    private fun groupEvent(
+        id: String = "e-1",
+        title: String = "Planning meet"
+    ) = CalendarEventEntity(
+        id = id, userId = "user-1", title = title,
+        startEpochMillis = 1_800_000_000_000L,
+        endEpochMillis = 1_800_003_600_000L,
+        groupId = "g-1"
+    )
+
+    @Test
+    fun `detail schedule section lists events`() {
+        render(
+            user = creator,
+            groupTasksEnabled = true,
+            allEvents = listOf(groupEvent()),
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithText("Schedule").assertExists()
+        composeRule.onNodeWithText("1 events").assertExists()
+        composeRule.onNodeWithText("Planning meet").assertExists()
     }
 
     @Test
@@ -564,7 +681,7 @@ class GroupsScreenTest {
             openGroupId = "g-1"
         )
 
-        composeRule.onNodeWithText("All groups").assertIsDisplayed()
+        composeRule.onNodeWithTag("group_detail_backbar").assertIsDisplayed()
         composeRule.onNodeWithText("Ayesha").assertExists()
     }
 
@@ -576,7 +693,7 @@ class GroupsScreenTest {
             openGroupId = "g-gone"
         )
 
-        composeRule.onNodeWithText("All groups").assertDoesNotExist()
+        composeRule.onNodeWithTag("group_detail_backbar").assertDoesNotExist()
         composeRule.onNodeWithText("DIU 41").assertExists()
     }
 
