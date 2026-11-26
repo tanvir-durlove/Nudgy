@@ -6,6 +6,7 @@ import android.widget.ImageView
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -111,6 +112,7 @@ import com.nextgentool.nudgy.ui.theme.NudgyMemberPillText
 import com.nextgentool.nudgy.ui.theme.NudgyPeach
 import com.nextgentool.nudgy.ui.theme.NudgySage
 import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
+import com.nextgentool.nudgy.ui.theme.NudgyFieldBorder
 import com.nextgentool.nudgy.ui.theme.NudgyMuted
 import com.nextgentool.nudgy.ui.theme.NudgyPrimary
 import com.nextgentool.nudgy.ui.theme.NudgyTokens
