@@ -22,6 +22,7 @@ import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.domain.model.BuiltInTemplates
 import com.nextgentool.nudgy.domain.model.TemplateDraft
 import com.nextgentool.nudgy.ui.viewmodel.TemplatesViewModel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -184,6 +185,37 @@ class TemplatesScreenTest {
             viewModel.templates.value.any { it.name == "Weekend reset" }
         }
         composeRule.onNodeWithText("Weekend reset").assertExists()
+    }
+
+    // PR #133 fix round 3 — diagnostic for the create test: the UI
+    // flow (type → Save → card closes) is proven by the assertions,
+    // but the template never reached `viewModel.templates` in three
+    // CI runs. This test calls createTemplate directly and checks
+    // the two halves separately: (1) the row reaches the
+    // repository, (2) the ViewModel flow re-emits it. Whichever half
+    // fails names the broken link — the UI test cannot tell them
+    // apart, because its only signal is the flow.
+    @Test
+    fun `createTemplate through the ViewModel inserts the template`() {
+        renderTemplates()
+        viewModel.createTemplate(
+            "Direct call",
+            listOf(TemplateDraft(title = "Do a thing"))
+        )
+        // (1) The row must reach the repository — the insert ran.
+        // A Room Flow read suspends only until the query executor
+        // answers, so runBlocking is safe inside waitUntil here.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            runBlocking {
+                repository.observeTemplates(userId)
+                    .first().any { it.name == "Direct call" }
+            }
+        }
+        // (2) The ViewModel flow must re-emit it — the screen and
+        // the UI create test both depend on this.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            viewModel.templates.value.any { it.name == "Direct call" }
+        }
     }
 
     @Test
