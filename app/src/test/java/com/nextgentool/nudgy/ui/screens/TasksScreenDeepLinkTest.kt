@@ -114,10 +114,12 @@ class TasksScreenDeepLinkTest {
         repository.getAllTasksOnce(userId).first { it.title == title }.id
     }
 
-    /** The list has loaded (the "Add task" quick-add field is up). */
+    /** The list has loaded (the search field is up — Sprint 7: the
+     * quick-add moved to the bottom of the list, so "Add task" no
+     * longer proves the list loaded). */
     private fun waitForListLoaded() {
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Add task")
+            composeRule.onAllNodesWithText("Search tasks")
                 .fetchSemanticsNodes().isNotEmpty()
         }
     }

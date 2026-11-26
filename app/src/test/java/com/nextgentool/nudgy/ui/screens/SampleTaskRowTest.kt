@@ -185,18 +185,20 @@ class SampleTaskRowTest {
 
         // TasksScreen, not TodayScreen (see the class comment): the
         // list scrolls by index, so the delete button is composed and
-        // pressable. The sample is list index 6, the real task 5.
+        // pressable. Sprint 7: the quick-add moved to the bottom, so
+        // the sample is list index 5, the real task 4 (search, saved
+        // views, filters, seg, then the rows).
         composeRule.setContent {
             TasksScreen(viewModel = tasksViewModel)
         }
         // The list arrives behind the loading skeleton — wait for the
-        // quick-add field (the TasksScreenSmokeTest pattern) before
+        // search field (the Sprint 7 "list loaded" signal) before
         // scrolling, or the scroll lands on an empty list.
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Add task")
+            composeRule.onAllNodesWithText("Search tasks")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithTag("tasks_list").performScrollToIndex(6)
+        composeRule.onNodeWithTag("tasks_list").performScrollToIndex(5)
         // The sample chip lands exactly once (the sample row);
         // the ordinary task next to it carries no chip.
         composeRule.waitUntil(timeoutMillis = 10_000) {

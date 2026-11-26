@@ -188,6 +188,20 @@
     <string name="tasks_completed">Completed (%1$d)</string>
     <string name="tasks_filter_all">All</string>
     <string name="tasks_filter_group">Group</string>
+    <!-- Sprint 7 — Tasks rebuilt to the prototype (scr-tasks). -->
+    <string name="tasks_my_filters_label">MY FILTERS</string>
+    <string name="tasks_filters_note">“My filters” are views you saved. Tap a filter to narrow the list — tap it again to clear it.</string>
+    <string name="tasks_filter_project">Project: %1$s</string>
+    <string name="tasks_filter_tag">Tag: %1$s</string>
+    <string name="tasks_filter_status">Status: %1$s</string>
+    <string name="tasks_view_hint_list">List view — every matching task in one list.</string>
+    <string name="tasks_view_hint_board">The Board shows the same tasks grouped by status — To do, In progress, Done — so you can see at a glance what is waiting and what is stuck.</string>
+    <string name="tasks_board_note">Tap a card to open it. In the app, drag cards between columns to change status.</string>
+    <string name="tasks_new_task_label">NEW TASK</string>
+    <string name="tasks_new_task_note">Saved tasks get today’s date — change it any time in the task details.</string>
+    <string name="tasks_empty_filtered_title">No tasks match that view.</string>
+    <string name="tasks_empty_filtered_sub">Try a different filter, or clear the search.</string>
+    <string name="tasks_empty_first_sub">Add your first task below.</string>
 
     <!-- Today widget (S6-5, step 3a) -->
     <string name="widget_today_title">Today</string>

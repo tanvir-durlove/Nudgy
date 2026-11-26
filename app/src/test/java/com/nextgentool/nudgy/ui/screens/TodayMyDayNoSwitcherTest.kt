@@ -197,7 +197,7 @@ class TodayMyDayNoSwitcherTest {
             TasksScreen(viewModel = tasksViewModel)
         }
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Add task")
+            composeRule.onAllNodesWithText("Search tasks")
                 .fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithTag("view_mode_list").assertExists()

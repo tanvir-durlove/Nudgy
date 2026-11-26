@@ -2,16 +2,19 @@ package com.nextgentool.nudgy.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -45,12 +48,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.nextgentool.nudgy.R
@@ -97,6 +103,18 @@ import java.util.Locale
  * bottom-nav destination, so no tab is highlighted while it is open.
  * Content arrives behind skeleton rows while the first Flow emission
  * loads (no abrupt pop-in).
+ *
+ * Sprint 7 — rebuilt to the prototype (scr-tasks): backbar ("All
+ * tasks" + total count + Templates soft button), search, "MY FILTERS"
+ * label before the saved-view chips, filter chips labelled
+ * "Project: / Tag: / Status:" + the filters note, a two-pill List |
+ * Board seg with a mode hint, and the NEW TASK card (label + field +
+ * Save) as the LAST list item. Design-only: the ViewModel, search,
+ * saved views, filter logic, List/Board state, TaskBoard drag, the
+ * detail sheet and the search deep-link are untouched. Disclosed
+ * deviations: the muted total count stays next to the title (the
+ * prototype shows none — it is live information); the "Clear filter"
+ * affordance stays in the empty state (the prototype has no such row).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -164,7 +182,7 @@ fun TasksScreen(
                 )
             }
             Text(
-                text = "My tasks",
+                text = "All tasks",
                 style = MaterialTheme.typography.titleLarge,
                 color = NudgyCharcoal
             )
@@ -175,12 +193,20 @@ fun TasksScreen(
                 color = NudgyMuted
             )
             Spacer(modifier = Modifier.width(16.dp))
-            // Sprint 1-4 — templates (Feature 13).
-            TextButton(
+            // Sprint 1-4 — templates (Feature 13). Sprint 7: a soft
+            // small button (prototype .btn-soft) instead of the accent
+            // TextButton; the testTag stays.
+            Button(
                 onClick = onNavigateToTemplates,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = colorResource(R.color.nudgy_teal_soft),
+                    contentColor = colorResource(R.color.nudgy_teal_dark)
+                ),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                shape = CircleShape,
                 modifier = Modifier.testTag("templates_button")
             ) {
-                Text("Templates", color = NudgyAccent)
+                Text("Templates")
             }
         }
 
@@ -203,20 +229,9 @@ fun TasksScreen(
                 .padding(horizontal = NudgyTokens.screenPadding),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Quick add.
-            item(key = "quick_add") {
-                val lastCreated = uiState.items
-                    .firstOrNull { it.task.id == uiState.lastCreatedTaskId }
-                QuickAddTask(
-                    onCreate = { viewModel.createTask(it) },
-                    isCreating = uiState.isCreating,
-                    lastCreatedTask = lastCreated?.task,
-                    onLastCreatedDue = { viewModel.setLastCreatedDue(it) },
-                    onLastCreatedPriority = { viewModel.setLastCreatedPriority(it) },
-                    onDismissLastCreated = { viewModel.clearLastCreated() }
-                )
-            }
-
+            // Sprint 7 — the quick-add moved to the BOTTOM of the list
+            // (the NEW TASK card, last item): the prototype order is
+            // search → filters → seg → list → new task.
             // Search (title / description / tag name — Tasks only, not global).
             item(key = "search") {
                 OutlinedTextField(
@@ -236,12 +251,21 @@ fun TasksScreen(
                 )
             }
 
-            // Saved views.
+            // Saved views (prototype "MY FILTERS" row: the tiny bold
+            // label sits before the user's actual saved-view chips —
+            // the prototype's Everything/Work/High/Group are demo views).
             item(key = "saved_views") {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
+                    Text(
+                        text = stringResource(R.string.tasks_my_filters_label),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = NudgyMuted,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.weight(1f)
@@ -283,43 +307,49 @@ fun TasksScreen(
                 }
             }
 
-            // Filter chips.
+            // Filter chips + the prototype's tiny note (the chips
+            // toggle off on re-tap — that is what the note describes).
             item(key = "filters") {
-                FilterChipRow(
-                    filter = uiState.filter,
-                    tags = uiState.tags,
-                    projects = uiState.projects,
-                    onFilterChange = { viewModel.setFilter(it) }
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChipRow(
+                        filter = uiState.filter,
+                        tags = uiState.tags,
+                        projects = uiState.projects,
+                        onFilterChange = { viewModel.setFilter(it) }
+                    )
+                    Text(
+                        text = stringResource(R.string.tasks_filters_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = NudgyMuted
+                    )
+                }
             }
 
             // Sprint 1-4 — List / Board toggle (Feature 5). The Matrix
             // (Sprint 4-3) lives in Today's My Day section only — it is
             // deliberately not offered here, so the toggle stays two
             // modes even though TaskViewMode has a third entry.
+            // Sprint 7: a two-pill segmented control (prototype .seg)
+            // replaces the single FilterChip toggle; the testTags stay
+            // so the S14 Board test keeps working. The hint below the
+            // seg follows the mode.
             item(key = "view_mode") {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(TaskViewMode.LIST, TaskViewMode.BOARD).forEach { mode ->
-                        FilterChip(
-                            selected = viewMode == mode,
-                            onClick = { viewMode = mode },
-                            label = {
-                                Text(if (mode == TaskViewMode.LIST) "List" else "Board")
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = colorResource(R.color.nudgy_teal),
-                                selectedLabelColor = colorResource(R.color.nudgy_cream),
-                                // Unselected: explicit theme-aware colors
-                                // (same white-on-white-in-dark-mode trap
-                                // as the saved-view chips above).
-                                containerColor = NudgyCard,
-                                labelColor = NudgyCharcoal
-                            ),
-                            modifier = Modifier.testTag(
-                                "view_mode_${mode.name.lowercase()}"
-                            )
-                        )
-                    }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ViewModeSeg(
+                        viewMode = viewMode,
+                        onModeChange = { viewMode = it }
+                    )
+                    Text(
+                        text = stringResource(
+                            if (viewMode == TaskViewMode.LIST) {
+                                R.string.tasks_view_hint_list
+                            } else {
+                                R.string.tasks_view_hint_board
+                            }
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = NudgyMuted
+                    )
                 }
             }
 
@@ -343,16 +373,18 @@ fun TasksScreen(
                                 text = if (uiState.filter.isEmpty()) {
                                     "No tasks yet"
                                 } else {
-                                    "No tasks match this filter"
+                                    stringResource(R.string.tasks_empty_filtered_title)
                                 },
                                 style = MaterialTheme.typography.titleMedium,
                                 color = NudgyCharcoal
                             )
                             Text(
                                 text = if (uiState.filter.isEmpty()) {
-                                    "Add your first task above."
+                                    // Sprint 7: the NEW TASK card is
+                                    // BELOW the list now, not above.
+                                    stringResource(R.string.tasks_empty_first_sub)
                                 } else {
-                                    "Try a different filter or search."
+                                    stringResource(R.string.tasks_empty_filtered_sub)
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = NudgyMuted
@@ -370,17 +402,26 @@ fun TasksScreen(
                 // items as the List, grouped by status. Dragging a card
                 // moves it; ticking in the List moves it to Done here.
                 item(key = "board") {
-                    TaskBoard(
-                        items = uiState.items,
-                        onMoveTask = { task, status, index, visibleItems ->
-                            viewModel.moveTaskToPosition(task, status, index, visibleItems)
-                        },
-                        onToggle = { viewModel.toggleTask(it) },
-                        onTaskClick = { viewModel.selectTask(it.id) },
-                        // Sprint 6-3 — the board card carries the
-                        // sample delete too (same deleteTask).
-                        onDeleteSample = { viewModel.deleteTask(it) }
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        TaskBoard(
+                            items = uiState.items,
+                            onMoveTask = { task, status, index, visibleItems ->
+                                viewModel.moveTaskToPosition(task, status, index, visibleItems)
+                            },
+                            onToggle = { viewModel.toggleTask(it) },
+                            onTaskClick = { viewModel.selectTask(it.id) },
+                            // Sprint 6-3 — the board card carries the
+                            // sample delete too (same deleteTask).
+                            onDeleteSample = { viewModel.deleteTask(it) }
+                        )
+                        // Sprint 7: the prototype's tiny note below the
+                        // columns (the drag behaviour itself is unchanged).
+                        Text(
+                            text = stringResource(R.string.tasks_board_note),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = NudgyMuted
+                        )
+                    }
                 }
             } else {
                 items(activeItems, key = { it.task.id }) { item ->
@@ -406,6 +447,48 @@ fun TasksScreen(
                             onToggle = { viewModel.toggleTask(item.task) },
                             onClick = { viewModel.selectTask(item.task.id) },
                             onDeleteSample = { viewModel.deleteTask(it) }
+                        )
+                    }
+                }
+            }
+
+            // Sprint 7 — NEW TASK card (prototype): the quick-add lives
+            // HERE now, as the last item — label + field + teal Save
+            // (the S7-2a showSaveButton variant) + the tiny note. The
+            // create / lastCreated / due / priority behaviour is exactly
+            // as it was at the top; only the position changed.
+            item(key = "new_task") {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = NudgyTokens.cardRadius,
+                    color = MaterialTheme.colorScheme.surface,
+                    shadowElevation = NudgyTokens.cardElevation,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(
+                            text = stringResource(R.string.tasks_new_task_label),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = NudgyMuted
+                        )
+                        Spacer(modifier = Modifier.height(9.dp))
+                        val lastCreated = uiState.items
+                            .firstOrNull { it.task.id == uiState.lastCreatedTaskId }
+                        QuickAddTask(
+                            onCreate = { viewModel.createTask(it) },
+                            isCreating = uiState.isCreating,
+                            lastCreatedTask = lastCreated?.task,
+                            onLastCreatedDue = { viewModel.setLastCreatedDue(it) },
+                            onLastCreatedPriority = { viewModel.setLastCreatedPriority(it) },
+                            onDismissLastCreated = { viewModel.clearLastCreated() },
+                            showSaveButton = true
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = stringResource(R.string.tasks_new_task_note),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = NudgyMuted
                         )
                     }
                 }
@@ -509,6 +592,60 @@ fun TasksScreen(
     }
 }
 
+/**
+ * Sprint 7 — the List | Board segmented control (prototype .seg):
+ * a nudgy_track pill track; the selected pill is a teal fill with a
+ * cream label, the unselected one is plain with a muted label. The
+ * testTags stay `view_mode_list` / `view_mode_board` so the S14 Board
+ * test keeps working. Local UI state only — the caller owns viewMode.
+ */
+@Composable
+private fun ViewModeSeg(
+    viewMode: TaskViewMode,
+    onModeChange: (TaskViewMode) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                color = colorResource(R.color.nudgy_track),
+                shape = CircleShape
+            )
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        listOf(TaskViewMode.LIST, TaskViewMode.BOARD).forEach { mode ->
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 38.dp)
+                    .background(
+                        color = if (viewMode == mode) {
+                            colorResource(R.color.nudgy_teal)
+                        } else {
+                            Color.Transparent
+                        },
+                        shape = CircleShape
+                    )
+                    .clickable { onModeChange(mode) }
+                    .testTag("view_mode_${mode.name.lowercase()}")
+            ) {
+                Text(
+                    text = if (mode == TaskViewMode.LIST) "List" else "Board",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (viewMode == mode) {
+                        colorResource(R.color.nudgy_cream)
+                    } else {
+                        NudgyMuted
+                    }
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun FilterChipRow(
     filter: SavedViewFilter,
@@ -535,7 +672,7 @@ private fun FilterChipRow(
                             filter.copy(projectId = if (selected) null else project.id)
                         )
                     },
-                    label = { Text(project.name) },
+                    label = { Text(stringResource(R.string.tasks_filter_project, project.name)) },
                     leadingIcon = {
                         Box(
                             modifier = Modifier
@@ -558,7 +695,7 @@ private fun FilterChipRow(
                             filter.copy(tagIds = if (selected) emptyList() else listOf(tag.id))
                         )
                     },
-                    label = { Text(tag.name) },
+                    label = { Text(stringResource(R.string.tasks_filter_tag, tag.name)) },
                     leadingIcon = {
                         Box(
                             modifier = Modifier
@@ -598,11 +735,14 @@ private fun FilterChipRow(
                     },
                     label = {
                         Text(
-                            when (status) {
-                                TaskStatus.TODO -> "To do"
-                                TaskStatus.IN_PROGRESS -> "In progress"
-                                TaskStatus.DONE -> "Done"
-                            }
+                            stringResource(
+                                R.string.tasks_filter_status,
+                                when (status) {
+                                    TaskStatus.TODO -> "To do"
+                                    TaskStatus.IN_PROGRESS -> "In progress"
+                                    TaskStatus.DONE -> "Done"
+                                }
+                            )
                         )
                     },
                     colors = filterChipColors()
