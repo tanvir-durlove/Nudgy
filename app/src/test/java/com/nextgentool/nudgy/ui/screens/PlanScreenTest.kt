@@ -132,9 +132,6 @@ class PlanScreenTest {
         }
     }
 
-    private fun topOf(text: String): Float =
-        composeRule.onNodeWithText(text).fetchSemanticsNode().boundsInRoot.top
-
     /**
      * Index of the first text node containing [title] in the semantics
      * tree's traversal order, which follows layout order. -1 if no such
@@ -391,13 +388,18 @@ class PlanScreenTest {
         }
         // Full draft first (see waitForFullDraft).
         waitForFullDraft()
-        assertTrue(topOf("Old report") < topOf("Dentist"))
+        // Traversal order, not pixel tops: boundsInRoot is unreliable
+        // in Robolectric (S1-2 — the measurement was the liar, not the
+        // product), and test 1 above already proves this order.
+        assertTrue(traversalIndex("Old report") < traversalIndex("Dentist"))
         composeRule.onNodeWithContentDescription("Move Old report down")
             .performSemanticsAction(SemanticsActions.OnClick)
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            topOf("Dentist") < topOf("Old report")
+            traversalIndex("Dentist") >= 0 &&
+                traversalIndex("Old report") >= 0 &&
+                traversalIndex("Dentist") < traversalIndex("Old report")
         }
-        assertTrue(topOf("Dentist") < topOf("Old report"))
+        assertTrue(traversalIndex("Dentist") < traversalIndex("Old report"))
     }
 
     @Test
@@ -406,14 +408,17 @@ class PlanScreenTest {
         setPlanContent()
         waitForFullDraft()
         // The date part is the live dayLabel, not the prototype's demo date.
+        // The intro is ONE Text ("{date} · {body}"), so the date and the
+        // body are substrings, not whole nodes — substring = true (the
+        // ChatScreenSmokeTest pattern); the default exact match never fires.
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText(dayLabel(startOfTodayMillis()))
+            composeRule.onAllNodesWithText(dayLabel(startOfTodayMillis()), substring = true)
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onAllNodesWithText("Here is a draft of your day")
-            .fetchSemanticsNodes().isNotEmpty().let { assertTrue(it) }
-        composeRule.onAllNodesWithText("your call, always")
-            .fetchSemanticsNodes().isNotEmpty().let { assertTrue(it) }
+        composeRule.onNodeWithText("Here is a draft of your day", substring = true)
+            .assertExists()
+        composeRule.onNodeWithText("your call, always", substring = true)
+            .assertExists()
     }
 
     @Test
