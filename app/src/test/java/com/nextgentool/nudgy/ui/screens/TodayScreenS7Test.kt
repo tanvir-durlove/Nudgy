@@ -3,9 +3,6 @@ package com.nextgentool.nudgy.ui.screens
 import android.content.Context
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.test.assertDoesNotExist
-import androidx.compose.ui.test.assertExists
-import androidx.compose.ui.test.fetchSemanticsNode
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -20,7 +17,6 @@ import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.model.TaskStatus
 import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
-import com.nextgentool.nudgy.domain.startOfTodayMillis
 import com.nextgentool.nudgy.domain.usecase.AddSubtaskUseCase
 import com.nextgentool.nudgy.domain.usecase.CarryOverUseCase
 import com.nextgentool.nudgy.domain.usecase.CreateTaskUseCase
@@ -156,7 +152,7 @@ class TodayScreenS7Test {
     }
 
     @Test
-    fun `hero matches the prototype: title, date, donut, Plan my day, quick-add card, ghost buttons`() {
+    fun `hero matches the prototype — title, date, donut, Plan my day, quick-add card, ghost buttons`() {
         setTodayContent()
 
         // Hero: title + date line + donut + actions.
@@ -240,11 +236,17 @@ class TodayScreenS7Test {
     }
 
     @Test
-    fun `Timeline renders the prototype rail: time, block, NOW line, Anytime`() {
+    fun `Timeline renders the prototype rail — time, block, NOW line, Anytime`() {
         // A timed task with an estimate (15:00, 45 min → block) + an
         // untimed task (Anytime group).
         val due = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 15)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val startOfToday = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
@@ -264,7 +266,7 @@ class TodayScreenS7Test {
             repository.createTask(
                 userId = repository.currentUserId(),
                 title = "Buy milk",
-                dueEpochMillis = startOfTodayMillis()
+                dueEpochMillis = startOfToday
             )
         }
         setTodayContent()
