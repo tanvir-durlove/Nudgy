@@ -110,6 +110,9 @@
     <string name="settings_calendar_sync_now">Sync now</string>
     <string name="settings_calendar_syncing">Syncing…</string>
     <string name="settings_calendar_connect_button">Connect</string>
+    <string name="calendar_sync_connected">Google Calendar · 2-way sync</string>
+    <string name="calendar_sync_not_connected">Google Calendar · not connected</string>
+    <string name="calendar_grid_note">Weeks run Monday–Sunday. Dots mark days with tasks or events.</string>
     <string name="settings_gemini_custom_key">Custom key saved</string>
     <string name="settings_gemini_builtin">Using Nudgy\'s built-in AI</string>
     <string name="settings_memories_empty">Nothing remembered yet</string>

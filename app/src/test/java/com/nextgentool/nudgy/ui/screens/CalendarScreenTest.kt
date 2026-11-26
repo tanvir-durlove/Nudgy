@@ -8,7 +8,10 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.repository.FocusTimeSlot
+import com.nextgentool.nudgy.domain.startOfDayMillis
 import com.nextgentool.nudgy.intent.IncomingIntent
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -17,6 +20,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 
 /**
@@ -134,7 +138,11 @@ class CalendarScreenTest {
                 isCalendarConnected = false
             )
         }
-        composeRule.onNodeWithText("Allow access").assertIsDisplayed()
+        // Sprint 7 — the month grid card above pushes the sync card
+        // below the fold on the test surface, so assertIsDisplayed
+        // fails for a composed-but-not-visible node; assertExists
+        // still fails if the card is genuinely missing.
+        composeRule.onNodeWithText("Allow access").assertExists()
     }
 
     @Test
@@ -147,7 +155,9 @@ class CalendarScreenTest {
                 isSyncing = true
             )
         }
-        composeRule.onNodeWithText("Syncing…").assertIsDisplayed()
+        // Sprint 7 — same below-the-fold reason as the test above:
+        // the grid pushes the sync card out of the test viewport.
+        composeRule.onNodeWithText("Syncing…").assertExists()
     }
 
     // ------------------------------------------------------ Sprint 2-4
@@ -157,7 +167,7 @@ class CalendarScreenTest {
         // Target: five days from today (next week), 15:00 slot.
         val target = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, 5) }
         val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(target.time)
-        val dayName = SimpleDateFormat("EEE", Locale.getDefault()).format(target.time)
+        var selectedDay = -1L
         composeRule.setContent {
             CalendarScreen(
                 events = emptyList(),
@@ -165,14 +175,19 @@ class CalendarScreenTest {
                     date = dateStr,
                     time = "15:00",
                     title = null
-                )
+                ),
+                onSelectDay = { selectedDay = it }
             )
         }
         composeRule.waitForIdle()
 
-        // The schedule header proves the strip jumped to the link's
-        // day (not today), and the grid carries the 15:00 highlight.
-        composeRule.onNodeWithText("$dayName’s schedule").assertExists()
+        // Sprint 7 — the "'s schedule" header is gone; the jump is
+        // proven by the selection itself (onSelectDay fires with the
+        // link's day), and the grid carries the 15:00 highlight.
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            selectedDay != -1L &&
+                startOfDayMillis(selectedDay) == startOfDayMillis(target.timeInMillis)
+        }
         composeRule.onNodeWithText("3:00 PM – 3:30 PM").assertExists()
     }
 
@@ -180,7 +195,7 @@ class CalendarScreenTest {
     fun `date link without a time jumps to the day with no slot highlight`() {
         val target = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, 5) }
         val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(target.time)
-        val dayName = SimpleDateFormat("EEE", Locale.getDefault()).format(target.time)
+        var selectedDay = -1L
         composeRule.setContent {
             CalendarScreen(
                 events = emptyList(),
@@ -188,12 +203,18 @@ class CalendarScreenTest {
                     date = dateStr,
                     time = null,
                     title = null
-                )
+                ),
+                onSelectDay = { selectedDay = it }
             )
         }
         composeRule.waitForIdle()
 
-        composeRule.onNodeWithText("$dayName’s schedule").assertExists()
+        // Sprint 7 — same replacement as the test above: the "'s
+        // schedule" header is gone, the selection proves the jump.
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            selectedDay != -1L &&
+                startOfDayMillis(selectedDay) == startOfDayMillis(target.timeInMillis)
+        }
         composeRule.onNodeWithText("3:00 PM – 3:30 PM").assertDoesNotExist()
     }
 
@@ -292,5 +313,185 @@ class CalendarScreenTest {
         composeRule.onNodeWithText("Schedule Event").assertIsDisplayed()
         composeRule.onNodeWithText("Design review").assertExists()
         composeRule.onNodeWithText("Room 4B").assertExists()
+    }
+
+    // ------------------------------------------------------ Sprint 7
+
+    @Test
+    fun `header shows the month title and the connected sync pill`() {
+        composeRule.setContent {
+            CalendarScreen(
+                events = emptyList(),
+                isCalendarConnected = true
+            )
+        }
+        composeRule.waitForIdle()
+        val monthTitle = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date())
+        composeRule.onNodeWithText(monthTitle).assertExists()
+        composeRule.onNodeWithText("Google Calendar · 2-way sync").assertExists()
+        composeRule.onNodeWithTag("calendar_month_grid").assertExists()
+    }
+
+    @Test
+    fun `not connected shows the muted pill and tapping it connects`() {
+        var connected = 0
+        composeRule.setContent {
+            CalendarScreen(
+                events = emptyList(),
+                isCalendarConnected = false,
+                onConnectGoogleCalendar = { connected++ }
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Google Calendar · not connected").assertExists()
+        composeRule.onNodeWithTag("calendar_sync_pill").performClick()
+        assertEquals(1, connected)
+    }
+
+    @Test
+    fun `connected pill tap calls sync now`() {
+        var synced = 0
+        composeRule.setContent {
+            CalendarScreen(
+                events = emptyList(),
+                isCalendarConnected = true,
+                onSyncNow = { synced++ }
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("calendar_sync_pill").performClick()
+        assertEquals(1, synced)
+    }
+
+    @Test
+    fun `seg switches Month to Week and back`() {
+        composeRule.setContent { CalendarScreen(events = emptyList()) }
+        composeRule.waitForIdle()
+        // Default is Month: the grid is there, the strip is not.
+        composeRule.onNodeWithTag("calendar_month_grid").assertExists()
+        composeRule.onNodeWithTag("calendar_week_strip").assertDoesNotExist()
+        composeRule.onNodeWithTag("calendar_view_week").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("calendar_week_strip").assertExists()
+        composeRule.onNodeWithTag("calendar_month_grid").assertDoesNotExist()
+        composeRule.onNodeWithTag("calendar_view_month").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("calendar_month_grid").assertExists()
+        composeRule.onNodeWithTag("calendar_week_strip").assertDoesNotExist()
+    }
+
+    @Test
+    fun `month grid shows Mon to Sun and dots on days with items`() {
+        val plusTwo = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, 2) }
+        val plusTwoStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(plusTwo.time)
+        val plusThree = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, 3) }
+        val plusThreeStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(plusThree.time)
+        composeRule.setContent {
+            CalendarScreen(
+                events = emptyList(),
+                daysWithItems = setOf(startOfDayMillis(plusTwo.timeInMillis))
+            )
+        }
+        composeRule.waitForIdle()
+        // Weekday header, Monday first.
+        listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun").forEach { label ->
+            composeRule.onNodeWithText(label).assertExists()
+        }
+        // The note under the grid (prototype-verbatim).
+        composeRule.onNodeWithText("Weeks run Monday–Sunday. Dots mark days with tasks or events.").assertExists()
+        // The dot lives inside the clickable day cell, so
+        // Modifier.clickable merges it out of the merged tree (the
+        // S6-3 lesson) — read it from the unmerged tree. The
+        // assertDoesNotExist needs it too: a merged-tree lookup
+        // would pass even if a dot existed.
+        composeRule.onNodeWithTag("calendar_month_dot_$plusTwoStr", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithTag("calendar_month_dot_$plusThreeStr", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun `tapping a grid day selects it`() {
+        val plusTwo = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, 2) }
+        val plusTwoStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(plusTwo.time)
+        var selectedDay = -1L
+        composeRule.setContent {
+            CalendarScreen(
+                events = emptyList(),
+                onSelectDay = { selectedDay = it }
+            )
+        }
+        composeRule.waitForIdle()
+        // performClick, not performSemanticsAction: the semantics
+        // action does not reliably deliver the click for a same-week
+        // grid-day tap — the identical tap timed out twice on CI
+        // (runs 45799918492, 45803759272), while the same tap with
+        // performClick passed on run 45803759272 and a cross-week
+        // semantics-action tap also passed there. It is a harness
+        // delivery quirk, not a product defect: the same onDayClick
+        // → jumpToDay → LaunchedEffect chain moves the selection in
+        // all three cases. performClick is also the path the
+        // sync-pill and seg tests use on this screen. The selection
+        // assertion below is unchanged.
+        composeRule.onNodeWithTag("calendar_month_day_$plusTwoStr").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            selectedDay != -1L &&
+                startOfDayMillis(selectedDay) == startOfDayMillis(plusTwo.timeInMillis)
+        }
+    }
+
+    // Month-grid math (pure — no Compose needed): the Monday-start
+    // grid, pinned for a Sunday-start month, a Monday-start month
+    // and a short February.
+
+    @Test
+    fun `month grid math November 2026 starts on Sunday with six leading days`() {
+        val november = Calendar.getInstance().apply {
+            set(2026, Calendar.NOVEMBER, 15, 12, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val cells = monthGridCells(november)
+        // 6 leading (Mon 26 Oct – Sat 31 Oct) + 30 November days = 36,
+        // padded to 42 (6 whole weeks).
+        assertEquals(42, cells.size)
+        assertEquals(26, cells.first().dayOfMonth)
+        assertFalse(cells.first().isInMonth)
+        assertEquals(1, cells[6].dayOfMonth)
+        assertTrue(cells[6].isInMonth)
+        assertEquals(30, cells[35].dayOfMonth)
+        assertTrue(cells[35].isInMonth)
+        assertEquals(6, cells[41].dayOfMonth)
+        assertFalse(cells[41].isInMonth)
+        assertEquals(42, cells.map { it.dayStartMillis }.toSet().size)
+    }
+
+    @Test
+    fun `month grid math a Monday-start month has no leading days`() {
+        val september = Calendar.getInstance().apply {
+            set(2025, Calendar.SEPTEMBER, 10, 12, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val cells = monthGridCells(september)
+        // 0 leading + 30 days = 30, padded to 35 (5 whole weeks).
+        assertEquals(35, cells.size)
+        assertEquals(1, cells.first().dayOfMonth)
+        assertTrue(cells.first().isInMonth)
+        assertEquals(5, cells.last().dayOfMonth)
+        assertFalse(cells.last().isInMonth)
+    }
+
+    @Test
+    fun `month grid math February 2026 is five weeks`() {
+        val february = Calendar.getInstance().apply {
+            set(2026, Calendar.FEBRUARY, 14, 12, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val cells = monthGridCells(february)
+        // Feb 1 2026 is a Sunday: 6 leading + 28 = 34, padded to 35.
+        assertEquals(35, cells.size)
+        assertEquals(26, cells.first().dayOfMonth)
+        assertFalse(cells.first().isInMonth)
+        assertEquals(1, cells[6].dayOfMonth)
+        assertTrue(cells[6].isInMonth)
+        assertEquals(28, cells[33].dayOfMonth)
+        assertTrue(cells[33].isInMonth)
     }
 }

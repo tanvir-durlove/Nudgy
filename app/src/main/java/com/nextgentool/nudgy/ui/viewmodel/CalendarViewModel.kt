@@ -51,7 +51,11 @@ data class CalendarUiState(
     val placedTasks: List<TaskEntity> = emptyList(),
     /** Sprint 2-2 — a drop that landed on a busy slot (Q3(a)): the
      *  dialog the screen shows, null when there is no pending drop. */
-    val pendingConflict: PendingDropConflict? = null
+    val pendingConflict: PendingDropConflict? = null,
+    /** Sprint 7 — day-start millis with at least one calendar event
+     *  or placed task, for the month grid's dots. Default empty so
+     *  direct state constructions (tests) keep compiling. */
+    val daysWithItems: Set<Long> = emptySet()
 )
 
 /**
@@ -114,6 +118,9 @@ class CalendarViewModel @Inject constructor(
     // so it does not push the inner combine past 5 flows (a single
     // 6-flow combine does not resolve in this codebase — see below).
     private val pendingConflict = MutableStateFlow<PendingDropConflict?>(null)
+    // Sprint 7 — month-grid dots (see daysWithItems): a separate flow
+    // so the outer combine stays at 5 flows (the 6-flow limit above).
+    private val markedDays = MutableStateFlow<Set<Long>>(emptySet())
 
     // The day's events, switching flow whenever the selected day
     // changes — and whenever the user flips (Sprint 5 fix round 4).
@@ -130,8 +137,8 @@ class CalendarViewModel @Inject constructor(
     // (the compiler falls back to the vararg overload — proven by two
     // failed CI rounds on this file). Nested combines, exactly like
     // TasksViewModel: an inner 5-flow combine builds the state, an
-    // outer 4-flow combine fills in the suggested slot, the strip /
-    // placed tasks and the pending conflict.
+    // outer 5-flow combine fills in the suggested slot, the strip /
+    // placed tasks, the pending conflict and the marked days.
     val uiState: StateFlow<CalendarUiState> = userFlow.flatMapLatest { user ->
         combine(
             combine(
@@ -154,14 +161,16 @@ class CalendarViewModel @Inject constructor(
             },
             suggestedSlot,
             taskRepository.observeAllTasks(user.uid),
-            pendingConflict
-        ) { state, slot, tasks, conflict ->
+            pendingConflict,
+            markedDays
+        ) { state, slot, tasks, conflict, marked ->
             val dayEnd = endOfDayMillis(state.selectedDayMillis)
             state.copy(
                 suggestedSlot = slot,
                 stripTasks = stripTasksForDay(tasks, state.selectedDayMillis, dayEnd),
                 placedTasks = placedTasksForDay(tasks, state.selectedDayMillis, dayEnd),
-                pendingConflict = conflict
+                pendingConflict = conflict,
+                daysWithItems = marked
             )
         }
     }
@@ -191,15 +200,27 @@ class CalendarViewModel @Inject constructor(
         // Recompute the suggested slot whenever the selected day, the
         // day's events, or the tasks change (timed tasks are busy
         // intervals for slot-finding, even though they never render on
-        // the schedule).
+        // the schedule). The same collect feeds the month grid's dots:
+        // every day carrying an event or a placed task.
         viewModelScope.launch {
             userFlow.flatMapLatest { user ->
                 combine(
                     calendarRepository.observeAllEvents(user.uid),
                     taskRepository.observeAllTasks(user.uid),
                     selectedDay
-                ) { _, tasks, day -> tasks to day }
-            }.collect { (tasks, day) ->
+                ) { events, tasks, day -> Triple(events, tasks, day) }
+            }.collect { (events, tasks, day) ->
+                // Sprint 7 — the month grid's dots: a day marks when it
+                // carries a calendar event or a placed task
+                // (plannedStart that day). Due-only tasks have no day
+                // and mark nothing; a multi-day event marks its start
+                // day only.
+                markedDays.value = buildSet {
+                    events.forEach { event -> add(startOfDayMillis(event.startEpochMillis)) }
+                    tasks.forEach { task ->
+                        task.plannedStartEpochMillis?.let { add(startOfDayMillis(it)) }
+                    }
+                }
                 refreshSuggestedSlot(day, tasks)
             }
         }

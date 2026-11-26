@@ -12,12 +12,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -62,7 +64,11 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -95,8 +101,10 @@ import com.nextgentool.nudgy.ui.theme.NudgyMuted
 import com.nextgentool.nudgy.ui.theme.NudgyPeach
 import com.nextgentool.nudgy.ui.theme.NudgyPrimary
 import com.nextgentool.nudgy.ui.theme.NudgySage
+import com.nextgentool.nudgy.ui.theme.NudgyTokens
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 
 data class DynamicDayItem(
@@ -105,6 +113,52 @@ data class DynamicDayItem(
     val epochMillis: Long,
     val isToday: Boolean
 )
+
+/** Sprint 7 — the Month/Week view switch (prototype scr-calendar).
+ *  Local UI state only; the default is Month (the prototype's). */
+private enum class CalendarViewMode { MONTH, WEEK }
+
+/** Sprint 7 — one cell of the month grid: the day's start millis,
+ *  its day-of-month number, and whether it belongs to the grid's
+ *  month (leading/trailing days are dimmed but tappable). */
+internal data class MonthGridCell(
+    val dayStartMillis: Long,
+    val dayOfMonth: Int,
+    val isInMonth: Boolean
+)
+
+/**
+ * Sprint 7 — the month grid's cells for the selected day's month.
+ * Weeks run Monday–Sunday, so the grid starts on the Monday of the
+ * week holding the 1st (leading blanks = (firstWeekday − MONDAY + 7)
+ * % 7) and pads to whole weeks. Pure function (no java.time — minSdk
+ * 24, no desugaring); pinned by the month-grid math tests.
+ */
+internal fun monthGridCells(selectedDayMillis: Long): List<MonthGridCell> {
+    val first = Calendar.getInstance().apply {
+        timeInMillis = selectedDayMillis
+        set(Calendar.DAY_OF_MONTH, 1)
+    }
+    val leading = (first.get(Calendar.DAY_OF_WEEK) - Calendar.MONDAY + 7) % 7
+    val daysInMonth = first.getActualMaximum(Calendar.DAY_OF_MONTH)
+    val total = ((leading + daysInMonth + 6) / 7) * 7
+    val start = Calendar.getInstance().apply {
+        timeInMillis = startOfDayMillis(selectedDayMillis)
+        set(Calendar.DAY_OF_MONTH, 1)
+        add(Calendar.DAY_OF_MONTH, -leading)
+    }
+    return (0 until total).map { i ->
+        val day = Calendar.getInstance().apply {
+            timeInMillis = start.timeInMillis
+            add(Calendar.DAY_OF_MONTH, i)
+        }
+        MonthGridCell(
+            dayStartMillis = startOfDayMillis(day.timeInMillis),
+            dayOfMonth = day.get(Calendar.DAY_OF_MONTH),
+            isInMonth = i in leading until leading + daysInMonth
+        )
+    }
+}
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
@@ -134,6 +188,9 @@ fun CalendarScreen(
     stripTasks: List<TaskEntity> = emptyList(),
     placedTasks: List<TaskEntity> = emptyList(),
     pendingConflict: PendingDropConflict? = null,
+    // Sprint 7 — month-grid dots: day-start millis with an event or a
+    // placed task (from the ViewModel; the screen has no month data).
+    daysWithItems: Set<Long> = emptySet(),
     onDropTask: (task: TaskEntity, slotStartMillis: Long) -> Unit = { _, _ -> },
     onAcceptSuggestedSlot: () -> Unit = {},
     onDismissConflict: () -> Unit = {},
@@ -226,10 +283,18 @@ fun CalendarScreen(
     val todayIndex = daysList.indexOfFirst { it.isToday }.coerceAtLeast(0)
     var selectedDayIndex by remember { mutableIntStateOf(todayIndex) }
 
+    // Sprint 7 — Month/Week view switch (prototype scr-calendar).
+    // Local UI state only; Month is the prototype's default.
+    var viewMode by remember { mutableStateOf(CalendarViewMode.MONTH) }
+
     val selectedDayMillis = daysList.getOrNull(selectedDayIndex)?.epochMillis ?: System.currentTimeMillis()
+    // Sprint 7 — the header month in title case ("November 2026",
+    // prototype scr-calendar); the old .uppercase() form is gone
+    // with the "'s schedule" line below.
     val headerMonth = remember(selectedDayMillis) {
         val cal = Calendar.getInstance().apply { timeInMillis = selectedDayMillis }
-        monthFormatter.format(cal.time).uppercase()
+        monthFormatter.format(cal.time)
+            .replaceFirstChar { it.titlecase(Locale.getDefault()) }
     }
 
     // Sprint 2-2 — the selected day's midnight (the grid starts here).
@@ -473,7 +538,7 @@ fun CalendarScreen(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(screenScroll)
-            .padding(horizontal = 20.dp, vertical = 8.dp),
+            .padding(horizontal = NudgyTokens.screenPadding, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         // Sprint 2-1: sync / edit failures are shown, not swallowed.
@@ -502,120 +567,189 @@ fun CalendarScreen(
             }
         }
 
-        // Top Header
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
+        // Sprint 7 — header (prototype scr-calendar): the month title
+        // at 21sp / ExtraBold with the live sync pill beneath it.
+        // The 360 dp phone cannot fit title + pill side by side
+        // (measured: 378 dp vs 328 dp content), so the pill sits on
+        // its own row, left-aligned. The old "'s schedule" line is
+        // gone: it duplicated the day-events section title below.
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
                     text = headerMonth,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = NudgyAccent
+                    fontSize = 21.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = NudgyCharcoal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
-                val isSelectedDayToday = daysList.getOrNull(selectedDayIndex)?.isToday == true
-                val scheduleTitle = if (isSelectedDayToday) {
-                    "Today’s schedule"
-                } else {
-                    "${daysList.getOrNull(selectedDayIndex)?.dayOfWeek ?: "Day"}’s schedule"
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(MaterialTheme.shapes.medium)
+                        .background(MaterialTheme.colorScheme.inverseSurface)
+                        .clickable { showAddEventDialog = true },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Add event",
+                        tint = MaterialTheme.colorScheme.inverseOnSurface,
+                        modifier = Modifier.size(22.dp)
+                    )
                 }
-                Text(
-                    text = scheduleTitle,
-                    style = MaterialTheme.typography.displayMedium,
-                    color = NudgyCharcoal
-                )
             }
-
-            Box(
+            Spacer(modifier = Modifier.height(8.dp))
+            // The sync pill is a status display that surfaces the
+            // EXISTING sync action (the same onSyncNow / connect the
+            // sync card's button calls) — no new sync behaviour.
+            Row(
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(MaterialTheme.shapes.medium)
-                    .background(MaterialTheme.colorScheme.inverseSurface)
-                    .clickable { showAddEventDialog = true },
-                contentAlignment = Alignment.Center
+                    .clip(CircleShape)
+                    .background(
+                        color = if (isCalendarConnected) {
+                            colorResource(R.color.nudgy_teal_soft)
+                        } else {
+                            colorResource(R.color.nudgy_track)
+                        }
+                    )
+                    .clickable {
+                        if (isCalendarConnected) onSyncNow() else onConnectGoogleCalendar()
+                    }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                    .testTag("calendar_sync_pill"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Add event",
-                    tint = MaterialTheme.colorScheme.inverseOnSurface,
-                    modifier = Modifier.size(22.dp)
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(
+                            color = if (isCalendarConnected) {
+                                colorResource(R.color.nudgy_teal)
+                            } else {
+                                NudgyMuted
+                            }
+                        )
+                )
+                Text(
+                    text = stringResource(
+                        if (isCalendarConnected) {
+                            R.string.calendar_sync_connected
+                        } else {
+                            R.string.calendar_sync_not_connected
+                        }
+                    ),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = NudgyMuted
                 )
             }
         }
 
-        // Horizontal Weekly Date Selector (with prev/next week controls)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .clickable { weekOffset--; linkHighlight = null },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ChevronLeft,
-                    contentDescription = "Previous week",
-                    tint = NudgyCharcoal,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
+        // Sprint 7 — Month/Week seg (prototype scr-calendar): the
+        // Tasks two-pill shape (PR #132). Local state only.
+        CalendarViewModeSeg(
+            viewMode = viewMode,
+            onModeChange = { viewMode = it }
+        )
+
+        // Sprint 7 — month grid card (prototype scr-calendar, Month
+        // mode): Mon–Sun, dots for days with tasks or events, the
+        // selected day teal. Tapping a day reuses jumpToDay — the day
+        // events and the hour grid follow exactly as from the strip.
+        if (viewMode == CalendarViewMode.MONTH) {
+            MonthGridCard(
+                selectedDayMillis = dayStartMillis,
+                daysWithItems = daysWithItems,
+                onDayClick = { dayStart -> jumpToDay(dayStart, null) }
+            )
+        }
+
+        // Horizontal Weekly Date Selector (with prev/next week controls).
+        // Week mode only (Sprint 7): Month mode shows the month grid
+        // card instead; the strip returns with the Week pill.
+        if (viewMode == CalendarViewMode.WEEK) {
             Row(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("calendar_week_strip"),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                daysList.forEachIndexed { index, day ->
-                    val isSelected = index == selectedDayIndex
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .clickable { weekOffset--; linkHighlight = null },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ChevronLeft,
+                        contentDescription = "Previous week",
+                        tint = NudgyCharcoal,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    daysList.forEachIndexed { index, day ->
+                        val isSelected = index == selectedDayIndex
 
-                    Column(
-                        modifier = Modifier
-                            .clip(MaterialTheme.shapes.large)
-                            .background(if (isSelected) MaterialTheme.colorScheme.inverseSurface else Color.Transparent)
-                            .clickable {
-                                selectedDayIndex = index
-                                // Sprint 2-4 — a manual day move drops
-                                // the date-link highlight (one-shot cue).
-                                linkHighlight = null
-                                onSelectDay(day.epochMillis)
-                            }
-                            .padding(horizontal = 10.dp, vertical = 12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = day.dayOfWeek,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontSize = 12.sp,
-                                color = if (isSelected) MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f) else NudgyMuted
+                        Column(
+                            modifier = Modifier
+                                .clip(MaterialTheme.shapes.large)
+                                .background(if (isSelected) MaterialTheme.colorScheme.inverseSurface else Color.Transparent)
+                                .clickable {
+                                    selectedDayIndex = index
+                                    // Sprint 2-4 — a manual day move drops
+                                    // the date-link highlight (one-shot cue).
+                                    linkHighlight = null
+                                    onSelectDay(day.epochMillis)
+                                }
+                                .padding(horizontal = 10.dp, vertical = 12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = day.dayOfWeek,
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontSize = 12.sp,
+                                    color = if (isSelected) MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f) else NudgyMuted
+                                )
                             )
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "${day.dayOfMonth}",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = if (isSelected) MaterialTheme.colorScheme.inverseOnSurface else NudgyCharcoal
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "${day.dayOfMonth}",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSelected) MaterialTheme.colorScheme.inverseOnSurface else NudgyCharcoal
+                                )
                             )
-                        )
+                        }
                     }
                 }
-            }
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .clickable { weekOffset++; linkHighlight = null },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = "Next week",
-                    tint = NudgyCharcoal,
-                    modifier = Modifier.size(22.dp)
-                )
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .clickable { weekOffset++; linkHighlight = null },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = "Next week",
+                        tint = NudgyCharcoal,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
             }
         }
 
@@ -1493,6 +1627,199 @@ fun CalendarScreen(
                 dismissButton = {
                     TextButton(onClick = { showTimePicker = false }) { Text("Cancel", color = NudgyCharcoal) }
                 }
+            )
+        }
+    }
+}
+
+/**
+ * Sprint 7 — Month/Week seg (prototype scr-calendar): the Tasks
+ * two-pill shape (PR #132) — a nudgy_track pill track, the selected
+ * pill teal with a cream label, the other muted. Local state only.
+ */
+@Composable
+private fun CalendarViewModeSeg(
+    viewMode: CalendarViewMode,
+    onModeChange: (CalendarViewMode) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                color = colorResource(R.color.nudgy_track),
+                shape = CircleShape
+            )
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        CalendarViewMode.entries.forEach { mode ->
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 38.dp)
+                    .background(
+                        color = if (viewMode == mode) {
+                            colorResource(R.color.nudgy_teal)
+                        } else {
+                            Color.Transparent
+                        },
+                        shape = CircleShape
+                    )
+                    .clickable { onModeChange(mode) }
+                    .testTag("calendar_view_${mode.name.lowercase()}")
+            ) {
+                Text(
+                    text = if (mode == CalendarViewMode.MONTH) "Month" else "Week",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (viewMode == mode) {
+                        colorResource(R.color.nudgy_cream)
+                    } else {
+                        NudgyMuted
+                    }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Sprint 7 — month grid card (prototype scr-calendar): a white card
+ * with the Mon–Sun header, a 7-column grid of the selected day's
+ * month (Monday-start, from monthGridCells), a dot under days that
+ * have tasks or events, the selected day teal, today outlined when
+ * it is not selected, and the prototype's note under the grid.
+ * Dim days (the next/previous month's) stay tappable: tapping any
+ * day reuses jumpToDay, so the grid's month follows the selection.
+ */
+@Composable
+private fun MonthGridCard(
+    selectedDayMillis: Long,
+    daysWithItems: Set<Long>,
+    onDayClick: (Long) -> Unit
+) {
+    val cells = remember(selectedDayMillis) { monthGridCells(selectedDayMillis) }
+    val selectedStart = startOfDayMillis(selectedDayMillis)
+    val todayStart = startOfDayMillis(System.currentTimeMillis())
+    // Weekday labels, Monday first, in the device locale.
+    val weekdayLabels = remember {
+        val monday = Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+        }
+        val fmt = SimpleDateFormat("EEE", Locale.getDefault())
+        (0 until 7).map { i ->
+            val day = Calendar.getInstance().apply {
+                timeInMillis = monday.timeInMillis
+                add(Calendar.DAY_OF_MONTH, i)
+            }
+            fmt.format(day.time)
+        }
+    }
+    val dateTagFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("calendar_month_grid"),
+        shape = NudgyTokens.cardRadius,
+        color = NudgyCard,
+        shadowElevation = NudgyTokens.cardElevation
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(modifier = Modifier.fillMaxWidth()) {
+                weekdayLabels.forEach { label ->
+                    Text(
+                        text = label,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = NudgyMuted,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            cells.chunked(7).forEach { week ->
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    week.forEach { cell ->
+                        val isSelected = cell.dayStartMillis == selectedStart
+                        val isToday = cell.dayStartMillis == todayStart
+                        val dayTag = dateTagFormat.format(Date(cell.dayStartMillis))
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(44.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(
+                                    color = if (isSelected) {
+                                        colorResource(R.color.nudgy_teal)
+                                    } else {
+                                        Color.Transparent
+                                    }
+                                )
+                                .then(
+                                    if (isToday && !isSelected) {
+                                        Modifier.border(
+                                            width = 2.dp,
+                                            color = colorResource(R.color.nudgy_teal),
+                                            shape = RoundedCornerShape(12.dp)
+                                        )
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                                .clickable { onDayClick(cell.dayStartMillis) }
+                                .testTag("calendar_month_day_$dayTag")
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Text(
+                                    text = "${cell.dayOfMonth}",
+                                    fontSize = 14.sp,
+                                    fontWeight = if (isSelected || isToday) {
+                                        FontWeight.Bold
+                                    } else {
+                                        FontWeight.Normal
+                                    },
+                                    color = when {
+                                        isSelected -> colorResource(R.color.nudgy_cream)
+                                        !cell.isInMonth -> NudgyMuted
+                                        else -> NudgyCharcoal
+                                    }
+                                )
+                                // The 6 dp slot is always reserved so
+                                // the numbers stay aligned; days without
+                                // items get a transparent spacer.
+                                if (cell.dayStartMillis in daysWithItems) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                color = if (isSelected) {
+                                                    colorResource(R.color.nudgy_cream)
+                                                } else {
+                                                    colorResource(R.color.nudgy_teal)
+                                                }
+                                            )
+                                            .testTag("calendar_month_dot_$dayTag")
+                                    )
+                                } else {
+                                    Spacer(modifier = Modifier.size(6.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = stringResource(R.string.calendar_grid_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = NudgyMuted
             )
         }
     }

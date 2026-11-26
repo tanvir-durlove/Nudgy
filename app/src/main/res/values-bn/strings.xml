@@ -100,6 +100,9 @@
     <string name="settings_calendar_sync_now">এখনই সিঙ্ক করো</string>
     <string name="settings_calendar_syncing">সিঙ্ক হচ্ছে…</string>
     <string name="settings_calendar_connect_button">যুক্ত করো</string>
+    <string name="calendar_sync_connected">Google Calendar · দ্বিমুখী সিঙ্ক</string>
+    <string name="calendar_sync_not_connected">Google Calendar · সংযুক্ত নয়</string>
+    <string name="calendar_grid_note">সপ্তাহ সোমবার থেকে রবিবার চলে। টাস্ক বা ইভেন্ট আছে এমন দিনের নিচে ডট থাকে।</string>
     <string name="settings_gemini_custom_key">নিজের key সংরক্ষিত</string>
     <string name="settings_gemini_builtin">Nudgy-র বিল্ট-ইন AI ব্যবহার হচ্ছে</string>
     <string name="settings_memories_empty">এখনো কিছু মনে রাখা হয়নি</string>

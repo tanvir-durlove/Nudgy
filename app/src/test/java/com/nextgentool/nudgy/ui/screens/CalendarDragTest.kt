@@ -124,8 +124,17 @@ class CalendarDragTest {
      * from the first layout and the bounds are fresh. Returns the
      * press position (the card's centre, viewport px) and the grid's
      * top (viewport px).
+     *
+     * Sprint 7 — the screen defaults to Month mode, whose grid card
+     * pushes the strip and the grid ~350 dp down (the 01:30/05:30
+     * drag targets would fall past the 1000 dp viewport). The drag
+     * wiring is mode-independent (the strip + grid are the same
+     * composables in both modes), so this switches the seg to Week
+     * first, where the strip/grid sit at their proven positions.
      */
     private fun prepareDrag(scrollState: ScrollState): Pair<Offset, Float> {
+        composeRule.onNodeWithTag("calendar_view_week").performClick()
+        composeRule.runOnIdle { }
         val cardCenter = composeRule.onNodeWithTag("strip_card_t1")
             .fetchSemanticsNode().boundsInRoot.center
         val gridTop = composeRule.onNodeWithTag("calendar_grid")
