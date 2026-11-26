@@ -287,7 +287,15 @@ class GroupsScreenTest {
         composeRule.onNodeWithText("Group name, e.g. Flat 7B").performScrollTo()
         composeRule.onNodeWithText("Group name, e.g. Flat 7B").assertIsDisplayed()
         composeRule.onNodeWithText("Group name, e.g. Flat 7B").performTextInput("DIU 41")
-        composeRule.onNodeWithText("DIU 41").assertIsDisplayed()
+        // The typed text appears twice in the semantics tree — the
+        // field's EditableText AND its inner Text — so count both,
+        // like "Ayesha"/"Member" elsewhere in this file. This is the
+        // guard against the silent-drop trap: if the text had been
+        // dropped, the count would be 0.
+        assertEquals(
+            2,
+            composeRule.onAllNodesWithText("DIU 41").fetchSemanticsNodes().size
+        )
         composeRule.onNodeWithText("Create group").performClick()
         composeRule.waitForIdle()
 
