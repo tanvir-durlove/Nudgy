@@ -89,6 +89,15 @@
     <string name="onboarding_sample_title">Start with sample tasks</string>
     <string name="onboarding_sample_sub">3 clearly-marked sample tasks you can delete in one tap.</string>
 
+    <!-- Sprint 7 — Plan rebuilt to the prototype (scr-plan). -->
+    <string name="plan_intro_body">Here is a draft of your day. Carry-overs come first, then tasks ordered by due time. Remove anything that does not fit — your call, always.</string>
+    <string name="plan_carry_banner_title">%d unfinished from yesterday</string>
+    <string name="plan_carry_banner_sub">They are in the draft below, marked “Carried over”. Remove any you do not want today.</string>
+    <string name="plan_time_budget_title">Time budget</string>
+    <string name="plan_time_budget_note">Estimates are optional. A task without one still joins My Day — it just shows as a point on the timeline, not a block.</string>
+    <string name="plan_draft_title">Draft — in order</string>
+    <string name="plan_start_note">Start my day confirms these tasks into My Day on Today.</string>
+
     <string name="settings_guest_user">Guest User</string>
     <string name="settings_guest_subtitle">Sign in with Google to sync your data</string>
     <string name="settings_sign_in_button">Sign in with Google</string>

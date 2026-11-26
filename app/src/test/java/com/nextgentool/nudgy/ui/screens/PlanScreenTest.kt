@@ -13,13 +13,14 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.lifecycle.ViewModelStore
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.domain.dayLabel
 import com.nextgentool.nudgy.domain.todayDateString
 import com.nextgentool.nudgy.domain.usecase.CarryOverUseCase
 import com.nextgentool.nudgy.domain.usecase.PlanDayUseCase
@@ -46,6 +47,14 @@ import org.robolectric.annotation.Config
  * draft is carry-over first within the 8h estimate budget, "Start my
  * day" stamps plannedDate + plannedStart (and moves carried-over tasks
  * to today), and doing Plan a second time shows the previous picks.
+ *
+ * Sprint 7 — rebuilt to the prototype (scr-plan): intro line, cream
+ * carry banner (live count, hidden when empty), Time-budget card
+ * ("{Xh Ym} of 8h max" + 9px bar), "Draft — in order", "Start my day"
+ * 52dp + the tiny note. Below-fold clicks use performSemanticsAction
+ * (SemanticsActions.OnClick) — never coordinate performClick, and
+ * never performScrollTo: on this harness it hangs the test worker
+ * (runs 851/852); below-fold assertions use assertExists.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -118,7 +127,7 @@ class PlanScreenTest {
             PlanScreen(onBackClick = onBackClick, viewModel = viewModel)
         }
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Today's plan")
+            composeRule.onAllNodesWithText("Draft — in order")
                 .fetchSemanticsNodes().isNotEmpty()
         }
     }
@@ -189,7 +198,7 @@ class PlanScreenTest {
      */
     private fun waitForFullDraft() {
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("3h 0m of 8h planned")
+            composeRule.onAllNodesWithText("3h 0m of 8h max")
                 .fetchSemanticsNodes().isNotEmpty() &&
                 composeRule.onAllNodesWithText("No-est task")
                     .fetchSemanticsNodes().isNotEmpty()
@@ -260,10 +269,10 @@ class PlanScreenTest {
         assertTrue(traversalIndex("Old report") < traversalIndex("Dentist"))
         assertTrue(traversalIndex("Dentist") < traversalIndex("No-est task"))
         // 120 + 60 = 180 min picked; the 500-min task no longer fits.
-        composeRule.onNodeWithText("3h 0m of 8h planned").assertIsDisplayed()
-        composeRule.onNodeWithText("Big project").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("3h 0m of 8h max").assertIsDisplayed()
+        composeRule.onNodeWithText("Big project").assertExists()
         // The over-budget task is present (in "Not planned"), not hidden.
-        composeRule.onNodeWithText("Not planned").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Not planned").assertExists()
     }
 
     @Test
@@ -278,7 +287,8 @@ class PlanScreenTest {
         // Full draft first (see waitForFullDraft): starting the day on a
         // half-streamed draft would stamp only the tasks seen so far.
         waitForFullDraft()
-        composeRule.onNodeWithTag("plan_start_button").performScrollTo().performClick()
+        composeRule.onNodeWithTag("plan_start_button")
+            .performSemanticsAction(SemanticsActions.OnClick)
         // Drive the Main looper (Room writes + appliedFlow), then let
         // Compose settle (recomposition + the LaunchedEffect that fires
         // onBackClick) before asserting the navigation happened.
@@ -333,12 +343,14 @@ class PlanScreenTest {
         // draft would never pick it (500 min does not fit the 8h budget
         // after the first two), so the second Plan proves the previous
         // picks are remembered — not re-derived from the budget.
-        composeRule.onNodeWithTag("plan_row_Big project").performScrollTo().performClick()
+        composeRule.onNodeWithTag("plan_row_Big project")
+            .performSemanticsAction(SemanticsActions.OnClick)
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("11h 20m of 8h planned")
+            composeRule.onAllNodesWithText("11h 20m of 8h max")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithTag("plan_start_button").performScrollTo().performClick()
+        composeRule.onNodeWithTag("plan_start_button")
+            .performSemanticsAction(SemanticsActions.OnClick)
         // Wait for the apply to land: the Big project now has a plan.
         // (Pump the main looper explicitly — see pumpMainLooperUntil:
         // a DB-polling waitUntil does not drive viewModelScope work.)
@@ -362,11 +374,11 @@ class PlanScreenTest {
         // ViewModel's still-composed "11h 20m" line.
         composeRule.waitForIdle()
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("11h 20m of 8h planned")
+            composeRule.onAllNodesWithText("11h 20m of 8h max")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("11h 20m of 8h planned").assertIsDisplayed()
-        composeRule.onNodeWithText("Big project").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("11h 20m of 8h max").assertIsDisplayed()
+        composeRule.onNodeWithText("Big project").assertExists()
     }
 
     @Test
@@ -381,10 +393,83 @@ class PlanScreenTest {
         waitForFullDraft()
         assertTrue(topOf("Old report") < topOf("Dentist"))
         composeRule.onNodeWithContentDescription("Move Old report down")
-            .performScrollTo().performClick()
+            .performSemanticsAction(SemanticsActions.OnClick)
         composeRule.waitUntil(timeoutMillis = 10_000) {
             topOf("Dentist") < topOf("Old report")
         }
         assertTrue(topOf("Dentist") < topOf("Old report"))
+    }
+
+    @Test
+    fun `intro line shows the date and the draft copy`() {
+        seedPlanData()
+        setPlanContent()
+        waitForFullDraft()
+        // The date part is the live dayLabel, not the prototype's demo date.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText(dayLabel(startOfTodayMillis()))
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onAllNodesWithText("Here is a draft of your day")
+            .fetchSemanticsNodes().isNotEmpty().let { assertTrue(it) }
+        composeRule.onAllNodesWithText("your call, always")
+            .fetchSemanticsNodes().isNotEmpty().let { assertTrue(it) }
+    }
+
+    @Test
+    fun `time-budget card shows the total, the bar and the note`() {
+        seedPlanData()
+        setPlanContent()
+        waitForFullDraft()
+        composeRule.onNodeWithTag("plan_time_budget_card").assertExists()
+        composeRule.onNodeWithText("Time budget").assertExists()
+        composeRule.onNodeWithText("3h 0m of 8h max").assertIsDisplayed()
+        composeRule.onNodeWithTag("plan_time_budget_bar").assertExists()
+        composeRule.onNodeWithText(
+            "Estimates are optional. A task without one still joins My Day — " +
+                "it just shows as a point on the timeline, not a block."
+        ).assertExists()
+    }
+
+    @Test
+    fun `carry banner shows the live count when rows are carried over`() {
+        seedPlanData()
+        setPlanContent()
+        waitForFullDraft()
+        // Exactly one seeded row is carried over (Old report, due yesterday).
+        composeRule.onNodeWithTag("plan_carry_banner").assertExists()
+        composeRule.onNodeWithText("1 unfinished from yesterday").assertExists()
+        composeRule.onNodeWithText(
+            "They are in the draft below, marked “Carried over”. " +
+                "Remove any you do not want today."
+        ).assertExists()
+    }
+
+    @Test
+    fun `carry banner is hidden when nothing is carried over`() {
+        // Today-only tasks: no row is a carry-over.
+        createTask("Dentist", at(0, 15), estimatedMinutes = 60)
+        createTask("No-est task", startOfTodayMillis(), estimatedMinutes = null)
+        setPlanContent()
+        // Wait for the FULL draft (both rows + the budget line) so the
+        // absence below cannot pass on a half-streamed draft.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("1h 0m of 8h max")
+                .fetchSemanticsNodes().isNotEmpty() &&
+                composeRule.onAllNodesWithText("No-est task")
+                    .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("plan_carry_banner").assertDoesNotExist()
+    }
+
+    @Test
+    fun `start my day carries the tiny note below it`() {
+        seedPlanData()
+        setPlanContent()
+        waitForFullDraft()
+        composeRule.onNodeWithTag("plan_start_button").assertExists()
+        composeRule.onNodeWithText(
+            "Start my day confirms these tasks into My Day on Today."
+        ).assertExists()
     }
 }
