@@ -270,8 +270,18 @@ class GroupsScreenTest {
 
         composeRule.onNodeWithText("Create a group").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("New group").assertIsDisplayed()
+        // The card opens below the fold (title + intro + row + note +
+        // join card + button sit above it), so assertExists — the card
+        // is composed, just not visible on the test viewport.
+        composeRule.onNodeWithText("New group").assertExists()
+        // Scroll the field into view before typing: performTextInput
+        // silently drops text typed into a composed-but-not-displayed
+        // field. performScrollTo works on this screen — the detail
+        // tests below use it throughout (no infinite transition here).
+        composeRule.onNodeWithText("Group name, e.g. Flat 7B").performScrollTo()
+        composeRule.onNodeWithText("Group name, e.g. Flat 7B").assertIsDisplayed()
         composeRule.onNodeWithText("Group name, e.g. Flat 7B").performTextInput("DIU 41")
+        composeRule.onNodeWithText("DIU 41").assertIsDisplayed()
         composeRule.onNodeWithText("Create group").performClick()
         composeRule.waitForIdle()
 
@@ -285,7 +295,8 @@ class GroupsScreenTest {
         composeRule.onNodeWithText("New group").assertDoesNotExist()
         composeRule.onNodeWithText("Create a group").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("New group").assertIsDisplayed()
+        // Below the fold once open (see the test above) — assertExists.
+        composeRule.onNodeWithText("New group").assertExists()
         composeRule.onNodeWithText("Create a group").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("New group").assertDoesNotExist()
@@ -408,8 +419,13 @@ class GroupsScreenTest {
             composeRule.onAllNodesWithText("Ayesha").fetchSemanticsNodes().size
         )
         // user-2 has a blank display name: the dialog falls back to
-        // "Member", never a blank row.
-        composeRule.onNodeWithText("Member").assertIsDisplayed()
+        // "Member", never a blank row. "Member" now appears twice —
+        // the detail header's RolePill (Sprint 7) AND the dialog
+        // fallback — so count both, like "Ayesha" above.
+        assertEquals(
+            2,
+            composeRule.onAllNodesWithText("Member").fetchSemanticsNodes().size
+        )
     }
 
     @Test
