@@ -203,6 +203,16 @@
     <string name="tasks_empty_filtered_sub">Try a different filter, or clear the search.</string>
     <string name="tasks_empty_first_sub">Add your first task below.</string>
 
+    <!-- Sprint 7 — Templates rebuilt to the prototype (scr-templates). -->
+    <string name="templates_intro">Ready-made task sets for days that repeat. Using a template copies its tasks — you pick the date.</string>
+    <string name="templates_empty">No templates yet. Create one below.</string>
+    <string name="templates_create_button">Create custom template</string>
+    <string name="templates_create_title">New custom template</string>
+    <string name="templates_create_name_hint">Template name, e.g. Weekend reset</string>
+    <string name="templates_create_task_hint">First task, e.g. Tidy the desk · 15 min</string>
+    <string name="templates_create_save">Save template</string>
+    <string name="templates_cancel">Cancel</string>
+
     <!-- Today widget (S6-5, step 3a) -->
     <string name="widget_today_title">Today</string>
     <string name="widget_today_description">Your planned tasks for today</string>

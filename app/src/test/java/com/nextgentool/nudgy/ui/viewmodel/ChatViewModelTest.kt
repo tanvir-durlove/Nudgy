@@ -850,6 +850,16 @@ class ChatViewModelTest {
             assertFalse(preFilter.hasPendingClarification())
             assertTrue(taskRepository.getAllTasksOnce(userId).isEmpty())
         } finally {
+            // PR #133 fix round 3 — the Focus/Settings resetMain race:
+            // this ViewModel is still alive (tearDown clears the store
+            // only after the test returns), and its init coroutines do
+            // Room work on real Dispatchers.IO threads and resume back
+            // onto Main from those threads. resetMain() while such a
+            // resume is in flight throws "Dispatchers.Main is used
+            // concurrently with setting it". Cancel the scope and drain
+            // the real-thread IO BEFORE resetMain.
+            viewModelStore.clear()
+            Thread.sleep(500)
             Dispatchers.resetMain()
         }
     }
@@ -1126,6 +1136,16 @@ class ChatViewModelTest {
             assertNull(viewModel.pendingDraft.value)
             assertEquals(0, recordingGemini.restCalls)
         } finally {
+            // PR #133 fix round 3 — the Focus/Settings resetMain race:
+            // this ViewModel is still alive (tearDown clears the store
+            // only after the test returns), and its init coroutines do
+            // Room work on real Dispatchers.IO threads and resume back
+            // onto Main from those threads. resetMain() while such a
+            // resume is in flight throws "Dispatchers.Main is used
+            // concurrently with setting it". Cancel the scope and drain
+            // the real-thread IO BEFORE resetMain.
+            viewModelStore.clear()
+            Thread.sleep(500)
             Dispatchers.resetMain()
         }
     }
