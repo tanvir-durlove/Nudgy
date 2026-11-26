@@ -149,7 +149,16 @@ class TemplatesScreenTest {
         composeRule.onNodeWithTag("templates_list").performScrollToIndex(3)
         composeRule.onNodeWithTag("new_template_button").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("templates_list").performScrollToIndex(4)
+        // Scroll to the BUTTON above the card, not to the card itself:
+        // the card is the LAST item, so scrolling to its own index can
+        // push its head (the name field) above the fold on a short
+        // viewport — and performTextInput silently drops text typed
+        // into a field that is composed but not displayed (that is
+        // what the first run's timeout was). With the button at the
+        // top, the card's head — name field, task field — is in view.
+        composeRule.onNodeWithTag("templates_list").performScrollToIndex(3)
+        composeRule.onNodeWithTag("create_template_name").assertIsDisplayed()
+        composeRule.onNodeWithTag("create_template_task_0").assertIsDisplayed()
         composeRule.onNodeWithTag("create_template_name")
             .performTextInput("Weekend reset")
         composeRule.onNodeWithTag("create_template_task_0")
