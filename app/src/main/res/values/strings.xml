@@ -61,18 +61,31 @@
     <!-- Sprint 6-3 — onboarding tutorial + sample tasks (spec §6) -->
     <string name="sample_chip">Sample</string>
     <string name="sample_delete_content">Delete sample task</string>
-    <string name="onboarding_skip">Skip</string>
+    <!-- Sprint 7 — onboarding rebuilt to the prototype (scr-onboarding):
+      3 slides; the old 4-page strings + top-right Skip are gone. -->
     <string name="onboarding_next">Next</string>
     <string name="onboarding_finish">Get started</string>
     <string name="onboarding_done">Done</string>
-    <string name="onboarding_page1_title">Capture tasks in seconds</string>
-    <string name="onboarding_page1_body">Type it, say it, or share it from another app — Nudgy keeps it in one place.</string>
-    <string name="onboarding_page2_title">Plan My Day</string>
-    <string name="onboarding_page2_body">Pick what matters today and start your day with one tap.</string>
-    <string name="onboarding_page3_title">Reminders that respect you</string>
-    <string name="onboarding_page3_body">Set a reminder and Nudgy nudges you at the right time — never more than you asked for.</string>
-    <string name="onboarding_page4_title">Plan together</string>
-    <string name="onboarding_page4_body">Create a group, share tasks, and see who did what.</string>
+    <string name="onboarding_skip_tour">Skip the tour</string>
+    <string name="onboarding_tagline">Your day, gently kept on track.</string>
+    <string name="onboarding_slide1_pill">Step 1 of 3 · Today</string>
+    <string name="onboarding_slide1_title">Start with Today</string>
+    <string name="onboarding_slide1_body">One screen for the whole day: what you picked this morning, what is done, and what is next on your timeline.</string>
+    <string name="onboarding_slide1_task1_title">Morning walk</string>
+    <string name="onboarding_slide1_task1_meta">7:00 AM · 30 min</string>
+    <string name="onboarding_slide1_task2_title">Buy groceries</string>
+    <string name="onboarding_slide1_task2_meta">10:30 AM · 45 min</string>
+    <string name="onboarding_slide1_note">Sample tasks are already in the app so you can try everything right away.</string>
+    <string name="onboarding_slide2_pill">Step 2 of 3 · Plan</string>
+    <string name="onboarding_slide2_title">Plan in the morning</string>
+    <string name="onboarding_slide2_body">Nudgy drafts your day — carry-overs first, ordered by due time, never more than 8 hours of estimates. You pick what stays. Nothing is added without you.</string>
+    <string name="onboarding_slide2_banner_title">3 unfinished from yesterday</string>
+    <string name="onboarding_slide2_banner_sub">Choose them in Plan — they are never moved automatically.</string>
+    <string name="onboarding_slide3_pill">Step 3 of 3 · Chat</string>
+    <string name="onboarding_slide3_title">Just say it</string>
+    <string name="onboarding_slide3_body">Tap the + button and talk or type — in English or Bengali. Nudgy turns it into tasks, but always shows you a confirmation card before anything is saved.</string>
+    <string name="onboarding_slide3_user_bubble">কালকে সকাল ৭টায় হাঁটতে যাবো, আর Tasnim-কে ৫টায় ফোন করতে হবে</string>
+    <string name="onboarding_slide3_ai_bubble">Got it — I found 2 tasks. Review them below before I save anything.</string>
     <string name="onboarding_sample_title">Start with sample tasks</string>
     <string name="onboarding_sample_sub">3 clearly-marked sample tasks you can delete in one tap.</string>
 

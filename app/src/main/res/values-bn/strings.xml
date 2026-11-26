@@ -60,18 +60,31 @@
     <!-- Sprint 6-3 — onboarding tutorial + sample tasks (spec §6) -->
     <string name="sample_chip">নমুনা</string>
     <string name="sample_delete_content">নমুনা টাস্ক মোছো</string>
-    <string name="onboarding_skip">এড়িয়ে যাও</string>
+    <!-- Sprint 7 — onboarding rebuilt to the prototype (scr-onboarding):
+      3 slides; the old 4-page strings + top-right Skip are gone. -->
     <string name="onboarding_next">পরেরটা</string>
     <string name="onboarding_finish">শুরু করি</string>
     <string name="onboarding_done">ঠিক আছে</string>
-    <string name="onboarding_page1_title">কয়েক সেকেন্ডে টাস্ক ধরো</string>
-    <string name="onboarding_page1_body">লিখে, বলে বা অন্য অ্যাপ থেকে শেয়ার করে টাস্ক যোগ করো — সব এক জায়গায় থাকবে।</string>
-    <string name="onboarding_page2_title">আজকের দিনটা সাজাও</string>
-    <string name="onboarding_page2_body">আজ যা জরুরি তা বেছে নাও, এক ট্যাপে দিন শুরু করো।</string>
-    <string name="onboarding_page3_title">সময়মতো মনে করিয়ে দেবে</string>
-    <string name="onboarding_page3_body">রিমাইন্ডার দিলে ঠিক সময়ে মনে করিয়ে দেবে — যতটুকু চেয়েছ তার বেশি নয়।</string>
-    <string name="onboarding_page4_title">একসাথে পরিকল্পনা করো</string>
-    <string name="onboarding_page4_body">গ্রুপ বানাও, টাস্ক শেয়ার করো, কে কী করল দেখো।</string>
+    <string name="onboarding_skip_tour">পরিচয়টা এড়িয়ে যাও</string>
+    <string name="onboarding_tagline">তোমার দিন, নরমভাবে গুছিয়ে রাখা।</string>
+    <string name="onboarding_slide1_pill">ধাপ ১ / ৩ · আজ</string>
+    <string name="onboarding_slide1_title">আজ থেকে শুরু করো</string>
+    <string name="onboarding_slide1_body">সারাদিনের সবকিছু এক স্ক্রিনে: সকালে যা বেছে নিয়েছ, যা শেষ হয়েছে, আর টাইমলাইনে এরপর কী আছে।</string>
+    <string name="onboarding_slide1_task1_title">Morning walk</string>
+    <string name="onboarding_slide1_task1_meta">7:00 AM · 30 min</string>
+    <string name="onboarding_slide1_task2_title">Buy groceries</string>
+    <string name="onboarding_slide1_task2_meta">10:30 AM · 45 min</string>
+    <string name="onboarding_slide1_note">নমুনা টাস্কগুলো অ্যাপেই আছে, যাতে তুমি এখনই সবকিছু চেষ্টা করে দেখতে পারো।</string>
+    <string name="onboarding_slide2_pill">ধাপ ২ / ৩ · পরিকল্পনা</string>
+    <string name="onboarding_slide2_title">সকালে পরিকল্পনা করো</string>
+    <string name="onboarding_slide2_body">Nudgy তোমার দিনের খসড়া বানায় — প্রথমে গতকালের বাকিগুলো, সময় অনুযায়ী সাজানো, মোট ৮ ঘণ্টার বেশি নয়। কোনটা থাকবে তুমি বেছে নাও। তোমার অনুমতি ছাড়া কিছুই যোগ হয় না।</string>
+    <string name="onboarding_slide2_banner_title">গতকালের ৩টা অসমাপ্ত</string>
+    <string name="onboarding_slide2_banner_sub">Plan-এ গিয়ে বেছে নাও — এগুলো নিজে থেকে সরানো হয় না।</string>
+    <string name="onboarding_slide3_pill">ধাপ ৩ / ৩ · চ্যাট</string>
+    <string name="onboarding_slide3_title">শুধু বলে দাও</string>
+    <string name="onboarding_slide3_body">+ বোতামে ট্যাপ করে বলো বা লেখো — ইংরেজি বা বাংলায়। Nudgy সেটাকে টাস্ক বানায়, তবে সেভ করার আগে সবসময় একটা নিশ্চিতকরণ কার্ড দেখায়।</string>
+    <string name="onboarding_slide3_user_bubble">কালকে সকাল ৭টায় হাঁটতে যাবো, আর Tasnim-কে ৫টায় ফোন করতে হবে</string>
+    <string name="onboarding_slide3_ai_bubble">বুঝেছি — ২টা টাস্ক পেয়েছি। সেভ করার আগে নিচে দেখে নাও।</string>
     <string name="onboarding_sample_title">নমুনা টাস্ক দিয়ে শুরু করি</string>
     <string name="onboarding_sample_sub">৩টা স্পষ্ট চিহ্নিত নমুনা টাস্ক — এক ট্যাপে মুছে ফেলা যায়।</string>
 
