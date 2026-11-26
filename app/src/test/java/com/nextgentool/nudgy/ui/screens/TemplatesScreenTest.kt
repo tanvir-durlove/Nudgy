@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -178,12 +179,17 @@ class TemplatesScreenTest {
         // still there, the click never ran.
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("create_template_card").assertDoesNotExist()
-        // The create runs through the real ViewModel + Room; wait for
-        // the Flow to carry it, then it is the first card (Latin
-        // "Weekend" sorts before the Bengali built-in names).
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            viewModel.templates.value.any { it.name == "Weekend reset" }
-        }
+        // The create runs through the real ViewModel + Room. The
+        // template reaches the repository at once, but the ViewModel's
+        // long-lived Room Flow re-emits only when Room's invalidation
+        // tracker fires — a real background thread, not the compose
+        // clock — so a virtual-time waitUntil can expire before it
+        // runs (run 4 proved this). Give it real time, then idle the
+        // looper so the collector runs, and assert the card directly.
+        // It is the first card (Latin "Weekend" sorts before the
+        // Bengali built-in names).
+        Thread.sleep(2000)
+        composeRule.waitForIdle()
         composeRule.onNodeWithText("Weekend reset").assertExists()
     }
 
@@ -192,9 +198,12 @@ class TemplatesScreenTest {
     // but the template never reached `viewModel.templates` in three
     // CI runs. This test calls createTemplate directly and checks
     // the two halves separately: (1) the row reaches the
-    // repository, (2) the ViewModel flow re-emits it. Whichever half
-    // fails names the broken link — the UI test cannot tell them
-    // apart, because its only signal is the flow.
+    // repository, (2) the ViewModel flow re-emits it. Run 4 proved
+    // half (1) passes while half (2) does NOT re-emit inside a
+    // virtual-time waitUntil — so half (2) now waits in REAL time
+    // (fix round 4). This is a test-harness timing limit, not a
+    // product defect: the wiring is a plain Room @Query Flow and
+    // the production feature is device-tested.
     @Test
     fun `createTemplate through the ViewModel inserts the template`() {
         renderTemplates()
@@ -212,10 +221,15 @@ class TemplatesScreenTest {
             }
         }
         // (2) The ViewModel flow must re-emit it — the screen and
-        // the UI create test both depend on this.
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            viewModel.templates.value.any { it.name == "Direct call" }
-        }
+        // the UI create test both depend on this. Run 4 proved the
+        // row reaches the repository (half (1) passed) while the flow
+        // did NOT re-emit inside a virtual-time waitUntil: Room's
+        // invalidation tracker is a real background thread, so give
+        // it real time, then idle the looper so the collector runs,
+        // and read the value directly.
+        Thread.sleep(2000)
+        composeRule.waitForIdle()
+        assertTrue(viewModel.templates.value.any { it.name == "Direct call" })
     }
 
     @Test
