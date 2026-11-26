@@ -204,7 +204,7 @@ class QuickChatSheetTest {
         renderSheetOnViewModel()
         waitForWelcome()
         composeRule.onNodeWithText("Quick Chat").assertIsDisplayed()
-        composeRule.onNodeWithText("Ask Nudgy anything...").assertIsDisplayed()
+        composeRule.onNodeWithText("Tell Nudgy what to do…").assertIsDisplayed()
         composeRule.onNodeWithText("Hi! What can I help you get done today?").assertExists()
         composeRule.onNodeWithContentDescription("Open full chat").assertExists()
     }

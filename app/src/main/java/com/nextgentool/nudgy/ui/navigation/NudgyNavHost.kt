@@ -646,7 +646,10 @@ fun NudgyNavHost(
                 rewardedAdReady = rewardedAdReady,
                 rewardedLoadError = rewardedLoadError,
                 onWatchRewardedAd = { activity?.let { viewModel.watchRewardedAd(it) } },
-                onRetryRewardedAd = { viewModel.retryRewardedAd() }
+                onRetryRewardedAd = { viewModel.retryRewardedAd() },
+                // Sprint 7 — the backbar goes to the Today tab
+                // (prototype scr-chat: back → Today).
+                onNavigateBack = { navigateTo(navController, NudgyRoute.Today) }
             )
         }
         composable(

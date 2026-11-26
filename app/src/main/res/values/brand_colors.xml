@@ -23,4 +23,7 @@
     <color name="nudgy_track">#E7ECEA</color>
     <color name="nudgy_teal_soft">#E6F4F1</color>
     <color name="nudgy_teal_dark">#0B5E57</color>
+    <!-- Sprint 7 — the prototype chatbar's mic-button border
+      (#FBE3D3), a darker cream than the icon background. -->
+    <color name="nudgy_cream_dark">#FBE3D3</color>
 </resources>

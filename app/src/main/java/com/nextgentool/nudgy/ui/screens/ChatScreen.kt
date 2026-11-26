@@ -24,12 +24,14 @@ import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Schedule
@@ -58,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.font.FontWeight
@@ -106,7 +109,13 @@ data class ChatMessage(
     val focusEndMillis: Long? = null,
     val focusDurationMinutes: Int = 45,
     val focusActionCompleted: Boolean = false,
-    val quickSuggestions: List<String> = emptyList()
+    val quickSuggestions: List<String> = emptyList(),
+    // Sprint 7 — the WHO label on the user's bubble: voice messages
+    // show "YOU · VOICE", typed ones "YOU". Display-only, defaulted
+    // false: the voice path does not stamp it yet (that is a
+    // ViewModel change, out of this design-only task's scope), so
+    // every user bubble shows "YOU" today.
+    val isVoice: Boolean = false
 )
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -146,7 +155,7 @@ fun ChatScreen(
     // no time to edit and the parent title is not editable here.
     onRemoveSplitSubtask: (Int) -> Unit = {},
     // Sprint 3-4 — brain dump (feature 19, Q9 = (a)): the combined
-    // preview card — all split drafts in one card, one Confirm-all,
+    // preview card — all split drafts in one card, one Save-all,
     // per-item remove. All defaulted: the card never renders without
     // pending drafts. isBrainDumpActive keeps the mic on Stop between
     // utterances (the recognizer's isListening flickers false while
@@ -161,7 +170,7 @@ fun ChatScreen(
     onRemoveBrainDumpDraft: (Int) -> Unit = {},
     // Sprint 3-6 — auto-schedule (feature 21, Q4 = (a)): the day-plan
     // combined preview card — one FOCUS_EVENT draft per proposed
-    // slot, one Confirm-all, per-item remove. Same pattern as the
+    // slot, one Save-all, per-item remove. Same pattern as the
     // brain-dump card; renders only on its own message while the
     // ViewModel still holds the drafts.
     pendingPlanDrafts: List<ChatDraft> = emptyList(),
@@ -183,6 +192,10 @@ fun ChatScreen(
     rewardedLoadError: String? = null,
     onWatchRewardedAd: () -> Unit = {},
     onRetryRewardedAd: () -> Unit = {},
+    // Sprint 7 — backbar (prototype scr-chat): Chat is a bottom-nav
+    // destination, so Back goes to the Today tab, not popBackStack.
+    // Defaulted: the smoke tests render without a NavController.
+    onNavigateBack: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
@@ -207,6 +220,15 @@ fun ChatScreen(
     val cream = colorResource(R.color.nudgy_cream)
     val ink = colorResource(R.color.nudgy_ink)
     val muted = colorResource(R.color.nudgy_muted)
+    // Sprint 7 — the prototype confirm-card button row: soft Edit
+    // (teal-soft fill, teal-dark text) and ghost Discard (white fill,
+    // ink text, track border).
+    val tealSoft = colorResource(R.color.nudgy_teal_soft)
+    val tealDark = colorResource(R.color.nudgy_teal_dark)
+    val track = colorResource(R.color.nudgy_track)
+    // Sprint 7 — the prototype caps bubbles at 82% of the screen
+    // width (both sides); wrap-content below that cap.
+    val maxBubbleWidth = (LocalConfiguration.current.screenWidthDp * 0.82f).dp
 
     val quickPrompts = listOf(
         "Plan my day",
@@ -252,6 +274,38 @@ fun ChatScreen(
                 .padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
+            // Sprint 7 — backbar (prototype scr-chat; the same back
+            // Row Templates uses: back + titleLarge, no TopAppBar).
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                    .testTag("chat_backbar")
+            ) {
+                IconButton(onClick = onNavigateBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = ink
+                    )
+                }
+                Text(
+                    text = "Chat",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = ink
+                )
+            }
+            // Sprint 7 — intro (prototype-verbatim). Fixed under the
+            // backbar like the Templates intro, so it is always
+            // visible; the quick-prompt pills stay in the thread's
+            // hero item below.
+            Text(
+                text = "Say or type what you need — in English or বাংলা. Chat works offline on this device; AI help is used only for hard requests, and nothing is saved until you confirm it.",
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                color = muted,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
             LazyColumn(
                 state = listState,
                 reverseLayout = true,
@@ -325,14 +379,28 @@ fun ChatScreen(
                             horizontalArrangement = Arrangement.End
                         ) {
                             Surface(
-                                shape = RoundedCornerShape(18.dp).copy(bottomEnd = androidx.compose.foundation.shape.CornerSize(4.dp)),
-                                color = teal
+                                shape = RoundedCornerShape(18.dp).copy(bottomEnd = androidx.compose.foundation.shape.CornerSize(6.dp)),
+                                color = teal,
+                                modifier = Modifier.widthIn(max = maxBubbleWidth)
                             ) {
-                                Text(
-                                    text = message.text,
-                                    style = MaterialTheme.typography.bodyLarge.copy(color = Color.White),
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                                )
+                                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)) {
+                                    // Sprint 7 — WHO label (prototype
+                                    // scr-chat): "YOU · VOICE" on voice
+                                    // messages, "YOU" on typed ones.
+                                    Text(
+                                        text = if (message.isVoice) "YOU · VOICE" else "YOU",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = Color(0xFFBFE8E1)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = message.text,
+                                        style = MaterialTheme.typography.bodyLarge.copy(
+                                            color = Color.White,
+                                            fontSize = 14.5.sp
+                                        )
+                                    )
+                                }
                             }
                         }
                     } else {
@@ -344,15 +412,28 @@ fun ChatScreen(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Surface(
-                                        shape = RoundedCornerShape(18.dp).copy(bottomStart = androidx.compose.foundation.shape.CornerSize(4.dp)),
+                                        shape = RoundedCornerShape(18.dp).copy(bottomStart = androidx.compose.foundation.shape.CornerSize(6.dp)),
                                         color = Color.White,
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, muted.copy(alpha = 0.25f))
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, muted.copy(alpha = 0.25f)),
+                                        modifier = Modifier.widthIn(max = maxBubbleWidth)
                                     ) {
-                                        Text(
-                                            text = message.text,
-                                            style = MaterialTheme.typography.bodyLarge.copy(color = ink),
-                                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                                        )
+                                        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)) {
+                                            // Sprint 7 — WHO label
+                                            // (prototype scr-chat).
+                                            Text(
+                                                text = "NUDGY",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = muted
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = message.text,
+                                                style = MaterialTheme.typography.bodyLarge.copy(
+                                                    color = ink,
+                                                    fontSize = 14.5.sp
+                                                )
+                                            )
+                                        }
                                     }
 
                                     // Action Card 1: Task Preview
@@ -476,7 +557,7 @@ fun ChatScreen(
                                     // card renders ONLY on the message the
                                     // pending draft is attached to, and only
                                     // while the ViewModel still holds the
-                                    // draft. Confirm saves, Edit changes
+                                    // draft. Save confirms and saves, Edit changes
                                     // the draft, Discard drops it — nothing
                                     // is in the DB yet. The TASK_PREVIEW /
                                     // EVENT_CREATED cards above stay as the
@@ -488,9 +569,9 @@ fun ChatScreen(
                                         Spacer(modifier = Modifier.height(8.dp))
                                         Surface(
                                             modifier = Modifier.fillMaxWidth().testTag("draft_preview_card"),
-                                            shape = RoundedCornerShape(16.dp),
-                                            color = cream,
-                                            border = androidx.compose.foundation.BorderStroke(1.dp, teal.copy(alpha = 0.3f))
+                                            shape = RoundedCornerShape(18.dp),
+                                            color = Color.White,
+                                            border = androidx.compose.foundation.BorderStroke(1.5.dp, teal)
                                         ) {
                                             Column(modifier = Modifier.padding(14.dp)) {
                                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -514,7 +595,7 @@ fun ChatScreen(
                                                 // Sprint 3-5 — the split preview: the parent
                                                 // title is the header above; the card lists
                                                 // the subtasks with a per-item remove, then
-                                                // Confirm / Discard. No time line (a split
+                                                // Save / Discard. No time line (a split
                                                 // has no time) and no Edit button.
                                                 if (draft.kind == DraftKind.SUBTASK_SPLIT) {
                                                     Text(
@@ -569,13 +650,19 @@ fun ChatScreen(
                                                             colors = ButtonDefaults.buttonColors(containerColor = teal),
                                                             modifier = Modifier.testTag("draft_confirm_button")
                                                         ) {
-                                                            Text("Confirm", fontSize = 13.sp, color = Color.White)
+                                                            Text("Save", fontSize = 13.sp, color = Color.White)
                                                         }
-                                                        TextButton(
+                                                        Button(
                                                             onClick = onDiscardDraft,
+                                                            shape = RoundedCornerShape(100.dp),
+                                                            colors = ButtonDefaults.buttonColors(
+                                                                containerColor = Color.White,
+                                                                contentColor = ink
+                                                            ),
+                                                            border = androidx.compose.foundation.BorderStroke(1.dp, track),
                                                             modifier = Modifier.testTag("draft_discard_button")
                                                         ) {
-                                                            Text("Discard", fontSize = 13.sp, color = muted)
+                                                            Text("Discard", fontSize = 13.sp, color = ink)
                                                         }
                                                     }
                                                 } else {
@@ -612,23 +699,34 @@ fun ChatScreen(
                                                         colors = ButtonDefaults.buttonColors(containerColor = teal),
                                                         modifier = Modifier.testTag("draft_confirm_button")
                                                     ) {
-                                                        Text("Confirm", fontSize = 13.sp, color = Color.White)
+                                                        Text("Save", fontSize = 13.sp, color = Color.White)
                                                     }
-                                                    TextButton(
+                                                    Button(
                                                         onClick = {
                                                             editingDraft = draft
                                                             editTitle = draft.title
                                                             editStartMillis = draft.startEpochMillis
                                                         },
+                                                        shape = RoundedCornerShape(100.dp),
+                                                        colors = ButtonDefaults.buttonColors(
+                                                            containerColor = tealSoft,
+                                                            contentColor = tealDark
+                                                        ),
                                                         modifier = Modifier.testTag("draft_edit_button")
                                                     ) {
-                                                        Text("Edit", fontSize = 13.sp, color = teal)
+                                                        Text("Edit", fontSize = 13.sp, color = tealDark)
                                                     }
-                                                    TextButton(
+                                                    Button(
                                                         onClick = onDiscardDraft,
+                                                        shape = RoundedCornerShape(100.dp),
+                                                        colors = ButtonDefaults.buttonColors(
+                                                            containerColor = Color.White,
+                                                            contentColor = ink
+                                                        ),
+                                                        border = androidx.compose.foundation.BorderStroke(1.dp, track),
                                                         modifier = Modifier.testTag("draft_discard_button")
                                                     ) {
-                                                        Text("Discard", fontSize = 13.sp, color = muted)
+                                                        Text("Discard", fontSize = 13.sp, color = ink)
                                                     }
                                                 }
                                                 }
@@ -640,7 +738,7 @@ fun ChatScreen(
                                     // combined preview (Q9 = (a)). One card
                                     // for ALL split drafts: each row shows
                                     // title + time with its own remove
-                                    // button; Confirm-all saves every
+                                    // button; Save-all saves every
                                     // remaining draft, Discard drops them
                                     // all. Renders only on the message the
                                     // dump is attached to, and only while
@@ -651,9 +749,9 @@ fun ChatScreen(
                                         Spacer(modifier = Modifier.height(8.dp))
                                         Surface(
                                             modifier = Modifier.fillMaxWidth().testTag("brain_dump_preview_card"),
-                                            shape = RoundedCornerShape(16.dp),
-                                            color = cream,
-                                            border = androidx.compose.foundation.BorderStroke(1.dp, teal.copy(alpha = 0.3f))
+                                            shape = RoundedCornerShape(18.dp),
+                                            color = Color.White,
+                                            border = androidx.compose.foundation.BorderStroke(1.5.dp, teal)
                                         ) {
                                             Column(modifier = Modifier.padding(14.dp)) {
                                                 Text(
@@ -714,13 +812,19 @@ fun ChatScreen(
                                                         colors = ButtonDefaults.buttonColors(containerColor = teal),
                                                         modifier = Modifier.testTag("brain_dump_confirm_button")
                                                     ) {
-                                                        Text("Confirm all", fontSize = 13.sp, color = Color.White)
+                                                        Text("Save all", fontSize = 13.sp, color = Color.White)
                                                     }
-                                                    TextButton(
+                                                    Button(
                                                         onClick = onDiscardBrainDump,
+                                                        shape = RoundedCornerShape(100.dp),
+                                                        colors = ButtonDefaults.buttonColors(
+                                                            containerColor = Color.White,
+                                                            contentColor = ink
+                                                        ),
+                                                        border = androidx.compose.foundation.BorderStroke(1.dp, track),
                                                         modifier = Modifier.testTag("brain_dump_discard_button")
                                                     ) {
-                                                        Text("Discard", fontSize = 13.sp, color = muted)
+                                                        Text("Discard", fontSize = 13.sp, color = ink)
                                                     }
                                                 }
                                             }
@@ -732,7 +836,7 @@ fun ChatScreen(
                                     // (a)). One card for ALL proposed
                                     // focus blocks: each row shows task
                                     // + slot range with its own remove
-                                    // button; Confirm-all schedules every
+                                    // button; Save-all schedules every
                                     // remaining block, Discard drops them
                                     // all. Same pattern as the brain-dump
                                     // card (1d); renders only on the
@@ -745,9 +849,9 @@ fun ChatScreen(
                                         Spacer(modifier = Modifier.height(8.dp))
                                         Surface(
                                             modifier = Modifier.fillMaxWidth().testTag("day_plan_preview_card"),
-                                            shape = RoundedCornerShape(16.dp),
-                                            color = cream,
-                                            border = androidx.compose.foundation.BorderStroke(1.dp, teal.copy(alpha = 0.3f))
+                                            shape = RoundedCornerShape(18.dp),
+                                            color = Color.White,
+                                            border = androidx.compose.foundation.BorderStroke(1.5.dp, teal)
                                         ) {
                                             Column(modifier = Modifier.padding(14.dp)) {
                                                 Text(
@@ -810,13 +914,19 @@ fun ChatScreen(
                                                         colors = ButtonDefaults.buttonColors(containerColor = teal),
                                                         modifier = Modifier.testTag("day_plan_confirm_button")
                                                     ) {
-                                                        Text("Confirm all", fontSize = 13.sp, color = Color.White)
+                                                        Text("Save all", fontSize = 13.sp, color = Color.White)
                                                     }
-                                                    TextButton(
+                                                    Button(
                                                         onClick = onDiscardPlan,
+                                                        shape = RoundedCornerShape(100.dp),
+                                                        colors = ButtonDefaults.buttonColors(
+                                                            containerColor = Color.White,
+                                                            contentColor = ink
+                                                        ),
+                                                        border = androidx.compose.foundation.BorderStroke(1.dp, track),
                                                         modifier = Modifier.testTag("day_plan_discard_button")
                                                     ) {
-                                                        Text("Discard", fontSize = 13.sp, color = muted)
+                                                        Text("Discard", fontSize = 13.sp, color = ink)
                                                     }
                                                 }
                                             }
@@ -1038,45 +1148,17 @@ fun ChatScreen(
                     }
                 }
 
-                // Hero & Greeting — text only, no mascot (S3-1: the
-                // rebuild chat has no mascot anywhere).
+                // Hero — Sprint 7: the intro paragraph moved out to
+                // the fixed header above (prototype scr-chat); only
+                // the quick-prompt pills stay here, at the top of the
+                // thread. The pills are behaviour (S3), not
+                // decoration: tapping one sends that command.
                 item(key = "hero") {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 16.dp, bottom = 8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                            .padding(top = 16.dp, bottom = 8.dp)
                     ) {
-                        Text(
-                            text = "YOUR PRODUCTIVITY PARTNER",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = teal
-                        )
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Text(
-                            text = "What can I help you\nget done?",
-                            style = MaterialTheme.typography.displayMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 28.sp
-                            ),
-                            textAlign = TextAlign.Center,
-                            color = ink
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = "I can manage tasks, schedule focus time, and keep your day moving in English or বাংলা.",
-                            style = MaterialTheme.typography.bodyLarge,
-                            textAlign = TextAlign.Center,
-                            color = muted,
-                            modifier = Modifier.padding(horizontal = 20.dp)
-                        )
-
-                        Spacer(modifier = Modifier.height(18.dp))
-
                         // Quick Prompt Pills
                         FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1197,9 +1279,16 @@ fun ChatScreen(
                 onSendMessage = onSendMessage,
                 onStartVoice = onStartVoice,
                 onStopVoice = onStopVoice,
-                modifier = Modifier.padding(bottom = 12.dp),
                 voiceLanguage = voiceLanguage,
                 onToggleVoiceLanguage = onToggleVoiceLanguage
+            )
+            // Sprint 7 — footer note (prototype-verbatim): the
+            // assistant never saves directly.
+            Text(
+                text = "The assistant never saves directly — every task appears as a confirmation card first.",
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                color = muted,
+                modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)
             )
         }
 
