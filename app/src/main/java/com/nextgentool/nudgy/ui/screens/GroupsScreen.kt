@@ -4,11 +4,15 @@ import android.content.Intent
 import android.graphics.drawable.AnimatedVectorDrawable
 import android.widget.ImageView
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -37,6 +42,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -46,6 +53,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,11 +68,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -84,12 +96,10 @@ import com.nextgentool.nudgy.data.repository.activityDisplayText
 import com.nextgentool.nudgy.data.repository.effectiveCompletion
 import com.nextgentool.nudgy.data.repository.formatCompletionCount
 import com.nextgentool.nudgy.ui.components.NudgyCheckbox
-import com.nextgentool.nudgy.ui.sheets.CreateGroupSheet
 import com.nextgentool.nudgy.ui.sheets.CreateTaskSheet
 import com.nextgentool.nudgy.ui.sheets.EditTaskSheet
 import com.nextgentool.nudgy.ui.sheets.GroupScheduleSheet
 import com.nextgentool.nudgy.ui.sheets.GroupTaskDetailSheet
-import com.nextgentool.nudgy.ui.sheets.JoinGroupSheet
 import com.nextgentool.nudgy.ui.sheets.SendNoticeSheet
 import com.nextgentool.nudgy.ui.theme.NudgyAccent
 import com.nextgentool.nudgy.ui.theme.NudgyAvatarPalettes
@@ -102,12 +112,15 @@ import com.nextgentool.nudgy.ui.theme.NudgyMemberPillText
 import com.nextgentool.nudgy.ui.theme.NudgyPeach
 import com.nextgentool.nudgy.ui.theme.NudgySage
 import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
+import com.nextgentool.nudgy.ui.theme.NudgyFieldBorder
 import com.nextgentool.nudgy.ui.theme.NudgyMuted
 import com.nextgentool.nudgy.ui.theme.NudgyPrimary
+import com.nextgentool.nudgy.ui.theme.NudgyTokens
 import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 
 /**
  * Groups tab (Group v1).
@@ -150,6 +163,7 @@ import kotlinx.coroutines.flow.flowOf
  *   list, from the denormalized name on the row); the Activity card
  *   lists who did what, newest first, live via the listener.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun GroupsScreen(
     user: NudgyUser,
@@ -226,6 +240,14 @@ fun GroupsScreen(
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+    // Sprint 7 — prototype accents for the list restyle. The Groups
+    // screen's own palette already matches the Sprint 7 light tokens
+    // (canvas #F4F6F5, charcoal #111827, muted #475569), so those stay.
+    val teal = colorResource(R.color.nudgy_teal)
+    val tealSoft = colorResource(R.color.nudgy_teal_soft)
+    val tealDark = colorResource(R.color.nudgy_teal_dark)
+    val cream = colorResource(R.color.nudgy_cream)
+    val creamDark = colorResource(R.color.nudgy_cream_dark)
     val taskDateFormatter = remember {
         SimpleDateFormat("EEE, MMM d · h:mm a", Locale.getDefault())
     }
@@ -234,15 +256,25 @@ fun GroupsScreen(
     }
 
     var selectedGroup by remember { mutableStateOf(initialSelectedGroup) }
-    var showCreateGroup by remember { mutableStateOf(false) }
-    var showJoinGroup by remember { mutableStateOf(false) }
-    // Deep-link prefill (one-shot): MainActivity delivers a join code from an
-    // App Links intent; the sheet opens prefilled and the user still taps Join.
-    var joinPrefill by remember { mutableStateOf<String?>(null) }
+    // Sprint 7 — the join/create flows live in inline cards on the
+    // list now (prototype scr-groups), not in bottom sheets: the join
+    // card is always visible, the create card opens from the
+    // "Create a group" button. Same callbacks, same validation, same
+    // results — only the presentation moved.
+    val scope = rememberCoroutineScope()
+    var joinCode by remember { mutableStateOf("") }
+    var joinError by remember { mutableStateOf<String?>(null) }
+    var joinBusy by remember { mutableStateOf(false) }
+    var showCreateCard by remember { mutableStateOf(false) }
+    var createName by remember { mutableStateOf("") }
+    var createError by remember { mutableStateOf<String?>(null) }
+    var createBusy by remember { mutableStateOf(false) }
+    // Deep-link prefill (one-shot): MainActivity delivers a join code
+    // from an App Links intent; it fills the join card's field and the
+    // user still taps Join — never auto-joined.
     LaunchedEffect(prefillJoinCode) {
         if (prefillJoinCode != null) {
-            joinPrefill = prefillJoinCode
-            showJoinGroup = true
+            joinCode = prefillJoinCode.uppercase().filter { it.isLetterOrDigit() }
             onPrefillJoinCodeConsumed()
         }
     }
@@ -349,7 +381,7 @@ fun GroupsScreen(
             .fillMaxSize()
             .background(NudgyCanvas)
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 16.dp)
+            .padding(horizontal = NudgyTokens.screenPadding, vertical = 16.dp)
     ) {
         if (user.isGuest) {
             Text(
@@ -419,107 +451,27 @@ fun GroupsScreen(
         val group = selectedGroup
         if (group == null) {
             // ------------------------------------------------ list view
-            // Hero banner (Figma redesign, generic copy)
-            Surface(
-                shape = RoundedCornerShape(28.dp),
-                color = NudgyPeach,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        text = "BUILT FOR YOUR PEOPLE",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
-                        ),
-                        color = NudgyAccent
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Keep everyone in the loop.",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = NudgyCharcoal
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Shared deadlines and schedules from your group owner, " +
-                            "right alongside your personal plans.",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-                        color = NudgyMuted
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(
-                            onClick = { showCreateGroup = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary),
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Create",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold, fontSize = 14.sp
-                                ),
-                                color = Color.White
-                            )
-                        }
-                        OutlinedButton(
-                            onClick = { showJoinGroup = true },
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Group,
-                                contentDescription = null,
-                                tint = NudgyPrimary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Join with code",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold, fontSize = 14.sp
-                                ),
-                                color = NudgyAccent
-                            )
-                        }
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(20.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "Your groups",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = NudgyCharcoal,
-                    modifier = Modifier.weight(1f)
-                )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(100.dp))
-                        .background(NudgyPrimary.copy(alpha = 0.12f))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = "${groups.size} active",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = 12.sp, fontWeight = FontWeight.SemiBold
-                        ),
-                        color = NudgyAccent
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(12.dp))
+            // Sprint 7 — title + intro (prototype scr-groups,
+            // verbatim). The hero banner and its Create / Join with
+            // code buttons are gone: join and create live in inline
+            // cards below the list now.
+            Text(
+                text = "Groups",
+                style = MaterialTheme.typography.titleLarge.copy(
+                    fontSize = 21.sp, fontWeight = FontWeight.ExtraBold
+                ),
+                color = NudgyCharcoal
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Tasks and schedules shared with your group — anything added here appears in every member's own list, with a group badge so you know where it came from.",
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                color = NudgyMuted
+            )
+            Spacer(modifier = Modifier.height(14.dp))
             if (groups.isEmpty()) {
                 Surface(
-                    shape = RoundedCornerShape(20.dp),
+                    shape = NudgyTokens.cardRadius,
                     color = NudgyCard,
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -554,77 +506,102 @@ fun GroupsScreen(
                     val itemTaskCount = allTasks.count {
                         it.groupId == item.groupId && !it.isCompleted
                     }
-                    val (avatarBg, avatarText) = groupAvatarPalette(item.name)
+                    // Sprint 7 — prototype avatar (.avatar): a 44dp
+                    // circle with the group's first letter; teal-soft
+                    // by default, cream for the hashed variant (the
+                    // prototype's .coralbg).
+                    val isCreamAvatar = (item.name.hashCode() and Int.MAX_VALUE) % 2 == 1
+                    val isCreator = item.creatorUid == user.uid
                     Surface(
-                        shape = RoundedCornerShape(20.dp),
+                        shape = RoundedCornerShape(18.dp),
                         color = NudgyCard,
                         shadowElevation = 2.dp,
                         onClick = { selectedGroup = item },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 12.dp)
+                            .padding(bottom = 10.dp)
                             .testTag("group_row_${item.groupId}")
                     ) {
                         Row(
-                            modifier = Modifier.padding(16.dp),
+                            modifier = Modifier.padding(14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(
                                 contentAlignment = Alignment.Center,
                                 modifier = Modifier
-                                    .size(56.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(avatarBg)
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isCreamAvatar) cream else tealSoft)
                             ) {
                                 Text(
-                                    text = groupInitials(item.name),
+                                    text = item.name.firstOrNull { it.isLetter() }?.uppercase() ?: "G",
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold, fontSize = 16.sp
                                     ),
-                                    color = avatarText
+                                    color = if (isCreamAvatar) NudgyCharcoal else tealDark
                                 )
                             }
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = item.name,
-                                        style = MaterialTheme.typography.titleMedium.copy(
-                                            fontWeight = FontWeight.Bold
-                                        ),
-                                        color = NudgyCharcoal,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f, fill = false)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    RolePill(isCreator = item.creatorUid == user.uid)
-                                }
+                                Text(
+                                    text = item.name,
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = NudgyCharcoal,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                                 Spacer(modifier = Modifier.height(4.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    // Sprint 7 — the prototype meta is
+                                    // "N members · M open tasks", but
+                                    // member counts are not loaded for
+                                    // the list (members are observed only
+                                    // for the selected group); the count
+                                    // stays task-only until that data
+                                    // lands. The join code is gone from
+                                    // the row (the prototype has none) —
+                                    // it still lives in the detail's
+                                    // invite card.
                                     Text(
-                                        text = "$itemTaskCount open",
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                        text = "$itemTaskCount open tasks",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.5.sp),
                                         color = NudgyMuted
                                     )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(
-                                        text = item.code,
-                                        style = MaterialTheme.typography.bodyMedium.copy(
-                                            fontSize = 12.sp, fontWeight = FontWeight.SemiBold
-                                        ),
-                                        color = NudgyAccent
-                                    )
-                                    IconButton(
-                                        onClick = { copyCode(item.code) },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.ContentCopy,
-                                            contentDescription = "Copy join code",
-                                            tint = NudgyPrimary,
-                                            modifier = Modifier.size(15.dp)
-                                        )
+                                    RolePill(isCreator = isCreator)
+                                    // Sprint 7 — the prototype shows the
+                                    // teal "+ Add task" chip on every
+                                    // row, but the admin-only rule
+                                    // (Sprint 5 Q3, Tanvir's correction)
+                                    // forbids a member from creating a
+                                    // group task: the chip renders for
+                                    // creators only and opens the detail,
+                                    // where Add task lives at the top of
+                                    // the task list (the prototype's own
+                                    // note says creation happens there).
+                                    // Never a dead button for members.
+                                    if (isCreator) {
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(100.dp))
+                                                .background(teal)
+                                                .clickable { selectedGroup = item }
+                                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                                                .testTag("group_add_task_${item.groupId}")
+                                        ) {
+                                            Text(
+                                                text = "+ Add task",
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontSize = 11.5.sp, fontWeight = FontWeight.Bold
+                                                ),
+                                                color = Color.White
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -638,6 +615,216 @@ fun GroupsScreen(
                     }
                 }
             }
+            // Sprint 7 — tiny note (prototype-verbatim): creation
+            // happens in the detail, at the top of its task list.
+            // Only when the list is non-empty — with no groups there is
+            // nothing to tap yet.
+            if (groups.isNotEmpty()) {
+                Text(
+                    text = buildAnnotatedString {
+                        append("Tap a group, then use ")
+                        withStyle(SpanStyle(color = tealDark, fontWeight = FontWeight.Bold)) {
+                            append("Add task")
+                        }
+                        append(" at the top of its task list to create a group task.")
+                    },
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                    color = NudgyMuted,
+                    modifier = Modifier.padding(start = 2.dp, top = 2.dp)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+            // Sprint 7 — Join card (prototype scr-groups): always
+            // visible; same validation, error display and callback as
+            // the old sheet — only the presentation moved inline.
+            Surface(
+                shape = NudgyTokens.cardRadius,
+                color = NudgyCard,
+                shadowElevation = NudgyTokens.cardElevation,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Join a group",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold, fontSize = 15.5.sp
+                        ),
+                        color = NudgyCharcoal
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Enter a join code, or open an invite link someone shared with you.",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                        color = NudgyMuted
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = joinCode,
+                            onValueChange = {
+                                joinCode = it.uppercase().filter { ch -> ch.isLetterOrDigit() }
+                                joinError = null
+                            },
+                            placeholder = { Text("Join code, e.g. FAM-2481") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = teal,
+                                unfocusedBorderColor = NudgyFieldBorder
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(
+                            onClick = {
+                                if (joinCode.isBlank() || joinBusy) return@Button
+                                joinBusy = true
+                                scope.launch {
+                                    when (val result = onJoinGroup(joinCode)) {
+                                        is GroupResult.Ok -> {
+                                            joinCode = ""
+                                            joinError = null
+                                            joinBusy = false
+                                        }
+                                        is GroupResult.Err -> {
+                                            joinError = result.message
+                                            joinBusy = false
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = joinCode.isNotBlank() && !joinBusy,
+                            colors = ButtonDefaults.buttonColors(containerColor = teal),
+                            shape = RoundedCornerShape(100.dp)
+                        ) {
+                            Text(
+                                text = if (joinBusy) "Joining…" else "Join",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = Color.White
+                            )
+                        }
+                    }
+                    joinError?.let { message ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                            color = Color(0xFFB3261E)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Left a group earlier? Rejoin any time with the same code.",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                        color = NudgyMuted
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            // Sprint 7 — "Create a group" soft block button (prototype
+            // scr-groups): toggles the create card below, like the
+            // Templates inline-create pattern (S6-4 step 3c).
+            Button(
+                onClick = { showCreateCard = !showCreateCard },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = tealSoft,
+                    contentColor = tealDark
+                ),
+                shape = RoundedCornerShape(100.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Create a group",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = tealDark
+                )
+            }
+            if (showCreateCard) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Surface(
+                    shape = NudgyTokens.cardRadius,
+                    color = NudgyCard,
+                    shadowElevation = NudgyTokens.cardElevation,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "New group",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold, fontSize = 15.5.sp
+                            ),
+                            color = NudgyCharcoal
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = createName,
+                            onValueChange = { createName = it; createError = null },
+                            placeholder = { Text("Group name, e.g. Flat 7B") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = teal,
+                                unfocusedBorderColor = NudgyFieldBorder
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        createError?.let { message ->
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = message,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                                color = Color(0xFFB3261E)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                if (createName.isBlank() || createBusy) return@Button
+                                createBusy = true
+                                scope.launch {
+                                    when (val result = onCreateGroup(createName)) {
+                                        is GroupResult.Ok -> {
+                                            showCreateCard = false
+                                            createName = ""
+                                            createError = null
+                                            createBusy = false
+                                        }
+                                        is GroupResult.Err -> {
+                                            createError = result.message
+                                            createBusy = false
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = createName.isNotBlank() && !createBusy,
+                            colors = ButtonDefaults.buttonColors(containerColor = teal),
+                            shape = RoundedCornerShape(100.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = if (createBusy) "Creating…" else "Create group",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = Color.White
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "You become the admin. A join code is generated to share.",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                            color = NudgyMuted
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
             // Reserved banner slot: empty space only (no ad SDK) so a future
             // banner slots in without layout shift.
             Spacer(modifier = Modifier.height(64.dp))
@@ -1404,19 +1591,9 @@ fun GroupsScreen(
     }
 
     // ------------------------------------------------ sheets & dialogs
-    if (showCreateGroup) {
-        CreateGroupSheet(
-            onDismiss = { showCreateGroup = false },
-            onCreateGroup = onCreateGroup
-        )
-    }
-    if (showJoinGroup) {
-        JoinGroupSheet(
-            onDismiss = { showJoinGroup = false; joinPrefill = null },
-            onJoinGroup = onJoinGroup,
-            initialCode = joinPrefill ?: ""
-        )
-    }
+    // Sprint 7 — the join/create sheets are gone: both flows live in
+    // inline cards on the list now (see the list branch above). The
+    // detail sheets below are untouched.
     val activeGroup = selectedGroup
     // Sprint 5-2 — the task/schedule/edit/detail sheets and the
     // item-delete dialogs live behind groupTasksEnabled (their buttons
@@ -1747,26 +1924,30 @@ private fun groupAvatarPalette(name: String): Pair<Color, Color> {
     return NudgyAvatarPalettes[index]
 }
 
-/** OWNER (green) / MEMBER (purple) pill badge, shared by cards and detail. */
+/**
+ * Sprint 7 — role tagchip (prototype scr-groups .tagchip.grp):
+ * "You are admin" / "Member", cream fill, cream-dark border, ink
+ * text. Shared by the list rows and the detail header — the detail
+ * prototype uses the same chip, so the change lands in both.
+ */
 @Composable
 private fun RolePill(isCreator: Boolean) {
-    val (pillBackground, pillText) = if (isCreator) {
-        NudgySage to NudgyGreen
-    } else {
-        NudgyLavender to NudgyMemberPillText
-    }
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(100.dp))
-            .background(pillBackground)
+            .background(colorResource(R.color.nudgy_cream))
+            .border(
+                BorderStroke(1.dp, colorResource(R.color.nudgy_cream_dark)),
+                RoundedCornerShape(100.dp)
+            )
             .padding(horizontal = 8.dp, vertical = 3.dp)
     ) {
         Text(
-            text = if (isCreator) "OWNER" else "MEMBER",
+            text = if (isCreator) "You are admin" else "Member",
             style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 10.sp, fontWeight = FontWeight.Bold
+                fontSize = 11.5.sp, fontWeight = FontWeight.Medium
             ),
-            color = pillText
+            color = NudgyCharcoal
         )
     }
 }

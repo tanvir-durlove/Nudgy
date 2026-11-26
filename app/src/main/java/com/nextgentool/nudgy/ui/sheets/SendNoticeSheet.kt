@@ -35,7 +35,7 @@ import com.nextgentool.nudgy.ui.theme.NudgyPrimary
 
 /**
  * Sprint 5-3 — send a text-only admin notice (feature 32, spec §6,
- * Q2=(a)). Same sheet pattern as [CreateGroupSheet]: the caller
+ * Q2=(a)). Same sheet pattern: the caller
  * closes on submit (the repository surfaces failures on the shared
  * group-error toast — the sheet has no inline result).
  *

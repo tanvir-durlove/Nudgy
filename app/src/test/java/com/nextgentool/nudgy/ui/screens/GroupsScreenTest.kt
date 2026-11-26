@@ -33,8 +33,8 @@ import org.robolectric.annotation.Config
  *
  * Renders the pure [GroupsScreen] with hand-built state (no Hilt, no
  * ViewModel): the list, the empty state, the guest prompt, the detail
- * (members + placeholder, no group-work UI), the create/join sheets,
- * and the deep-link prefill. Compose 1.7 member rules apply:
+ * (members + placeholder, no group-work UI), the create/join inline
+ * cards (Sprint 7 — the sheets are gone), and the deep-link prefill. Compose 1.7 member rules apply:
  * assertExists/assertDoesNotExist are members, never top-level imports.
  *
  * Sprint 5-2 — group tasks (spec §5, feature 31): the same screen
@@ -151,13 +151,46 @@ class GroupsScreenTest {
     )
 
     @Test
-    fun `list shows groups with name code and role pill`() {
+    fun `list shows groups with name meta and role pill`() {
         render()
 
+        composeRule.onNodeWithText("Groups").assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "Tasks and schedules shared with your group — anything added here appears in every member's own list, with a group badge so you know where it came from."
+        ).assertIsDisplayed()
         composeRule.onNodeWithText("DIU 41").assertIsDisplayed()
-        composeRule.onNodeWithText("K7Q2XA").assertIsDisplayed()
+        // No tasks seeded: the prototype meta is "N members · M open
+        // tasks", but member counts are not loaded for the list, so the
+        // meta is task-only for now.
+        composeRule.onNodeWithText("0 open tasks").assertIsDisplayed()
         // user-2 is a member of user-1's group, not the creator.
-        composeRule.onNodeWithText("MEMBER").assertIsDisplayed()
+        composeRule.onNodeWithText("Member").assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "Add task at the top of its task list", substring = true
+        ).assertIsDisplayed()
+        // The join code is gone from the row (the prototype has none) —
+        // it still lives in the detail's invite card.
+        composeRule.onNodeWithText("K7Q2XA").assertDoesNotExist()
+        // Members get no "+ Add task" chip (admin-only, Sprint 5 Q3).
+        composeRule.onNodeWithText("+ Add task").assertDoesNotExist()
+    }
+
+    // Sprint 7 — the "+ Add task" chip: creators only, and it opens the
+    // detail where Add task lives. The chip is a plain clickable Box
+    // inside the scrolling column (the Calendar grid-day pattern), so
+    // performClick + waitUntil is the reliable path here.
+    @Test
+    fun `creator row shows the Add task chip and tapping it opens the detail`() {
+        render(user = creator)
+
+        composeRule.onNodeWithTag("group_add_task_g-1").assertIsDisplayed()
+        composeRule.onNodeWithText("+ Add task").assertIsDisplayed()
+        composeRule.onNodeWithText("+ Add task").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("All groups")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("All groups").assertIsDisplayed()
     }
 
     @Test
@@ -172,8 +205,8 @@ class GroupsScreenTest {
         render(user = guestUser, groups = emptyList())
 
         composeRule.onNodeWithText("Sign in to use groups").assertIsDisplayed()
-        composeRule.onNodeWithText("Create").assertDoesNotExist()
-        composeRule.onNodeWithText("Join with code").assertDoesNotExist()
+        composeRule.onNodeWithText("Create a group").assertDoesNotExist()
+        composeRule.onNodeWithText("Join a group").assertDoesNotExist()
     }
 
     @Test
@@ -221,17 +254,52 @@ class GroupsScreenTest {
         composeRule.onNodeWithText("Leave group").assertDoesNotExist()
     }
 
+    // Sprint 7 — the join/create sheets are inline cards now
+    // (prototype scr-groups): the join card is always visible, the
+    // create card opens from the "Create a group" button. Same
+    // callbacks, same validation — the tests below prove the flows
+    // through the cards.
+
     @Test
-    fun `create sheet calls onCreateGroup with the typed name`() {
+    fun `create card calls onCreateGroup with the typed name`() {
         var captured: String? = null
         render(onCreateGroup = { name ->
             captured = name
             GroupResult.Ok(group())
         })
 
-        composeRule.onNodeWithText("Create").performClick()
+        // The button sits below the fold (join card above it): scroll
+        // it into view first — a below-fold performClick did not
+        // reliably deliver here (run 1002 opened the card, run 1003
+        // did not, identical click code), while the displayed chip
+        // and Join clicks worked both runs.
+        composeRule.onNodeWithText("Create a group").performScrollTo()
+        composeRule.onNodeWithText("Create a group").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Group name").performTextInput("DIU 41")
+        // The card opens below the fold (title + intro + row + note +
+        // join card + button sit above it), so assertExists — the card
+        // is composed, just not visible on the test viewport.
+        composeRule.onNodeWithText("New group").assertExists()
+        // Scroll the field into view before typing: performTextInput
+        // silently drops text typed into a composed-but-not-displayed
+        // field. performScrollTo works on this screen — the detail
+        // tests below use it throughout (no infinite transition here).
+        composeRule.onNodeWithText("Group name, e.g. Flat 7B").performScrollTo()
+        composeRule.onNodeWithText("Group name, e.g. Flat 7B").assertIsDisplayed()
+        composeRule.onNodeWithText("Group name, e.g. Flat 7B").performTextInput("DIU 41")
+        // The typed text appears twice in the semantics tree — the
+        // field's EditableText AND its inner Text — so count both,
+        // like "Ayesha"/"Member" elsewhere in this file. This is the
+        // guard against the silent-drop trap: if the text had been
+        // dropped, the count would be 0.
+        assertEquals(
+            2,
+            composeRule.onAllNodesWithText("DIU 41").fetchSemanticsNodes().size
+        )
+        // The button sits below the field, still past the fold after
+        // the field scroll — scroll it into view first, same
+        // below-fold click-delivery lesson as the button above.
+        composeRule.onNodeWithText("Create group").performScrollTo()
         composeRule.onNodeWithText("Create group").performClick()
         composeRule.waitForIdle()
 
@@ -239,15 +307,46 @@ class GroupsScreenTest {
     }
 
     @Test
-    fun `join sheet shows the error for a wrong code`() {
+    fun `create a group button toggles the create card`() {
+        render()
+
+        composeRule.onNodeWithText("New group").assertDoesNotExist()
+        // Below the fold — scroll into view first (see the test above).
+        composeRule.onNodeWithText("Create a group").performScrollTo()
+        composeRule.onNodeWithText("Create a group").performClick()
+        composeRule.waitForIdle()
+        // Below the fold once open (see the test above) — assertExists.
+        composeRule.onNodeWithText("New group").assertExists()
+        composeRule.onNodeWithText("Create a group").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("New group").assertDoesNotExist()
+    }
+
+    @Test
+    fun `join card joins with the typed code`() {
+        var captured: String? = null
+        render(onJoinGroup = {
+            captured = it
+            GroupResult.Ok(group())
+        })
+
+        composeRule.onNodeWithText("Join a group").assertIsDisplayed()
+        composeRule.onNodeWithText("Join code, e.g. FAM-2481").assertExists()
+        composeRule.onNodeWithText("Join code, e.g. FAM-2481").performTextInput("K7Q2XA")
+        composeRule.onNodeWithText("Join").performClick()
+        composeRule.waitForIdle()
+
+        assertEquals("K7Q2XA", captured)
+    }
+
+    @Test
+    fun `join card shows the error for a wrong code`() {
         render(onJoinGroup = {
             GroupResult.Err("That code doesn't match any group. Check the code and try again.")
         })
 
-        composeRule.onNodeWithText("Join with code").performClick()
-        composeRule.waitForIdle()
-        composeRule.onNodeWithText("Join code").performTextInput("ZZZZZZ")
-        composeRule.onNodeWithText("Join group").performClick()
+        composeRule.onNodeWithText("Join code, e.g. FAM-2481").performTextInput("ZZZZZZ")
+        composeRule.onNodeWithText("Join").performClick()
         composeRule.waitForIdle()
 
         composeRule.onNodeWithText(
@@ -256,7 +355,7 @@ class GroupsScreenTest {
     }
 
     @Test
-    fun `deep-link prefill opens the join sheet with the code`() {
+    fun `deep-link prefill fills the join card field and Join sends the code`() {
         var captured: String? = null
         render(
             prefillJoinCode = "K7Q2XA",
@@ -272,8 +371,8 @@ class GroupsScreenTest {
         // prefilled code. Assert the value through that real flow instead
         // of through TextField semantics (assertTextEquals did not see the
         // prefilled value in round 4).
-        composeRule.onNodeWithText("Join group").assertIsEnabled()
-        composeRule.onNodeWithText("Join group").performClick()
+        composeRule.onNodeWithText("Join").assertIsEnabled()
+        composeRule.onNodeWithText("Join").performClick()
         composeRule.waitForIdle()
 
         assertEquals("K7Q2XA", captured)
@@ -340,8 +439,13 @@ class GroupsScreenTest {
             composeRule.onAllNodesWithText("Ayesha").fetchSemanticsNodes().size
         )
         // user-2 has a blank display name: the dialog falls back to
-        // "Member", never a blank row.
-        composeRule.onNodeWithText("Member").assertIsDisplayed()
+        // "Member", never a blank row. "Member" now appears twice —
+        // the detail header's RolePill (Sprint 7) AND the dialog
+        // fallback — so count both, like "Ayesha" above.
+        assertEquals(
+            2,
+            composeRule.onAllNodesWithText("Member").fetchSemanticsNodes().size
+        )
     }
 
     @Test
