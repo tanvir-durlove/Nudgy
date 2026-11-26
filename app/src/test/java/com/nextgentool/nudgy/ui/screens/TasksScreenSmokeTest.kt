@@ -1,6 +1,8 @@
 package com.nextgentool.nudgy.ui.screens
 
 import android.content.Context
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -8,6 +10,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -148,6 +151,26 @@ class TasksScreenSmokeTest {
         waitForListLoaded()
     }
 
+    /**
+     * Same as [renderTasks] but on a 1600dp-wide surface (test-only
+     * layout; production code untouched). The filter chips live in a
+     * LazyRow, which composes only what fits its viewport — on the
+     * default narrow test surface the late chips ("Status: To do" and
+     * friends, after All + project + tag + 3 priority chips) never
+     * enter the semantics tree. The ReminderChipsTest pattern (step
+     * 5c): widen the viewport so the whole row composes at once.
+     * Used ONLY by the chip-prefix test; every other test keeps the
+     * normal-width render.
+     */
+    private fun renderTasksWide() {
+        composeRule.setContent {
+            Box(Modifier.requiredWidth(1600.dp)) {
+                TasksScreen(viewModel = viewModel)
+            }
+        }
+        waitForListLoaded()
+    }
+
     /** Seeds one task and returns its id. */
     private fun seedTask(title: String): String = runBlocking {
         repository.createTask(userId = userId, title = title)
@@ -178,7 +201,10 @@ class TasksScreenSmokeTest {
             repository.createProject(userId, "Home", "#0F766E")
             repository.createTag(userId, "Errands", "#0F766E")
         }
-        renderTasks()
+        // Wide render: "Status: To do" sits late in the filter
+        // LazyRow and only composes on a wide viewport (see
+        // renderTasksWide).
+        renderTasksWide()
         composeRule.onNodeWithText("Project: Home").assertExists()
         composeRule.onNodeWithText("Tag: Errands").assertExists()
         composeRule.onNodeWithText("Status: To do").assertExists()
