@@ -68,7 +68,7 @@ import org.robolectric.annotation.Config
  *
  * Sprint 3-3 — the LLM-fallback path renders end to end here: an
  * Unhandled message shows the local fallback answer, and with a BYOK
- * key a structured reply shows the preview card and Confirm creates
+ * key a structured reply shows the preview card and Save creates
  * the task. The Gemini transport is a recording fake (no network);
  * the cap starts empty and the gate is closed by default.
  */
@@ -271,7 +271,7 @@ class ChatScreenSmokeTest {
         // near-viewport items, so its presence is timing/layout
         // dependent (round 1 failed it on visibility, round 2 on
         // existence — both flakes of the same cause, not the product).
-        composeRule.onNodeWithText("Ask Nudgy anything...").assertIsDisplayed()
+        composeRule.onNodeWithText("Tell Nudgy what to do…").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Voice input").assertExists()
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("Hi! What can I help you get done today?")
@@ -307,8 +307,8 @@ class ChatScreenSmokeTest {
         composeRule.onNodeWithTag("draft_confirm_button").performClick()
         // The receipt arrives with the TASK_PREVIEW card. "View Task"
         // exists ONLY on the post-save receipt — the preview card has
-        // Confirm / Edit / Discard instead, so this waitUntil only
-        // passes when Confirm actually saved. (The receipt text
+        // Save / Edit / Discard instead, so this waitUntil only
+        // passes when Save actually saved. (The receipt text
         // "remind you about" cannot be used: the preview question
         // contains the same words, so onNode would throw on
         // duplicates — the race the old test's comment warned about.)
@@ -426,7 +426,7 @@ class ChatScreenSmokeTest {
     }
 
     // Sprint 3-3 — with a BYOK key, the same Unhandled message gets a
-    // structured reply: the preview card renders, and Confirm creates
+    // structured reply: the preview card renders, and Save creates
     // the validated task (the full draft → preview → confirm flow,
     // rendered on the real screen).
     @Test
@@ -499,8 +499,89 @@ class ChatScreenSmokeTest {
         // more than one match (that was the round-2 failure).
         composeRule.onNodeWithText("Water the plants at 6pm").assertExists()
         composeRule.onNodeWithText("Done — I will remind you about the plants.").assertExists()
-        composeRule.onNodeWithText("Ask Nudgy anything...").assertExists()
+        composeRule.onNodeWithText("Tell Nudgy what to do…").assertExists()
         composeRule.onNodeWithContentDescription("Voice input").assertExists()
+    }
+
+    // Sprint 7 — the Chat restyle (prototype scr-chat): backbar,
+    // intro copy, WHO labels on the bubbles, the confirm card's
+    // Save/Edit/Discard row, the chatbar, and the footer note.
+    // Plain-list render (no ViewModel, no seed race), like the
+    // restyled test above. The backbar, intro, chatbar and footer
+    // sit outside the LazyColumn, so they are always displayed;
+    // the WHO labels and the card live inside it, so assertExists
+    // is enough for them.
+    @Test
+    fun `sprint 7 chat restyle shows backbar intro who labels confirm row chatbar and footer`() {
+        val now = System.currentTimeMillis()
+        val draft = ChatDraft(
+            kind = DraftKind.TASK,
+            title = "Call Tasnim",
+            startEpochMillis = now + 5 * 60 * 60 * 1000L
+        )
+        val messages = listOf(
+            ChatMessage(id = "u1", senderIsUser = true, text = "Call Tasnim at 5pm", isVoice = true),
+            ChatMessage(id = "u2", senderIsUser = true, text = "5 PM."),
+            ChatMessage(
+                id = "draft-msg-1",
+                senderIsUser = false,
+                text = "Here is what I would save — check it first.",
+                actionType = ChatActionType.DRAFT_PREVIEW
+            )
+        )
+        var backClicks = 0
+        var confirmClicks = 0
+        composeRule.setContent {
+            // Sprint 5 fix round 4 — ChatViewModel.user is a StateFlow now.
+            val chatUser by viewModel.user.collectAsState()
+            ChatScreen(
+                user = chatUser,
+                messages = messages,
+                isListening = false,
+                isSpeaking = false,
+                isThinking = false,
+                thinkingText = "Nudgy is thinking...",
+                onSendMessage = {},
+                onStartVoice = {},
+                onStopVoice = {},
+                onBlockFocusTime = { _, _, _, _ -> },
+                pendingDraft = draft,
+                pendingDraftMessageId = "draft-msg-1",
+                onConfirmDraft = { confirmClicks++ },
+                onDiscardDraft = {},
+                onNavigateBack = { backClicks++ }
+            )
+        }
+        // Backbar (fixed header) + its Back action.
+        composeRule.onNodeWithTag("chat_backbar").assertIsDisplayed()
+        composeRule.onNodeWithText("Chat").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Back").performClick()
+        assertEquals(1, backClicks)
+        // Intro (prototype-verbatim, fixed header).
+        composeRule.onNodeWithText("Say or type what you need — in English or বাংলা. Chat works offline on this device; AI help is used only for hard requests, and nothing is saved until you confirm it.").assertIsDisplayed()
+        // WHO labels: the voice message says "YOU · VOICE", the
+        // typed one "YOU", the assistant one "NUDGY".
+        composeRule.onNodeWithText("YOU · VOICE").assertExists()
+        composeRule.onNodeWithText("YOU").assertExists()
+        composeRule.onNodeWithText("NUDGY").assertExists()
+        // Confirm card: the prototype's Save/Edit/Discard row, with
+        // the existing testTags kept.
+        composeRule.onNodeWithTag("draft_preview_card").assertExists()
+        composeRule.onNodeWithTag("draft_confirm_button").assertExists()
+        composeRule.onNodeWithTag("draft_edit_button").assertExists()
+        composeRule.onNodeWithTag("draft_discard_button").assertExists()
+        composeRule.onNodeWithText("Save").assertExists()
+        composeRule.onNodeWithText("Edit").assertExists()
+        composeRule.onNodeWithText("Discard").assertExists()
+        composeRule.onNodeWithTag("draft_confirm_button").performClick()
+        assertEquals(1, confirmClicks)
+        // Chatbar (fixed footer): the prototype placeholder, the mic
+        // and the send button.
+        composeRule.onNodeWithText("Tell Nudgy what to do…").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Voice input").assertExists()
+        composeRule.onNodeWithContentDescription("Send").assertExists()
+        // Footer note (prototype-verbatim).
+        composeRule.onNodeWithText("The assistant never saves directly — every task appears as a confirmation card first.").assertIsDisplayed()
     }
 
     // Sprint 3-4 — the brain-dump combined preview card renders from
@@ -651,7 +732,7 @@ class ChatScreenSmokeTest {
             composeRule.onAllNodesWithTag("draft_preview_card")
                 .fetchSemanticsNodes().isEmpty()
         }
-        // The receipt arrives only after Confirm actually saved: its
+        // The receipt arrives only after Save actually saved: its
         // "into 3 subtasks:" (with the colon) appears nowhere on the
         // preview card — the preview text is the model's own reply, and
         // the card lists bare titles. This is the S3-2 pattern (wait
@@ -757,7 +838,7 @@ class ChatScreenSmokeTest {
             composeRule.onAllNodesWithTag("day_plan_preview_card")
                 .fetchSemanticsNodes().isEmpty()
         }
-        // The receipt arrives only after Confirm actually saved.
+        // The receipt arrives only after Save actually saved.
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("scheduled 2 focus blocks", substring = true)
                 .fetchSemanticsNodes().isNotEmpty()
