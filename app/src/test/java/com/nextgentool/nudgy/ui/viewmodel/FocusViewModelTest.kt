@@ -117,19 +117,13 @@ class FocusViewModelTest {
     @After
     fun tearDown() {
         // PR #86 rule: cancel the ViewModel scopes (the ticker) before
-        // the database closes.
+        // the database closes. The store is already cleared inside
+        // vmTest's finally (before resetMain); this is the idempotent
+        // safety net, and the real-IO drain lives there too — closing
+        // the DB under an in-flight init query throws against the
+        // closed pool and poisons the coroutines-test collector for
+        // the next TestScope (S4-1 round 5).
         store.clear()
-        // S4-1 round 5 — the ViewModel's init coroutines (restore +
-        // refreshStats + the tasks Flow) dispatch Room work to real
-        // Dispatchers.IO threads, while the test body runs on virtual
-        // time and can return microseconds later: an init query can
-        // still be in flight when tearDown runs. Closing the DB under
-        // it throws against the closed pool, and the uncaught
-        // exception poisons the coroutines-test collector — BoardDragTest
-        // (the next TestScope) then fails with UncaughtExceptionsBeforeTest
-        // on every run (6/6, rounds 2-4). Let the real IO threads finish
-        // before closing (in-memory queries take a few ms).
-        Thread.sleep(500)
         db.close()
     }
 
@@ -146,6 +140,23 @@ class FocusViewModelTest {
         try {
             block()
         } finally {
+            // PR #128 fix round — resetMain() must be the LAST step, not
+            // the first: the ViewModel is still alive here, and its init
+            // coroutines (restore + refreshStats + the tasks Flow) dispatch
+            // Room work to real Dispatchers.IO threads, which resume back
+            // onto Main from those threads. resetMain() while such a resume
+            // is in flight throws "Dispatchers.Main is used concurrently
+            // with setting it" — the two consecutive PR-run failures on
+            // this head (different victim tests each time). Cancel the
+            // ViewModel first, then drain the real IO the same way
+            // tearDown used to (S4-1 round 5: an init query can still be
+            // in flight when the test body returns; in-memory queries
+            // take a few ms), and only then reset Main. The drain used
+            // to live in tearDown, after resetMain — too late to protect
+            // it — so it moved here; tearDown keeps only the idempotent
+            // store.clear() safety net and the DB close.
+            store.clear()
+            Thread.sleep(500)
             Dispatchers.resetMain()
         }
     }
