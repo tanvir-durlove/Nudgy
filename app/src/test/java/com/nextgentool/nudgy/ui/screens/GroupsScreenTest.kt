@@ -403,8 +403,8 @@ class GroupsScreenTest {
             initialSelectedGroup = group()
         )
 
-        composeRule.onNodeWithText("+ Add task").assertExists()
-        composeRule.onNodeWithText("+ Add schedule").assertExists()
+        composeRule.onNodeWithText("+ Add a task").assertExists()
+        composeRule.onNodeWithText("+ Add a schedule").assertExists()
         composeRule.onNodeWithText("Group tasks and notices").assertDoesNotExist()
         composeRule.onNodeWithText("১/২ করেছে").assertExists()
         composeRule.onNodeWithText("Homework").assertExists()
@@ -419,8 +419,8 @@ class GroupsScreenTest {
             initialSelectedGroup = group()
         )
 
-        composeRule.onNodeWithText("+ Add task").assertDoesNotExist()
-        composeRule.onNodeWithText("+ Add schedule").assertDoesNotExist()
+        composeRule.onNodeWithText("+ Add a task").assertDoesNotExist()
+        composeRule.onNodeWithText("+ Add a schedule").assertDoesNotExist()
         composeRule.onNodeWithText("১/২ করেছে").assertExists()
     }
 
@@ -504,7 +504,7 @@ class GroupsScreenTest {
             initialSelectedGroup = group()
         )
 
-        composeRule.onNodeWithText("+ Add task").performScrollTo().performClick()
+        composeRule.onNodeWithText("+ Add a task").performScrollTo().performClick()
         composeRule.waitForIdle()
 
         composeRule.onNodeWithText("Post a group task").assertIsDisplayed()
@@ -571,8 +571,14 @@ class GroupsScreenTest {
         composeRule.onNodeWithTag("send_notice_field").performScrollTo()
         composeRule.onNodeWithTag("send_notice_field").assertIsDisplayed()
         composeRule.onNodeWithTag("send_notice_field").performTextInput("Class at 10")
+        // The typed text lives in exactly one semantics node — the
+        // field's EditableText. (The "2" copied from the list
+        // create-card test counted the field PLUS the group row, whose
+        // name "DIU 41" equalled the typed name; no other node here
+        // shows "Class at 10".) The callback assertion below is the
+        // real proof the text reached onSendNotice.
         assertEquals(
-            2,
+            1,
             composeRule.onAllNodesWithText("Class at 10").fetchSemanticsNodes().size
         )
         composeRule.onNodeWithTag("send_notice_submit").performScrollTo().performClick()
