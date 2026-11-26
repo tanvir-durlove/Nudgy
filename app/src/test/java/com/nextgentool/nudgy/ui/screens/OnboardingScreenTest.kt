@@ -1,12 +1,13 @@
 package com.nextgentool.nudgy.ui.screens
 
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -33,6 +34,15 @@ import org.robolectric.annotation.Config
  * window), so anything below the hero is asserted with assertExists,
  * never assertIsDisplayed — and never performScrollTo: on this
  * harness it hangs the test worker (runs 851/852).
+ *
+ * The Next / Skip / Finish buttons and the sample checkbox sit below
+ * the fold, so they are clicked with performSemanticsAction
+ * (SemanticsActions.OnClick), never coordinate-based performClick:
+ * PR run 45756654447 failed 8 tests exactly there — the touch
+ * injection could not reach the below-fold buttons, so the page
+ * never advanced (the screen itself was fine; slide 1 renders and
+ * passes). The semantics OnClick action invokes the button directly,
+ * no coordinates involved (the PrivacyPolicyScreenTest pattern).
  *
  * Compose 1.7 traps, all proven in this repo: assertTextEquals and
  * the generic assert(matcher) do NOT resolve on this BOM — the page
@@ -64,7 +74,7 @@ class OnboardingScreenTest {
     /** Walks to the given slide (0-based) from the first render. */
     private fun goToSlide(index: Int) {
         repeat(index) {
-            composeRule.onNodeWithTag("onboarding_next").performClick()
+            composeRule.onNodeWithTag("onboarding_next").performSemanticsAction(SemanticsActions.OnClick)
             composeRule.waitForIdle()
         }
     }
@@ -82,7 +92,7 @@ class OnboardingScreenTest {
         composeRule.onNodeWithTag("onboarding_skip").assertExists()
         // Next walks through slides 2–3; Skip stays on every slide.
         for (index in 1..2) {
-            composeRule.onNodeWithTag("onboarding_next").performClick()
+            composeRule.onNodeWithTag("onboarding_next").performSemanticsAction(SemanticsActions.OnClick)
             composeRule.waitForIdle()
             assertEquals(true, pageTitle().contains(titles[index]))
             composeRule.onNodeWithTag("onboarding_skip").assertExists()
@@ -117,7 +127,7 @@ class OnboardingScreenTest {
     fun `slide two shows the pill and the carry banner`() {
         render()
         goToSlide(1)
-        composeRule.onNodeWithText("Step 2 of 3 · Plan").assertIsDisplayed()
+        composeRule.onNodeWithText("Step 2 of 3 · Plan").assertExists()
         composeRule.onNodeWithText("3 unfinished from yesterday").assertExists()
         composeRule.onNodeWithText(
             "Choose them in Plan — they are never moved automatically."
@@ -128,7 +138,7 @@ class OnboardingScreenTest {
     fun `slide three shows the pill and the chat bubbles`() {
         render()
         goToSlide(2)
-        composeRule.onNodeWithText("Step 3 of 3 · Chat").assertIsDisplayed()
+        composeRule.onNodeWithText("Step 3 of 3 · Chat").assertExists()
         composeRule.onNodeWithText(
             "কালকে সকাল ৭টায় হাঁটতে যাবো, আর Tasnim-কে ৫টায় ফোন করতে হবে"
         ).assertExists()
@@ -143,13 +153,13 @@ class OnboardingScreenTest {
         render()
         // Slides 1–2: no sample offer.
         composeRule.onNodeWithTag("onboarding_sample_offer").assertDoesNotExist()
-        composeRule.onNodeWithTag("onboarding_next").performClick()
+        composeRule.onNodeWithTag("onboarding_next").performSemanticsAction(SemanticsActions.OnClick)
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("onboarding_sample_offer").assertDoesNotExist()
         // Last slide: the offer is there, checked by default.
         // It sits below the fold on the small Robolectric window —
         // assert existence only, never performScrollTo.
-        composeRule.onNodeWithTag("onboarding_next").performClick()
+        composeRule.onNodeWithTag("onboarding_next").performSemanticsAction(SemanticsActions.OnClick)
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("onboarding_sample_offer").assertExists()
         composeRule.onNodeWithText("Start with sample tasks").assertExists()
@@ -162,7 +172,7 @@ class OnboardingScreenTest {
         var reported: Boolean? = null
         render(onFinish = { reported = it })
         goToSlide(2)
-        composeRule.onNodeWithTag("onboarding_finish").performClick()
+        composeRule.onNodeWithTag("onboarding_finish").performSemanticsAction(SemanticsActions.OnClick)
         assertEquals(true, reported)
     }
 
@@ -171,9 +181,9 @@ class OnboardingScreenTest {
         var reported: Boolean? = null
         render(onFinish = { reported = it })
         goToSlide(2)
-        composeRule.onNodeWithTag("onboarding_sample_checkbox").performClick()
+        composeRule.onNodeWithTag("onboarding_sample_checkbox").performSemanticsAction(SemanticsActions.OnClick)
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("onboarding_finish").performClick()
+        composeRule.onNodeWithTag("onboarding_finish").performSemanticsAction(SemanticsActions.OnClick)
         assertEquals(false, reported)
     }
 
@@ -181,7 +191,7 @@ class OnboardingScreenTest {
     fun `skip on the first slide reports includeSamples false`() {
         var reported: Boolean? = null
         render(onFinish = { reported = it })
-        composeRule.onNodeWithTag("onboarding_skip").performClick()
+        composeRule.onNodeWithTag("onboarding_skip").performSemanticsAction(SemanticsActions.OnClick)
         assertEquals(false, reported)
     }
 
@@ -195,7 +205,7 @@ class OnboardingScreenTest {
         // Finish reads "Done" in a re-view, and reports false
         // (nothing to seed — re-viewing must never re-seed).
         composeRule.onNodeWithText("Done").assertExists()
-        composeRule.onNodeWithTag("onboarding_finish").performClick()
+        composeRule.onNodeWithTag("onboarding_finish").performSemanticsAction(SemanticsActions.OnClick)
         assertEquals(false, reported)
     }
 }

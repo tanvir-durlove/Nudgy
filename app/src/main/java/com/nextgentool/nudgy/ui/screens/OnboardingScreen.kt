@@ -3,6 +3,7 @@ package com.nextgentool.nudgy.ui.screens
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +31,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -70,7 +72,10 @@ import com.nextgentool.nudgy.ui.theme.NudgyTokens
  *
  * The whole column scrolls: slide 3 (bubbles + sample offer) is
  * taller than a short screen, and clipping it would hide the
- * checkbox that decides what finishing seeds.
+ * checkbox that decides what finishing seeds. Each slide starts at
+ * the top (LaunchedEffect resets the scroll on every page change) —
+ * otherwise a user who scrolled down to reach Next would land
+ * mid-way into the new slide.
  */
 @Composable
 fun OnboardingScreen(
@@ -80,12 +85,19 @@ fun OnboardingScreen(
     var page by rememberSaveable { mutableStateOf(0) }
     var includeSamples by rememberSaveable { mutableStateOf(true) }
     val isLastPage = page == ONBOARDING_SLIDES.size - 1
+    val scrollState = rememberScrollState()
+    // Each slide starts at the top: without this, a user who scrolled
+    // down to reach Next would land mid-way into the new slide (its
+    // pill and heading scrolled out of view) instead of at its top.
+    LaunchedEffect(page) {
+        scrollState.scrollTo(0)
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(NudgyCanvas)
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(NudgyTokens.screenPadding)
     ) {
         // Hero (prototype scr-onboarding): centred logo + name + tagline.
