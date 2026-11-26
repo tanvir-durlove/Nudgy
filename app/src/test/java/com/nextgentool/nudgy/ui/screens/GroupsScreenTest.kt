@@ -296,6 +296,10 @@ class GroupsScreenTest {
             2,
             composeRule.onAllNodesWithText("DIU 41").fetchSemanticsNodes().size
         )
+        // The button sits below the field, still past the fold after
+        // the field scroll — scroll it into view first, same
+        // below-fold click-delivery lesson as the button above.
+        composeRule.onNodeWithText("Create group").performScrollTo()
         composeRule.onNodeWithText("Create group").performClick()
         composeRule.waitForIdle()
 
