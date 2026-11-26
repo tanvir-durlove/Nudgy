@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -178,28 +179,20 @@ class TemplatesScreenTest {
         // still there, the click never ran.
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("create_template_card").assertDoesNotExist()
-        // The create runs through the real ViewModel + Room, and the
-        // row reaches the repository (proven by the diagnostic test).
-        // This harness never delivers the live re-emission of the
-        // long-lived flow (five CI runs: neither a virtual-time
-        // waitUntil nor real time + waitForIdle), so the list is
-        // proven by a fresh render from the DB — a new ViewModel on
-        // the same repository, whose initial collection includes the
-        // new row. That is the strongest assertion this harness can
-        // make; the live update itself is standard Room behaviour,
-        // covered by the sprint-end device test.
-        // It is the first card (Latin "Weekend" sorts before the
-        // Bengali built-in names).
-        val freshViewModel = TemplatesViewModel(repository)
-        viewModelStore.put("templates-fresh", freshViewModel)
-        composeRule.setContent {
-            TemplatesScreen(onBack = {}, viewModel = freshViewModel)
-        }
+        // The Save must persist the template: the row reaches the
+        // repository. The new template appearing as a card in THIS
+        // live list cannot be asserted here — this harness never
+        // delivers the live re-emission of the long-lived flow
+        // (five CI runs proved it), and the rule forbids a second
+        // setContent with a fresh ViewModel (run 6). That half is
+        // proven by the diagnostic test's fresh render instead, and
+        // the live update itself by the sprint-end device test.
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Weekend reset")
-                .fetchSemanticsNodes().isNotEmpty()
+            runBlocking {
+                repository.observeTemplates(userId)
+                    .first().any { it.name == "Weekend reset" }
+            }
         }
-        composeRule.onNodeWithText("Weekend reset").assertExists()
     }
 
     // PR #133 fix round 3 — diagnostic for the create test: the UI
@@ -214,26 +207,32 @@ class TemplatesScreenTest {
     // time either. This Robolectric + compose-rule harness never
     // delivers the live re-emission, so half (2) is proven by a
     // FRESH ViewModel (a fresh initial collection, which includes
-    // the new row) instead of by the live flow. That is the
+    // the new row) instead of by the live flow. Round 6: the create
+    // runs BEFORE any setContent, because the rule forbids
+    // setContent twice per test (run 6 proved that) — the fresh
+    // ViewModel below must be the only setContent. That is the
     // strongest assertion this harness can make; the live update
     // itself is standard Room behaviour, covered by the sprint-end
     // device test — not a product defect.
     @Test
     fun `createTemplate through the ViewModel inserts the template`() {
-        renderTemplates()
         viewModel.createTemplate(
             "Direct call",
             listOf(TemplateDraft(title = "Do a thing"))
         )
         // (1) The row must reach the repository — the insert ran.
-        // A Room Flow read suspends only until the query executor
-        // answers, so runBlocking is safe inside waitUntil here.
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            runBlocking {
+        // Poll in real time: the insert runs on a real IO thread,
+        // and the compose clock is not involved before setContent.
+        val deadline = System.currentTimeMillis() + 10_000
+        var inRepository = false
+        while (System.currentTimeMillis() < deadline && !inRepository) {
+            inRepository = runBlocking {
                 repository.observeTemplates(userId)
                     .first().any { it.name == "Direct call" }
             }
+            if (!inRepository) Thread.sleep(50)
         }
+        assertTrue(inRepository)
         // (2) The created template renders from the DB: a fresh
         // ViewModel on the same repository re-collects from scratch,
         // and its initial emission includes the new row.
