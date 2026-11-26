@@ -176,6 +176,20 @@
     <string name="tasks_completed">শেষ হয়েছে (%1$d)</string>
     <string name="tasks_filter_all">সব</string>
     <string name="tasks_filter_group">গ্রুপ</string>
+    <!-- Sprint 7 — Tasks rebuilt to the prototype (scr-tasks). -->
+    <string name="tasks_my_filters_label">আমার ফিল্টার</string>
+    <string name="tasks_filters_note">“আমার ফিল্টার” হলো তোমার সেভ করা ভিউ। ফিল্টারে ট্যাপ করলে তালিকা ছোট হয় — আবার ট্যাপ করলে সাফ হয়ে যায়।</string>
+    <string name="tasks_filter_project">প্রজেক্ট: %1$s</string>
+    <string name="tasks_filter_tag">ট্যাগ: %1$s</string>
+    <string name="tasks_filter_status">স্ট্যাটাস: %1$s</string>
+    <string name="tasks_view_hint_list">লিস্ট ভিউ — মিলে যাওয়া সব টাস্ক এক তালিকায়।</string>
+    <string name="tasks_view_hint_board">বোর্ডে একই টাস্কগুলো স্ট্যাটাস অনুযায়ী সাজানো থাকে — To do, In progress, Done — যাতে এক নজরে দেখা যায় কী বাকি আর কী আটকে আছে।</string>
+    <string name="tasks_board_note">কার্ডে ট্যাপ করলে খুলবে। অ্যাপে কার্ড টেনে এক কলাম থেকে অন্য কলামে নিলে স্ট্যাটাস বদলায়।</string>
+    <string name="tasks_new_task_label">নতুন টাস্ক</string>
+    <string name="tasks_new_task_note">সেভ করা টাস্কে আজকের তারিখ বসে — টাস্কের ডিটেইলস থেকে যেকোনো সময় বদলাতে পারবে।</string>
+    <string name="tasks_empty_filtered_title">এই ভিউতে কোনো টাস্ক মিলছে না।</string>
+    <string name="tasks_empty_filtered_sub">অন্য ফিল্টার চেষ্টা করো, বা সার্চ সাফ করো।</string>
+    <string name="tasks_empty_first_sub">নিচে তোমার প্রথম টাস্ক যোগ করো।</string>
 
     <!-- Today widget (S6-5, step 3a) -->
     <string name="widget_today_title">আজ</string>
