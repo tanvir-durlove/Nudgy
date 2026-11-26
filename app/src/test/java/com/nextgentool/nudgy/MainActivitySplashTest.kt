@@ -56,7 +56,7 @@ class MainActivitySplashTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val attrs = context.theme.obtainStyledAttributes(
             R.style.Theme_Nudgy_Splash,
-            intArrayOf(R.attr.postSplashScreenTheme)
+            intArrayOf(androidx.core.splashscreen.R.attr.postSplashScreenTheme)
         )
         val postSplashTheme = attrs.getResourceId(0, 0)
         attrs.recycle()
