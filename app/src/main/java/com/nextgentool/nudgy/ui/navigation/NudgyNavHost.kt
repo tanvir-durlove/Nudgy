@@ -539,6 +539,8 @@ fun NudgyNavHost(
                 stripTasks = uiState.stripTasks,
                 placedTasks = uiState.placedTasks,
                 pendingConflict = uiState.pendingConflict,
+                // Sprint 7 — month-grid dots (daysWithItems).
+                daysWithItems = uiState.daysWithItems,
                 onDropTask = { task, slotStart -> viewModel.dropTaskAtSlot(task, slotStart) },
                 onAcceptSuggestedSlot = { viewModel.acceptSuggestedSlot() },
                 onDismissConflict = { viewModel.dismissConflict() },

@@ -7,6 +7,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.auth.AuthManager
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.NudgyDatabase
+import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.data.repository.FakeCalendarEventSync
 import com.nextgentool.nudgy.data.repository.FakeCalendarProviderGateway
@@ -154,6 +155,53 @@ class CalendarViewModelTest {
                 !it.isLoading && it.selectedDayMillis == startOfDayMillis(tomorrow) && it.events.size == 1
             }
             assertEquals("Team sync", state.events.single().title)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `daysWithItems marks event and placed-task days only`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            // Tomorrow: a calendar event. Day after tomorrow: a task
+            // placed at 10:00 (plannedStart). Day +3: a due-only task
+            // (no plannedStart) — it must mark nothing.
+            val tomorrow = dayAt(1, 10)
+            provider.addEvent(
+                FakeGoogleEvent(id = 45L, title = "Design review", start = tomorrow, end = tomorrow + 60 * 60 * 1000L)
+            )
+            calendarRepository.syncGoogleCalendar(userId)
+            db.taskDao().insertTask(
+                TaskEntity(
+                    id = "placed-1",
+                    userId = userId,
+                    title = "Placed task",
+                    dueDateEpochMillis = dayAt(2, 15),
+                    plannedStartEpochMillis = dayAt(2, 10)
+                )
+            )
+            db.taskDao().insertTask(
+                TaskEntity(
+                    id = "due-only-1",
+                    userId = userId,
+                    title = "Due-only task",
+                    dueDateEpochMillis = dayAt(3, 15)
+                )
+            )
+            val viewModel = CalendarViewModel(calendarRepository, taskRepository, groupRepository).also { viewModelStore.put("calendar", it) }
+            // The marked days land in the same init collect as the
+            // suggested slot, so wait for both days to be marked.
+            val state = viewModel.uiState.first {
+                !it.isLoading &&
+                    it.daysWithItems.contains(startOfDayMillis(tomorrow)) &&
+                    it.daysWithItems.contains(startOfDayMillis(dayAt(2, 10)))
+            }
+            assertEquals(
+                setOf(startOfDayMillis(tomorrow), startOfDayMillis(dayAt(2, 10))),
+                state.daysWithItems
+            )
         } finally {
             Dispatchers.resetMain()
         }
