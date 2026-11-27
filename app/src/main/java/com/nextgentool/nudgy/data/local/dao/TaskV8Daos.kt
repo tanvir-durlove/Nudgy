@@ -57,9 +57,6 @@ interface TagDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertTagIfAbsent(tag: TagEntity)
 
-    @Query("SELECT * FROM task_tags")
-    fun getAllCrossRefsFlow(): Flow<List<TaskTagCrossRef>>
-
     /**
      * Step 2-1 (export) — only the links of the exported tasks:
      * [DataExporter.collectExport] passes the exported task ids, so
