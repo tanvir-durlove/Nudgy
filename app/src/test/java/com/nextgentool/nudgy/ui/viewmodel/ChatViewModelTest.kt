@@ -378,6 +378,25 @@ class ChatViewModelTest {
         }
     }
 
+    // Chat isVoice — a typed message is not voice: its bubble keeps
+    // reading "YOU".
+    @Test
+    fun `typed message carries isVoice false`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.sendMessage("call tasnim at 5pm")
+            val messages = viewModel.messages.first { it.size == 3 }
+            assertTrue(messages[1].senderIsUser)
+            assertEquals("call tasnim at 5pm", messages[1].text)
+            assertFalse(messages[1].isVoice)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
     @Test
     fun `discarding a draft creates nothing and posts a discarded note`() = runTest {
         val testDispatcher = StandardTestDispatcher(testScheduler)
@@ -708,6 +727,32 @@ class ChatViewModelTest {
             assertTrue(taskRepository.getAllTasksOnce(userId).isEmpty())
             // No LLM turn was spent: every piece parsed locally.
             assertEquals(0, freeTurnsUsed())
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    // Chat isVoice — the brain-dump transcript IS the voice message:
+    // its bubble reads "YOU · VOICE". The flag survives the Room
+    // round-trip (entity + migration), so this asserts the message
+    // the flow re-emits, not the transient object.
+    @Test
+    fun `brain dump transcript carries isVoice true`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        try {
+            val viewModel = newViewModel()
+            viewModel.messages.first { it.size == 1 } // welcome seeded
+            viewModel.startVoice()
+            fakeVoice.deliverResult("buy milk")
+            viewModel.stopVoice()
+            val messages = viewModel.messages.first { it.size == 3 }
+            assertTrue(messages[1].senderIsUser)
+            assertEquals("buy milk", messages[1].text)
+            assertTrue(messages[1].isVoice)
+            // The welcome seed and the assistant preview are not voice.
+            assertFalse(messages[0].isVoice)
+            assertFalse(messages[2].isVoice)
         } finally {
             Dispatchers.resetMain()
         }

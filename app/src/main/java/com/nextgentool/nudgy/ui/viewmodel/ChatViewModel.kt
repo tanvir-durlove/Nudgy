@@ -1049,7 +1049,11 @@ class ChatViewModel @Inject constructor(
             }
             val historyBefore = messages.value.takeLast(6)
                 .map { it.text to it.senderIsUser }
-            addMessage(senderIsUser = true, text = transcript)
+            // Chat isVoice — the transcript IS the voice message: it
+            // carries the flag so its bubble reads "YOU · VOICE".
+            // The typed path (sendMessage) passes nothing and keeps
+            // the default false ("YOU").
+            addMessage(senderIsUser = true, text = transcript, isVoice = true)
 
             val pieces = BrainDumpSplitter.split(transcript)
             if (pieces.isEmpty()) {
@@ -1735,13 +1739,14 @@ class ChatViewModel @Inject constructor(
         rewardedAdGateway.retryLoad()
     }
 
-    private suspend fun addMessage(senderIsUser: Boolean, text: String) {
+    private suspend fun addMessage(senderIsUser: Boolean, text: String, isVoice: Boolean = false) {
         chatRepository.addMessage(
             currentUserId,
             ChatMessage(
                 id = UUID.randomUUID().toString(),
                 senderIsUser = senderIsUser,
-                text = text
+                text = text,
+                isVoice = isVoice
             )
         )
     }
