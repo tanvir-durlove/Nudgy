@@ -83,7 +83,8 @@ class ChatRepository(
                     focusEndMillis = entity.focusEndMillis,
                     focusDurationMinutes = entity.focusDurationMinutes,
                     focusActionCompleted = entity.focusActionCompleted,
-                    quickSuggestions = suggestions
+                    quickSuggestions = suggestions,
+                    isVoice = entity.isVoice
                 )
             }
         }
@@ -108,7 +109,8 @@ class ChatRepository(
             focusEndMillis = message.focusEndMillis,
             focusDurationMinutes = message.focusDurationMinutes,
             focusActionCompleted = message.focusActionCompleted,
-            quickSuggestionsRaw = message.quickSuggestions.joinToString("||")
+            quickSuggestionsRaw = message.quickSuggestions.joinToString("||"),
+            isVoice = message.isVoice
         )
         chatDao.insertMessage(entity)
     }

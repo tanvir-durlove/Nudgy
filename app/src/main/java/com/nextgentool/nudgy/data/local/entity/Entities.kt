@@ -158,5 +158,10 @@ data class ChatMessageEntity(
     val focusEndMillis: Long? = null,
     val focusDurationMinutes: Int = 45,
     val focusActionCompleted: Boolean = false,
-    val quickSuggestionsRaw: String = ""
+    val quickSuggestionsRaw: String = "",
+    // Chat isVoice (Room v14) — whether this user message came from
+    // the voice brain dump. Appended last (the boardOrder/assignee
+    // convention); pre-v14 rows migrate false, so every old bubble
+    // keeps showing "YOU".
+    val isVoice: Boolean = false
 )
