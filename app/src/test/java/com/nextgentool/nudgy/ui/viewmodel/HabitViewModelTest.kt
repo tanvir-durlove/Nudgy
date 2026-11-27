@@ -400,6 +400,10 @@ class HabitViewModelTest {
                 .thisWeekCheckInDates.any { date -> date == dateStringOf(now) }
         }
         assertTrue(checkedIn.habits.single { it.habit.id == habit.id }.checkedInToday)
-        assertEquals(seeded, checkedIn.habits.single { it.habit.id == habit.id }.thisWeekCheckInDates)
+        // Today joined the seeded Mon + Tue (the flip landed).
+        assertEquals(
+            seeded + dateStringOf(now),
+            checkedIn.habits.single { it.habit.id == habit.id }.thisWeekCheckInDates
+        )
     }
 }
