@@ -151,6 +151,14 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/groupCodes/$(request.resource.data.code)).data.groupId == gid;
       allow delete: if request.auth != null && (uid == request.auth.uid ||
         get(/databases/$(database)/documents/groups/$(gid)).data.creatorUid == request.auth.uid);
+      // Step 2-2 (Profile Edit): a member may update ONLY their own
+      // displayName — no other member-doc field may change, and nobody
+      // may update another member's doc. The displayName must stay a
+      // string; the app rejects a blank name before writing.
+      allow update: if request.auth != null && uid == request.auth.uid
+        && request.resource.data.diff(resource.data)
+          .affectedKeys().hasOnly(['displayName'])
+        && request.resource.data.displayName is string;
     }
 
     match /groups/{gid}/items/{itemId} {
