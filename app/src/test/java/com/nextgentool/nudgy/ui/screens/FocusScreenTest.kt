@@ -26,6 +26,12 @@ import org.robolectric.annotation.Config
  * controls, and its stats line, and the buttons call back. Compose
  * 1.7 member rules apply: assertExists is a member, never a
  * top-level import.
+ *
+ * Sprint 7 — the timer card (pill, 64sp timerface, "Focusing on:"
+ * line, centered buttons) and the "Focus statistics" statbox are
+ * asserted here; the week / % / streak statboxes and the Recent
+ * sessions card have no data source yet (see FocusScreen.kt KDoc),
+ * so no test asserts them.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -82,10 +88,45 @@ class FocusScreenTest {
 
         composeRule.onNodeWithText("25:00").assertIsDisplayed()
         composeRule.onNodeWithTag("focus_start").assertIsDisplayed()
-        composeRule.onNodeWithText("Today: 50 min focused • 2 sessions").assertExists()
+        composeRule.onNodeWithText("Focus statistics").assertExists()
+        composeRule.onNodeWithTag("focus_today_minutes").assertExists()
+        composeRule.onNodeWithText("50 min").assertExists()
+        composeRule.onNodeWithText("Focused today · 2 sessions").assertExists()
         composeRule.onNodeWithText("Focus on").assertExists()
         composeRule.onNodeWithText("No task (standalone)").assertExists()
         composeRule.onNodeWithText("Call mom").assertExists()
+    }
+
+    @Test
+    fun `timer card shows the pomodoro pill and the focusing line for the selected task`() {
+        val task = TaskEntity(
+            id = "task-1", userId = "user-1", title = "Call mom",
+            dueDateEpochMillis = 0L
+        )
+        setContent(
+            idleState(listOf(task)).copy(
+                selectedTaskId = "task-1",
+                selectedTaskTitle = "Call mom"
+            )
+        )
+
+        composeRule.onNodeWithText("Pomodoro · 25 minutes").assertExists()
+        composeRule.onNodeWithText("25:00").assertIsDisplayed()
+        composeRule.onNodeWithText("Focusing on: Call mom").assertExists()
+    }
+
+    @Test
+    fun `break state shows the break pill`() {
+        setContent(
+            idleState().copy(
+                kind = FocusSessionKind.BREAK,
+                remainingMillis = 5 * 60_000L,
+                totalMillis = 5 * 60_000L
+            )
+        )
+
+        composeRule.onNodeWithText("Break · 5 minutes").assertExists()
+        composeRule.onNodeWithText("05:00").assertIsDisplayed()
     }
 
     @Test
