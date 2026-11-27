@@ -846,14 +846,23 @@ class ChatScreenSmokeTest {
 
     @Test
     fun `auto-schedule flow renders the day-plan card and confirm creates focus blocks`() {
-        // Needs a future window today for a 45-minute block: after
-        // 22:00 the day has no room left, so the command legitimately
-        // answers "no free slot" instead of proposing one.
+        // Needs a future window today for TWO 45-minute blocks: the
+        // slots start from now (not from the due times), so two
+        // blocks fit only while roundUp(now+10min) + 105min is before
+        // midnight — that fails from ~21:50, when the second block
+        // runs past midnight and is dropped. < 21 is the tight guard
+        // that holds the window: now < 21:00 puts the first slot at
+        // most at 21:30 and the second block ends by 23:45.
         org.junit.Assume.assumeTrue(
-            java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY) < 22
+            java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY) < 21
         )
-        seedDayTask("Morning report", at(0, 9))
-        seedDayTask("Afternoon review", at(0, 15))
+        // Relative seeds (not fixed 09:00/15:00 hours): both tasks
+        // are always upcoming and never overdue, in a fixed order.
+        // The guard above keeps them inside today too: now+3h is
+        // still today while HOUR < 21 (20:59+3h = 23:59).
+        val now = System.currentTimeMillis()
+        seedDayTask("Morning report", now + 3_600_000)
+        seedDayTask("Afternoon review", now + 10_800_000)
         setChatContent()
         waitForWelcome()
         sendChat("plan my day")
