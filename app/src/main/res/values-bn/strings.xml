@@ -18,6 +18,8 @@
     <string name="settings_section_profile_sub">তোমার নাম, ইমেইল আর ছবি</string>
     <string name="settings_section_sign_in">সাইন ইন</string>
     <string name="settings_section_sign_in_sub">Google সাইন-ইন আর গেস্ট মোড</string>
+    <string name="settings_section_statistics">পরিসংখ্যান</string>
+    <string name="settings_section_statistics_sub">সম্পন্ন, স্ট্রিক, ফোকাস সময়</string>
     <string name="settings_section_notifications">নোটিফিকেশন</string>
     <string name="settings_section_notifications_sub">সকালের সারাংশ, শব্দ আর ভাইব্রেশন</string>
     <string name="settings_section_appearance">থিম</string>
@@ -117,8 +119,10 @@
 
     <!-- Sprint 6-2 — appearance (v1 radio rows) -->
     <string name="settings_theme_system">সিস্টেমের মতো</string>
+    <string name="settings_theme_system_short">সিস্টেম</string>
     <string name="settings_theme_light">লাইট</string>
     <string name="settings_theme_dark">ডার্ক</string>
+    <string name="settings_appearance_hint">লাইট ডিফল্ট উচ্চ-কনট্রাস্ট থিম</string>
     <string name="settings_theme_system_sub">সিস্টেমের থিম মেনে চলবে</string>
     <string name="settings_theme_light_sub">লাইট থিম</string>
     <string name="settings_theme_dark_sub">ডার্ক থিম</string>

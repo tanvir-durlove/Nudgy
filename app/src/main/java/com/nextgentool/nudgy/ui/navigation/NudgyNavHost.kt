@@ -857,6 +857,11 @@ fun NudgyNavHost(
                 // Sprint 4-4 — the Settings entry to the same weekly
                 // review screen the progress ring opens (spec §7).
                 onWeeklyReviewClick = { navController.navigate(NudgyRoute.WeeklyReview.route) },
+                // Sprint 7 — the Statistics row opens the Stats
+                // screen (PR #141). The Weekly review row above is
+                // deliberately NOT rewired: it shares its callback
+                // with the Today progress ring.
+                onStatisticsClick = { navController.navigate(NudgyRoute.Stats.route) },
                 user = user,
                 memories = memories,
                 byokKey = byokKey,

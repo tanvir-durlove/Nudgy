@@ -12,8 +12,8 @@ import org.robolectric.annotation.Config
 
 /**
  * Sprint 6-0 — the real Settings structure (spec §4): the three
- * static placeholder rows are gone; the screen renders the eleven
- * section headers + stub rows and the Weekly review row.
+ * static placeholder rows are gone; the screen renders the fifteen
+ * section headers + rows and the Weekly review row.
  *
  * The waitForIdle() IS the blink guard (S5 fix round): an infinite
  * transition keeps the test clock busy, so reintroducing a shimmer
@@ -42,6 +42,8 @@ class ShellScreensTest {
         val slugs = listOf(
             "profile",
             "sign_in",
+            // Sprint 7 — the Statistics section (new).
+            "statistics",
             "notifications",
             "appearance",
             "language",

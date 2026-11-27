@@ -294,8 +294,14 @@ class SettingsRowsTest {
         assertEquals(listOf(false), soundChanges)
     }
 
+    /**
+     * Sprint 7 — the Appearance row is an inline Light/Dark/System
+     * seg now (the S6-2 dialog is gone): the pills carry the same
+     * `settings_theme_<mode>` tags the dialog rows had, and tapping
+     * one writes the mode at once.
+     */
     @Test
-    fun `appearance dialog opens and picking Dark calls back`() {
+    fun `appearance seg shows the pills and tapping Dark calls back`() {
         val modes = mutableListOf<String>()
         composeRule.setContent {
             NudgyTheme {
@@ -303,12 +309,31 @@ class SettingsRowsTest {
             }
         }
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("settings_row_appearance").performScrollTo().performClick()
-        composeRule.waitForIdle()
-        composeRule.onNodeWithTag("settings_appearance_dialog").assertIsDisplayed()
-        composeRule.onNodeWithText("System default").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_row_appearance").performScrollTo()
+        composeRule.onNodeWithText("Light is the default high-contrast theme").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_theme_light").assertExists()
+        composeRule.onNodeWithTag("settings_theme_dark").assertExists()
+        composeRule.onNodeWithTag("settings_theme_system").assertExists()
+        // The dialog is gone: no appearance dialog anywhere.
+        composeRule.onNodeWithTag("settings_appearance_dialog").assertDoesNotExist()
         composeRule.onNodeWithTag("settings_theme_dark").performClick()
         assertEquals(listOf("dark"), modes)
+    }
+
+    /** Sprint 7 — the Statistics row opens the Stats screen. */
+    @Test
+    fun `statistics row fires its callback`() {
+        var clicks = 0
+        composeRule.setContent {
+            NudgyTheme {
+                SettingsShell(onStatisticsClick = { clicks++ })
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_row_statistics").performScrollTo()
+        composeRule.onNodeWithText("Completed, streaks, focus time").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_row_statistics").performClick()
+        assertEquals(1, clicks)
     }
 
     @Test
