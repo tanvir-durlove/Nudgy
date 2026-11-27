@@ -364,7 +364,7 @@ class Migration12To13Test {
         // Opening with the v13 entities + MIGRATION_12_13 runs the
         // migration and validates the whole schema. Any mismatch throws here.
         return Room.databaseBuilder(context, NudgyDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_12_13)
+            .addMigrations(MIGRATION_12_13, MIGRATION_13_14)
             .allowMainThreadQueries()
             .build()
     }

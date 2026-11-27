@@ -98,6 +98,7 @@ class Migration13To14Test {
                 `boardOrder` INTEGER NOT NULL DEFAULT 0,
                 `assigneeUid` TEXT,
                 `assigneeName` TEXT,
+                `isSample` INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY(`id`)
             )
             """.trimIndent()
