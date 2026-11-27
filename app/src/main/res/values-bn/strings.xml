@@ -180,6 +180,8 @@
     <string name="search_section_groups">গ্রুপ</string>
     <string name="search_type_to_search">খুঁজতে লিখুন</string>
     <string name="search_no_results">কোনো ফলাফল নেই</string>
+    <string name="search_nothing_matches">কিছুই মিললো না। সার্চ টাস্ক, শিডিউল, নোট আর গ্রুপ সব জায়গায় খোঁজে — ছোট একটি শব্দ লিখে দেখো।</string>
+    <string name="search_group_meta">গ্রুপ</string>
     <string name="tasks_completed">শেষ হয়েছে (%1$d)</string>
     <string name="tasks_filter_all">সব</string>
     <string name="tasks_filter_group">গ্রুপ</string>
