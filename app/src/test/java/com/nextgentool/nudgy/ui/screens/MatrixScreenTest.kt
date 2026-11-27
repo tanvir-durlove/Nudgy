@@ -1,9 +1,10 @@
 package com.nextgentool.nudgy.ui.screens
 
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.repository.TaskRepository
@@ -31,8 +32,12 @@ import org.robolectric.annotation.Config
  * top-level import (FocusScreenTest pattern). The content scrolls,
  * but a Column + verticalScroll composes every child (unlike Lazy
  * layouts), so assertExists works for all four quadrants. The tap
- * test clicks the TOP-row Q1 card, which is in view without
- * scrolling — no performScrollTo (hangs the test worker).
+ * test uses performSemanticsAction(OnClick), NOT performClick: the
+ * Q1 card sits below the fold in the test viewport (backbar + intro
+ * + the 560dp matrix inside nested scrolls), so a coordinate click
+ * lands outside the window and silently never fires (run 1017:
+ * expected [a] but was []) — the semantics action is the
+ * established remedy for a below-fold click.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -108,9 +113,12 @@ class MatrixScreenTest {
         val clicked = mutableListOf<String>()
         setMatrixContent(clicked)
 
-        // Top-row Q1 card: in view without scrolling. The tag lives
-        // ON the clickable Surface itself, so performClick works.
-        composeRule.onNodeWithTag("matrix_card_a").performClick()
+        // Below the fold in the test viewport (see the class KDoc),
+        // so a coordinate click never lands — invoke the same OnClick
+        // the clickable exposes. The tag lives ON the clickable
+        // Surface itself.
+        composeRule.onNodeWithTag("matrix_card_a")
+            .performSemanticsAction(SemanticsActions.OnClick)
         assertEquals(listOf("a"), clicked)
     }
 }
