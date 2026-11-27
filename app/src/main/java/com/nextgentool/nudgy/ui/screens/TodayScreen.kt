@@ -62,6 +62,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
@@ -189,12 +190,18 @@ fun TodayScreen(
     val tasksUiState by tasksViewModel.uiState.collectAsState()
     val scrollState = rememberScrollState()
     // Sprint 7-2b — the Habits tile scrolls Today to the Habits
-    // section (no Habits screen exists): the section's measured
-    // Y offset inside this Column, captured once laid out. The
-    // Column composes every child, so the offset is measurable
-    // even while the section sits below the fold.
+    // section (no Habits screen exists). The section's and the
+    // Column's LayoutCoordinates, evaluated FRESH at tap time —
+    // never a cached Offset: the S1-4c lesson (TaskBoard) is that a
+    // cached root Offset goes stale/wrong once the page is scrolled.
+    // localToRoot is the 1.0-era API — Compose 1.7 (BOM 2024.09.00)
+    // has NEITHER positionInParent() NOR positionInRoot() NOR
+    // positionInWindow() (runs 1034–1036 failed compile on each).
+    // The Column composes every child, so the section's coordinates
+    // are measurable even while it sits below the fold.
     val scope = rememberCoroutineScope()
-    var habitsOffsetY by remember { mutableStateOf<Int?>(null) }
+    var habitsCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var columnCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     val percent = if (uiState.todayTotal == 0) 0
     else uiState.doneCount * 100 / uiState.todayTotal
     // Sprint 7-2a — the prototype's soft teal: light uses the brand
@@ -220,6 +227,7 @@ fun TodayScreen(
             .background(NudgyCanvas)
             .verticalScroll(scrollState)
             .padding(NudgyTokens.screenPadding)
+            .onGloballyPositioned { columnCoords = it }
     ) {
         // Hero card (prototype scr-today): title + date on the left,
         // the 104px donut on the right, the action row below. The
@@ -752,7 +760,19 @@ fun TodayScreen(
                             subtitle = "Streaks that stick",
                             testTag = "more_tile_habits",
                             onClick = {
-                                habitsOffsetY?.let { y ->
+                                // Fresh evaluation at tap time (S1-4c
+                                // lesson): the section's root Y minus
+                                // the Column's root Y, plus the
+                                // current scroll — the root position
+                                // moves up as the page scrolls, so the
+                                // raw difference alone would undershoot
+                                // once the page is already scrolled.
+                                val habits = habitsCoords
+                                val column = columnCoords
+                                if (habits != null && column != null) {
+                                    val y = (habits.localToRoot(Offset.Zero).y -
+                                        column.localToRoot(Offset.Zero).y +
+                                        scrollState.value).roundToInt()
                                     scope.launch { scrollState.animateScrollTo(y) }
                                 }
                             },
@@ -826,26 +846,12 @@ fun TodayScreen(
         }
         // Sprint 4-2 — Habits (spec §5, Q10=(a)): a section inside
         // Today, below the tab content, on either tab. Sprint 7-2b —
-        // the Box measures the section's Y offset inside this Column
-        // so the Habits tile can scroll to it. Compose 1.7 (BOM
-        // 2024.09.00) has NEITHER positionInParent() NOR
-        // positionInRoot() (runs 1034 + 1035 failed compile on each),
-        // so the offset is derived from the WINDOW positions
-        // instead: the Box's window Y minus its parent Column's
-        // window Y, plus the current scroll — the window position
-        // moves up as the page scrolls, so the raw difference alone
-        // would shrink while scrolling. The guard keeps a remeasure
-        // from re-triggering composition in a loop.
+        // the Box hands its LayoutCoordinates to the Habits tile
+        // (evaluated fresh at tap time — see the state above).
         habitViewModel?.let { habitVm ->
             Spacer(modifier = Modifier.height(24.dp))
             Box(
-                modifier = Modifier.onGloballyPositioned { coordinates ->
-                    val parentY = coordinates.parentLayoutCoordinates
-                        ?.positionInWindow()?.y ?: 0f
-                    val y = (coordinates.positionInWindow().y - parentY +
-                        scrollState.value).roundToInt()
-                    if (habitsOffsetY != y) habitsOffsetY = y
-                }
+                modifier = Modifier.onGloballyPositioned { habitsCoords = it }
             ) {
                 HabitsSection(viewModel = habitVm)
             }
