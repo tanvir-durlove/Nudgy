@@ -295,8 +295,14 @@ class LiveUserViewModelFlipTest {
 
         flip(fakeAuth)
 
+        // Both conditions in ONE first: after the flip the flow can
+        // emit the signed-in user's custom template BEFORE the
+        // built-in seed lands — awaiting only the custom name would
+        // catch that early emission and the DAILY_ROUTINE pin below
+        // would fail. (Cleanup 1-1 — test-side only.)
         val signedInTemplates = viewModel.templates.first { templates ->
-            templates.any { it.name == "Signed-in template" }
+            templates.any { it.name == "Signed-in template" } &&
+                templates.any { it.id == BuiltInTemplates.DAILY_ROUTINE_ID }
         }
         assertTrue(signedInTemplates.any { it.id == BuiltInTemplates.DAILY_ROUTINE_ID })
     }
