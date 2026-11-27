@@ -1,6 +1,7 @@
 package com.nextgentool.nudgy.settings
 
 import com.nextgentool.nudgy.auth.AuthManager
+import com.nextgentool.nudgy.auth.UpdateDisplayNameResult
 import kotlinx.coroutines.CoroutineScope
 
 /**
