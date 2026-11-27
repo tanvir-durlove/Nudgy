@@ -378,6 +378,9 @@ fun NudgyNavHost(
                     // Sprint 7-2a — the Templates ghost button on Today.
                     onTemplatesClick = { navController.navigate(NudgyRoute.Templates.route) },
                     onFocusClick = { navController.navigate(NudgyRoute.Focus.route) },
+                    // Sprint 7-2b — the "More in Nudgy" Priority matrix
+                    // tile on Today.
+                    onMatrixClick = { navController.navigate(NudgyRoute.Matrix.route) },
                     // Sprint 4-4 — the progress ring opens the week's
                     // summary (spec §7, Q9=(a)).
                     onWeeklyReviewClick = { navController.navigate(NudgyRoute.WeeklyReview.route) },
@@ -403,7 +406,7 @@ fun NudgyNavHost(
             FocusScreen(onBackClick = { navController.popBackStack() })
         }
         // Sprint 7 — Priority matrix. NOT a bottom destination either:
-        // reached from the "More in Nudgy" tile on Today (S7-2b wires
+        // reached from the "More in Nudgy" tile on Today (S7-2b wired
         // it); no tab is highlighted while it is open (see
         // NudgyRoute.all). Tap on a task opens that task's detail
         // sheet on the Tasks screen, through the same searchOpenTaskId

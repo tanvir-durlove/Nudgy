@@ -115,12 +115,18 @@ class TodayScreenS7Test {
         db.close()
     }
 
-    private fun setTodayContent(onWeeklyReviewClick: () -> Unit = {}) {
+    private fun setTodayContent(
+        onWeeklyReviewClick: () -> Unit = {},
+        onFocusClick: () -> Unit = {},
+        onMatrixClick: () -> Unit = {}
+    ) {
         composeRule.setContent {
             TodayScreen(
                 onPlanClick = {},
                 onAllTasksClick = {},
                 onTemplatesClick = {},
+                onFocusClick = onFocusClick,
+                onMatrixClick = onMatrixClick,
                 onWeeklyReviewClick = onWeeklyReviewClick,
                 tasksViewModel = tasksViewModel,
                 todayViewModel = todayViewModel
@@ -287,5 +293,71 @@ class TodayScreenS7Test {
         // Anytime group for the untimed task.
         composeRule.onNodeWithText("Anytime").assertExists()
         composeRule.onNodeWithText("Buy milk").assertExists()
+    }
+
+    /**
+     * Sprint 7-2b — "More in Nudgy" (prototype scr-today): the three
+     * tiles below the This-week card, with the prototype's icon +
+     * title + subtitle on each. The tiles sit below the fold, so
+     * assertExists (never assertIsDisplayed) pins them.
+     */
+    @Test
+    fun `More in Nudgy shows the three prototype tiles`() {
+        setTodayContent()
+
+        composeRule.onNodeWithTag("more_in_nudgy_section").assertExists()
+        composeRule.onNodeWithText("More in Nudgy").assertExists()
+        composeRule.onNodeWithTag("more_tile_focus").assertExists()
+        composeRule.onNodeWithText("Focus timer").assertExists()
+        composeRule.onNodeWithText("25-minute Pomodoro").assertExists()
+        composeRule.onNodeWithTag("more_tile_habits").assertExists()
+        composeRule.onNodeWithText("Habits").assertExists()
+        composeRule.onNodeWithText("Streaks that stick").assertExists()
+        composeRule.onNodeWithTag("more_tile_matrix").assertExists()
+        composeRule.onNodeWithText("Priority matrix").assertExists()
+        composeRule.onNodeWithText("Urgent vs important").assertExists()
+        // Disclosed deviations (decided by Tanvir 2026-11-27): the
+        // Widget tile and the Share-preview button are NOT built —
+        // neither has an honest destination.
+        composeRule.onNodeWithTag("more_tile_widget").assertDoesNotExist()
+        composeRule.onNodeWithText("Share to Nudgy", substring = true)
+            .assertDoesNotExist()
+    }
+
+    /**
+     * Sprint 7-2b — the Focus tile calls the same onFocusClick the
+     * hero's Focus button uses. The NavHost wiring itself (callback
+     * → Focus route) is verified by reading + CI compile, not by
+     * rendering the real NavHost — same rule as the Templates button
+     * (class KDoc).
+     */
+    @Test
+    fun `Focus tile calls onFocusClick`() {
+        var focused = false
+        setTodayContent(onFocusClick = { focused = true })
+
+        // Below the fold: a coordinate click cannot reach the tile
+        // on Robolectric's short viewport — click via its semantics
+        // action instead (Matrix lesson, PR #140).
+        composeRule.onNodeWithTag("more_tile_focus")
+            .performSemanticsAction(SemanticsActions.OnClick)
+        assertTrue(focused)
+    }
+
+    /**
+     * Sprint 7-2b — the Matrix tile calls onMatrixClick, which the
+     * NavHost wires to the Matrix route (PR #140). This is the first
+     * button that reaches the Matrix screen at all.
+     */
+    @Test
+    fun `Matrix tile calls onMatrixClick`() {
+        var matrixOpened = false
+        setTodayContent(onMatrixClick = { matrixOpened = true })
+
+        // Below the fold: semantics action, not a coordinate click
+        // (Matrix lesson, PR #140).
+        composeRule.onNodeWithTag("more_tile_matrix")
+            .performSemanticsAction(SemanticsActions.OnClick)
+        assertTrue(matrixOpened)
     }
 }
