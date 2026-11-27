@@ -5,6 +5,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.FocusSessionKind
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
@@ -147,7 +149,11 @@ class FocusScreenTest {
         var picked: String? = "unset"
         setContent(idleState(listOf(task)), onSelectTask = { picked = it })
 
-        composeRule.onNodeWithTag("focus_task_task-1").performClick()
+        // Sprint 7 — the timer card pushes the picker below the fold
+        // in the test viewport, so a coordinate click misses; the
+        // semantics action clicks the row wherever it is.
+        composeRule.onNodeWithTag("focus_task_task-1")
+            .performSemanticsAction(SemanticsActions.OnClick)
         assertEquals("task-1", picked)
     }
 
