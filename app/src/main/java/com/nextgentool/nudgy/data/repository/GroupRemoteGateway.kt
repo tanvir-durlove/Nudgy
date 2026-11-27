@@ -99,6 +99,15 @@ interface GroupRemoteGateway {
     /** Deletes one membership-mirror doc. */
     suspend fun deleteMembershipMirror(userId: String, groupId: String)
 
+    /**
+     * Step 2-2 — renames one member doc's displayName (Profile Edit
+     * fan-out). Only the displayName key changes; `update()` (not
+     * set-merge) so a missing member doc fails instead of creating
+     * a phantom membership. The live rules allow exactly this: own
+     * doc, displayName key only (firestore.rules, members block).
+     */
+    suspend fun updateMemberDisplayName(groupId: String, userId: String, displayName: String)
+
     // ---- items ----
 
     /** Writes one item doc; also bumps the group's lastUpdatedAt in the same batch. [merge] selects set-with-merge (update path) vs plain set (create path). */
@@ -353,6 +362,16 @@ class FirestoreGroupRemoteGateway(
         firestore().collection("users").document(userId)
             .collection("groupMemberships").document(groupId)
             .delete().await()
+    }
+
+    override suspend fun updateMemberDisplayName(
+        groupId: String,
+        userId: String,
+        displayName: String
+    ) {
+        firestore().collection("groups").document(groupId)
+            .collection("members").document(userId)
+            .update("displayName", displayName).await()
     }
 
     // ---- items ----

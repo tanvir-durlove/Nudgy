@@ -787,6 +787,8 @@ fun NudgyNavHost(
             val calendarConnected by viewModel.calendarConnected.collectAsState()
             val isCalendarSyncing by viewModel.isCalendarSyncing.collectAsState()
             val isDeleting by viewModel.isDeleting.collectAsState()
+            // Step 2-2 — the Profile Edit rename state (name only).
+            val isRenaming by viewModel.isRenaming.collectAsState()
             // Sprint 6-2 — the notification toggles, theme mode and
             // language (spec §2 Q8/Q9/Q10), live from the store.
             val morningBriefEnabled by viewModel.morningBriefEnabled.collectAsState()
@@ -955,6 +957,12 @@ fun NudgyNavHost(
                     )
                 },
                 onRestoreClick = { restoreLauncher.launch(DataRestorer.createOpenDocumentIntent()) },
+                // Step 2-2 — Profile Edit (name only): the dialog
+                // closes on renameCompleted; a failure toasts via
+                // settingsError and the dialog stays open.
+                isRenaming = isRenaming,
+                renameCompleted = viewModel.renameCompleted,
+                onEditDisplayName = { name -> viewModel.updateDisplayName(name) },
                 // Sprint 6-3 — the tutorial re-view (spec §6): the
                 // row opens the same OnboardingScreen over the app.
                 onShowOnboardingClick = onShowOnboardingClick

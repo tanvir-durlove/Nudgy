@@ -9,8 +9,11 @@ import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.auth.AuthManager
 import com.nextgentool.nudgy.auth.GroupAuth
 import com.nextgentool.nudgy.auth.NudgyUser
+import com.nextgentool.nudgy.auth.UpdateDisplayNameResult
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.repository.CalendarRepository
+import com.nextgentool.nudgy.data.repository.FakeGroupRemoteGateway
+import com.nextgentool.nudgy.data.repository.GroupRepository
 import com.nextgentool.nudgy.data.repository.MemoryRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.settings.ByokKeyStore
@@ -130,7 +133,10 @@ class SettingsViewModelTest {
         // guard tests can pass nulls explicitly without a real DB
         // calendar repo.
         memoryRepo: MemoryRepository? = memoryRepository,
-        calendarRepo: CalendarRepository? = null
+        calendarRepo: CalendarRepository? = null,
+        // Step 2-2 — the group fan-out repository: null by default
+        // (no fan-out), so the rename tests can pass a real one.
+        groupRepo: GroupRepository? = null
     ): SettingsViewModel = SettingsViewModel(
         taskRepository = taskRepository,
         memoryRepository = memoryRepo,
@@ -139,7 +145,8 @@ class SettingsViewModelTest {
         byokKeyStore = fakeByok,
         calendarConnection = fakeCalendar,
         settingsPreferences = settingsPrefs,
-        calendarRepository = calendarRepo
+        calendarRepository = calendarRepo,
+        groupRepository = groupRepo
     ).also { store.put("settings", it) }
 
     private fun flip(auth: FlipGroupAuth) {
@@ -187,6 +194,101 @@ class SettingsViewModelTest {
         val viewModel = buildViewModel(fakeActions = fakeActions)
         viewModel.signOut()
         assertEquals(1, fakeActions.signOutCalls)
+    }
+
+    // ---- Profile Edit (Step 2-2) ----
+    //
+    // The rename itself is faked at the seam (the real
+    // AuthManager.updateDisplayName touches Firebase and is not
+    // unit-testable in Robolectric — device-test item); what is
+    // proven here is the ViewModel around it: trim, blank-guard,
+    // optimistic row update, error surfacing, and the group fan-out
+    // through a real GroupRepository over the fake gateway.
+
+    @Test
+    fun `rename trims and updates the profile row at once`() = vmTest {
+        val fakeAuth = FlipGroupAuth()
+        val fakeActions = FakeSettingsAccountActions()
+        val viewModel = buildViewModel(fakeAuth = fakeAuth, fakeActions = fakeActions)
+        flip(fakeAuth)
+        viewModel.user.first { !it.isGuest }
+
+        val completed = async { viewModel.renameCompleted.first() }
+        viewModel.updateDisplayName("  Tanvir  ")
+        completed.await()
+
+        assertEquals(1, fakeActions.updateDisplayNameCalls)
+        assertEquals("Tanvir", fakeActions.lastUpdateName)
+        assertEquals("Tanvir", viewModel.user.value.displayName)
+        assertEquals("TA", viewModel.user.value.initials)
+        assertFalse(viewModel.isRenaming.value)
+    }
+
+    @Test
+    fun `rename ignores a blank name without calling the seam`() = vmTest {
+        val fakeAuth = FlipGroupAuth()
+        val fakeActions = FakeSettingsAccountActions()
+        val viewModel = buildViewModel(fakeAuth = fakeAuth, fakeActions = fakeActions)
+        flip(fakeAuth)
+        viewModel.user.first { !it.isGuest }
+
+        viewModel.updateDisplayName("   ")
+
+        assertEquals(0, fakeActions.updateDisplayNameCalls)
+        assertEquals("Tanvir Ahmed", viewModel.user.value.displayName)
+        assertFalse(viewModel.isRenaming.value)
+    }
+
+    @Test
+    fun `rename failure surfaces the error and keeps the old name`() = vmTest {
+        val fakeAuth = FlipGroupAuth()
+        val fakeActions = FakeSettingsAccountActions().apply {
+            updateResult = UpdateDisplayNameResult.Failed("Please sign in again to change your name.")
+        }
+        val viewModel = buildViewModel(fakeAuth = fakeAuth, fakeActions = fakeActions)
+        flip(fakeAuth)
+        viewModel.user.first { !it.isGuest }
+
+        val error = async { viewModel.settingsError.first() }
+        viewModel.updateDisplayName("New Name")
+        assertEquals("Please sign in again to change your name.", error.await())
+
+        assertEquals(1, fakeActions.updateDisplayNameCalls)
+        assertEquals("Tanvir Ahmed", viewModel.user.value.displayName)
+        assertFalse(viewModel.isRenaming.value)
+    }
+
+    @Test
+    fun `rename fans out to the group member docs and the local cache rows`() = vmTest {
+        val fakeGateway = FakeGroupRemoteGateway()
+        val groupRepo = GroupRepository(context, db, fakeGateway)
+        fakeGateway.mirrors["user-1"] = mutableMapOf(
+            "g-1" to mutableMapOf("groupId" to "g-1", "groupName" to "DIU 41")
+        )
+        fakeGateway.members["g-1"] = mutableMapOf(
+            "user-1" to mutableMapOf("uid" to "user-1", "displayName" to "Tanvir Ahmed")
+        )
+        groupRepo.refreshGroupMembers("g-1")
+        assertEquals(
+            "Tanvir Ahmed",
+            db.groupMemberDao().getMembersOnce("g-1").single().displayName
+        )
+
+        val fakeAuth = FlipGroupAuth()
+        val viewModel = buildViewModel(fakeAuth = fakeAuth, groupRepo = groupRepo)
+        flip(fakeAuth)
+        viewModel.user.first { !it.isGuest }
+
+        val completed = async { viewModel.renameCompleted.first() }
+        viewModel.updateDisplayName("Tanvir")
+        completed.await()
+
+        assertEquals("Tanvir", fakeGateway.members["g-1"]?.get("user-1")?.get("displayName"))
+        assertEquals(
+            "Tanvir",
+            db.groupMemberDao().getMembersOnce("g-1").single().displayName
+        )
+        groupRepo.stopGroupSync()
     }
 
     // ---- Memories ----
@@ -429,6 +531,9 @@ private class FakeSettingsAccountActions : SettingsAccountActions {
     var signOutCalls = 0
     var deleteCalls = 0
     var deleteError: String? = null
+    var updateDisplayNameCalls = 0
+    var lastUpdateName: String? = null
+    var updateResult: UpdateDisplayNameResult = UpdateDisplayNameResult.Success
 
     override fun signOut(scope: CoroutineScope, onComplete: () -> Unit) {
         signOutCalls++
@@ -438,6 +543,12 @@ private class FakeSettingsAccountActions : SettingsAccountActions {
     override fun deleteAccount(onComplete: () -> Unit, onError: (String) -> Unit) {
         deleteCalls++
         if (deleteError != null) onError(deleteError!!) else onComplete()
+    }
+
+    override suspend fun updateDisplayName(displayName: String): UpdateDisplayNameResult {
+        updateDisplayNameCalls++
+        lastUpdateName = displayName
+        return updateResult
     }
 }
 

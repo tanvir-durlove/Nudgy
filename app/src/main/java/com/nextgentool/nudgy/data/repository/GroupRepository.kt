@@ -906,6 +906,47 @@ class GroupRepository(
         }
 
     /**
+     * Step 2-2 — Profile Edit fan-out: carry a display-name edit
+     * into every group the user belongs to.
+     *
+     * The membership mirror (users/{uid}/groupMemberships) lists
+     * the groups; for each one the remote member doc's displayName
+     * is updated (the live rules allow exactly this: own doc,
+     * displayName key only) and the local cache row follows, so the
+     * member list shows the new name without waiting for the next
+     * poll. A per-group failure is logged and skipped — a stale
+     * mirror (left on another device) must never block the others,
+     * and a failed group simply keeps the old name until the next
+     * edit retries it.
+     *
+     * Deliberately NOT renamed here: task assignee names and
+     * activity history. Both snapshot the name at the time (the
+     * assignee recorded when the task was assigned; the actor
+     * recorded when the event happened) — rewriting them would
+     * rewrite history.
+     */
+    suspend fun updateMemberDisplayName(userId: String, displayName: String) =
+        withContext(Dispatchers.IO) {
+            if (userId == AuthManager.GUEST_USER_ID) return@withContext
+            val mirrors = try {
+                remote.getMembershipMirrors(userId)
+            } catch (e: Exception) {
+                Log.w(TAG, "updateMemberDisplayName: mirror read failed: ${e.message}")
+                return@withContext
+            }
+            for (mirror in mirrors) {
+                val groupId = mirror["groupId"] as? String ?: continue
+                if (groupId.isBlank()) continue
+                try {
+                    remote.updateMemberDisplayName(groupId, userId, displayName)
+                    groupMemberDao.updateMemberDisplayName(groupId, userId, displayName)
+                } catch (e: Exception) {
+                    Log.w(TAG, "updateMemberDisplayName failed for group $groupId: ${e.message}")
+                }
+            }
+        }
+
+    /**
      * Remote refresh: fetch the member list, replace the cache, return
      * the fresh list. On failure the cache is left untouched and the
      * cached list is returned, so a failed refresh never wipes the

@@ -247,6 +247,62 @@ fun MemoriesDialog(
 }
 
 /**
+ * Step 2-2 — the Profile Edit dialog (name only, no photo).
+ *
+ * The field prefills with the current name and caps at 256
+ * characters (the Firebase displayName limit). Save is disabled
+ * while the field is blank or a rename is already running; the
+ * dialog stays open on failure (the ViewModel toasts the error)
+ * and closes only on [SettingsViewModel.renameCompleted].
+ */
+@Composable
+fun ProfileEditDialog(
+    initialName: String,
+    isSaving: Boolean,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var input by remember { mutableStateOf(initialName) }
+    AlertDialog(
+        modifier = Modifier.testTag("settings_profile_edit_dialog"),
+        onDismissRequest = { if (!isSaving) onDismiss() },
+        title = {
+            Text(stringResource(R.string.settings_profile_edit_title), fontWeight = FontWeight.Bold, color = NudgyCharcoal)
+        },
+        text = {
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it.take(256) },
+                label = { Text(stringResource(R.string.settings_profile_edit_label)) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("profile_edit_field"),
+                singleLine = true
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSave(input.trim()) },
+                enabled = input.isNotBlank() && !isSaving,
+                modifier = Modifier.testTag("profile_edit_save"),
+                colors = ButtonDefaults.buttonColors(containerColor = NudgyPrimary)
+            ) {
+                Text(stringResource(R.string.settings_byok_save), color = Color.White)
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !isSaving,
+                modifier = Modifier.testTag("profile_edit_cancel")
+            ) {
+                Text(stringResource(R.string.settings_delete_cancel))
+            }
+        }
+    )
+}
+
+/**
  * The delete-account confirm dialog (v1 YourNudgySheet, C7).
  * It stays up while the deletion runs — it closes only on success
  * ([SettingsViewModel.deleteCompleted]) or an explicit Cancel — so

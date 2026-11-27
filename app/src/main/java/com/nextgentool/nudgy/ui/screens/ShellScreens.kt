@@ -299,6 +299,13 @@ fun SettingsShell(
     onAppLockChange: (Boolean) -> Unit = {},
     onExportClick: () -> Unit = {},
     onRestoreClick: () -> Unit = {},
+    // Step 2-2 — Profile Edit (name only): the rename dialog state
+    // + the rename flow (same shape as the delete dialog above).
+    // Defaults keep the S6-0 shell test (no params) rendering: the
+    // Edit button is a no-op and no dialog opens.
+    isRenaming: Boolean = false,
+    renameCompleted: SharedFlow<Unit>? = null,
+    onEditDisplayName: (String) -> Unit = {},
     // Sprint 6-3 — the tutorial re-view (spec §6): opens the same
     // OnboardingScreen over the app; the row is inert in tests that
     // render the shell with no params (default no-op).
@@ -309,6 +316,8 @@ fun SettingsShell(
     var showByokDialog by remember { mutableStateOf(false) }
     var showMemoriesDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    // Step 2-2 — the Profile Edit dialog.
+    var showRenameDialog by remember { mutableStateOf(false) }
     // Sprint 6-2 — the Language dialog. (The Appearance dialog is
     // gone in Sprint 7 — the row is an inline seg now.)
     var showLanguageDialog by remember { mutableStateOf(false) }
@@ -316,6 +325,11 @@ fun SettingsShell(
     // the deletion runs, and a failure keeps it open for a retry).
     LaunchedEffect(deleteCompleted) {
         deleteCompleted?.collect { showDeleteDialog = false }
+    }
+    // Step 2-2 — same shape: the rename dialog closes only on
+    // success; a failure keeps it open for a retry.
+    LaunchedEffect(renameCompleted) {
+        renameCompleted?.collect { showRenameDialog = false }
     }
     val isGuest = user == null || user.isGuest
     // Sprint 6-0 — the real Settings structure (spec §4): the
@@ -347,7 +361,10 @@ fun SettingsShell(
             // Sprint 6-2 — notifications/appearance/language are wired
             // now; no stub row remains on this screen.
             when (section.slug) {
-                "profile" -> SettingsProfileRow(user = user)
+                "profile" -> SettingsProfileRow(
+                    user = user,
+                    onEditNameClick = { showRenameDialog = true }
+                )
                 "sign_in" -> SettingsSignInRow(
                     isGuest = isGuest,
                     onSignInClick = onSignInClick,
@@ -504,6 +521,15 @@ fun SettingsShell(
             isDeleting = isDeleting,
             onConfirm = onDeleteAccountClick,
             onDismiss = { showDeleteDialog = false }
+        )
+    }
+    // Step 2-2 — the Profile Edit dialog (name only, no photo).
+    if (showRenameDialog) {
+        ProfileEditDialog(
+            initialName = user?.displayName ?: "",
+            isSaving = isRenaming,
+            onSave = { name -> onEditDisplayName(name) },
+            onDismiss = { showRenameDialog = false }
         )
     }
     // Sprint 6-2 — the Language dialog (SettingsDialogs.kt).

@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -145,9 +146,18 @@ private fun SettingsRowChevron() {
     )
 }
 
-/** Profile row: initials circle + name + email (guest: no fake email). */
+/**
+ * Profile row: initials circle + name + email (guest: no fake email).
+ *
+ * Step 2-2 — a signed-in user gets a soft "Edit" button at the row
+ * end (the prototype's editProfileBtn); guests get none — there is
+ * no Firebase user to rename ("Guest User" is a local label).
+ */
 @Composable
-fun SettingsProfileRow(user: NudgyUser?) {
+fun SettingsProfileRow(
+    user: NudgyUser?,
+    onEditNameClick: () -> Unit = {}
+) {
     val isGuest = user == null || user.isGuest
     SettingsRowCard(slug = "profile") {
         Box(
@@ -175,6 +185,21 @@ fun SettingsProfileRow(user: NudgyUser?) {
                 title = user!!.displayName.ifBlank { user.email },
                 subtitle = user.email
             )
+            Button(
+                onClick = onEditNameClick,
+                modifier = Modifier.testTag("settings_profile_edit_button"),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = colorResource(R.color.nudgy_teal_soft),
+                    contentColor = colorResource(R.color.nudgy_teal_dark)
+                ),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_profile_edit),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
         }
     }
 }

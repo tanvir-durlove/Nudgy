@@ -23,6 +23,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthRecentLoginRequiredException
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.CollectionReference
 import com.google.firebase.firestore.FieldValue
@@ -38,6 +39,21 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+
+/**
+ * Step 2-2 — the outcome of a display-name edit.
+ *
+ * [Failed] covers every failure including the recent-login case
+ * (Firebase throws FirebaseAuthRecentLoginRequiredException when
+ * the sign-in is too old — the message tells the user to sign in
+ * again; there is no automatic re-auth). The message is already
+ * user-facing (resolved here, where a Context exists) — the
+ * ViewModel only toasts it.
+ */
+sealed interface UpdateDisplayNameResult {
+    data object Success : UpdateDisplayNameResult
+    data class Failed(val message: String) : UpdateDisplayNameResult
+}
 
 class AuthManager(private val context: Context) {
     // Nullable: Firebase is unavailable when google-services.json is absent (e.g. CI builds).
@@ -372,6 +388,71 @@ class AuthManager(private val context: Context) {
             Log.w(TAG, "Firestore user profile sync warning: ${e.message}")
         }
     }
+
+    /**
+     * Step 2-2 — renames the signed-in user (name only, no photo).
+     *
+     * Persistence is the Firebase Auth profile itself
+     * ([FirebaseUser.updateProfile]): the top-level displayName is
+     * populated from the Google account only on account creation,
+     * so an edit made here survives later Google sign-ins (the
+     * provider's name lives separately in providerData). No
+     * Firestore-override source of truth is needed.
+     *
+     * The write is three steps, in order: updateProfile, then the
+     * `users/{uid}` merge-write (so the Firestore doc is current
+     * without waiting for the next sign-in's syncUserToFirestore —
+     * which would write the same edited name anyway), then
+     * [FirebaseUser.reload] + an explicit [_userState] update — the
+     * AuthStateListener is NOT relied on to fire after updateProfile.
+     * A failure at any step returns [UpdateDisplayNameResult.Failed]
+     * and the name is unchanged everywhere. Robolectric cannot drive
+     * this (real Firebase) — the live path is a device-test item.
+     */
+    suspend fun updateDisplayName(displayName: String): UpdateDisplayNameResult =
+        withContext(Dispatchers.IO) {
+            val trimmed = displayName.trim()
+            val user = auth?.currentUser
+            if (trimmed.isBlank() || user == null) {
+                return@withContext UpdateDisplayNameResult.Failed(
+                    context.getString(R.string.settings_profile_edit_failed)
+                )
+            }
+            try {
+                user.updateProfile(
+                    UserProfileChangeRequest.Builder().setDisplayName(trimmed).build()
+                ).await()
+                val db = FirebaseFirestore.getInstance(
+                    context.getString(R.string.firestore_database_id)
+                )
+                db.collection("users").document(user.uid).set(
+                    mapOf<String, Any>(
+                        "displayName" to trimmed,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    ),
+                    SetOptions.merge()
+                ).await()
+                user.reload().await()
+                _userState.value = NudgyUser(
+                    uid = user.uid,
+                    displayName = resolveDisplayName(user.displayName, user.email),
+                    email = resolveEmail(user.email),
+                    photoUrl = user.photoUrl?.toString()
+                )
+                UpdateDisplayNameResult.Success
+            } catch (e: FirebaseAuthRecentLoginRequiredException) {
+                Log.w(TAG, "updateDisplayName needs a recent sign-in")
+                UpdateDisplayNameResult.Failed(
+                    context.getString(R.string.settings_profile_edit_needs_sign_in)
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "updateDisplayName failed: ${e.message}")
+                UpdateDisplayNameResult.Failed(
+                    e.message?.takeIf { it.isNotBlank() }
+                        ?: context.getString(R.string.settings_profile_edit_failed)
+                )
+            }
+        }
 
     /**
      * Sign Out

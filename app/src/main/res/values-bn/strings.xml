@@ -150,6 +150,13 @@
     <string name="settings_delete_deleting">মুছছে…</string>
     <string name="settings_delete_cancel">বাতিল</string>
 
+    <!-- Profile edit dialog (Step 2-2: name only, no photo) -->
+    <string name="settings_profile_edit">বদলাও</string>
+    <string name="settings_profile_edit_title">তোমার নাম বদলাও</string>
+    <string name="settings_profile_edit_label">নাম</string>
+    <string name="settings_profile_edit_needs_sign_in">নাম বদলাতে আবার সাইন ইন করো।</string>
+    <string name="settings_profile_edit_failed">নাম আপডেট করা যায়নি। আবার চেষ্টা করো।</string>
+
     <!-- Today screen headers -->
     <string name="today_tab_today">আজ</string>
     <string name="today_tab_upcoming">আসছে</string>
