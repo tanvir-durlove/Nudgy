@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.semantics.SemanticsProperties
 import com.nextgentool.nudgy.data.local.entity.HabitEntity
 import com.nextgentool.nudgy.data.repository.HabitStreak
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
@@ -30,6 +31,13 @@ import org.robolectric.annotation.Config
  * states (done today / at risk / broken), and the add / rename /
  * delete callbacks. Compose 1.7 member rules apply: assertExists is
  * a member, never a top-level import.
+ *
+ * Sprint 7 — the streak is split across two nodes (a chip with the
+ * short count + a status line under the name), the intro is the
+ * prototype-verbatim line, and the create action is the soft
+ * "+ New habit" block button (same habit_add callback). The
+ * "This week" dots card has no data source yet (see
+ * HabitsSection.kt KDoc), so no test asserts it.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -127,12 +135,28 @@ class HabitsSectionTest {
     }
 
     @Test
-    fun `a habit checked in today shows its streak and done today`() {
+    fun `section shows the prototype intro and the New habit block button`() {
+        setContent(loadedState())
+
+        composeRule.onNodeWithText(
+            "Small things, daily. Tick today off — streaks update right away."
+        ).assertExists()
+        // The button merges its label ("New habit") into one node
+        // with its tag; the field placeholder is the same string, so
+        // assert the label on the tagged node instead of by text.
+        val buttonNode = composeRule.onNodeWithTag("habit_add").fetchSemanticsNode()
+        val labels = buttonNode.config[SemanticsProperties.Text]
+        assertTrue(labels.any { it.text == "New habit" })
+    }
+
+    @Test
+    fun `a habit checked in today shows its streak chip and done today`() {
         setContent(loadedState(listOf(habit())))
 
         composeRule.onNodeWithText("Drink water").assertIsDisplayed()
         composeRule.onNodeWithTag("habit_streak_habit-1").assertIsDisplayed()
-        composeRule.onNodeWithText("3-day streak · done today · Best 5").assertIsDisplayed()
+        composeRule.onNodeWithText("3-day streak").assertExists()
+        composeRule.onNodeWithText("done today · Best 5").assertExists()
     }
 
     @Test
@@ -143,7 +167,8 @@ class HabitsSectionTest {
             )
         )
 
-        composeRule.onNodeWithText("2-day streak · not done today yet · Best 5").assertIsDisplayed()
+        composeRule.onNodeWithText("2-day streak").assertExists()
+        composeRule.onNodeWithText("not done today yet · Best 5").assertExists()
         composeRule.onNodeWithText("No current streak").assertDoesNotExist()
     }
 
@@ -155,7 +180,21 @@ class HabitsSectionTest {
             )
         )
 
-        composeRule.onNodeWithText("No current streak · Best 4").assertIsDisplayed()
+        composeRule.onNodeWithText("No streak").assertExists()
+        composeRule.onNodeWithText("No current streak · Best 4").assertExists()
+    }
+
+    @Test
+    fun `a fresh habit shows the No streak chip and no current streak`() {
+        setContent(
+            loadedState(
+                listOf(habit(currentStreak = 0, longestStreak = 0, checkedInToday = false))
+            )
+        )
+
+        composeRule.onNodeWithTag("habit_streak_habit-1").assertExists()
+        composeRule.onNodeWithText("No streak").assertExists()
+        composeRule.onNodeWithText("No current streak").assertExists()
     }
 
     @Test

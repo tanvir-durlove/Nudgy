@@ -1,18 +1,25 @@
 package com.nextgentool.nudgy.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Icon
@@ -29,8 +36,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.data.repository.HabitStreak
@@ -58,6 +67,29 @@ import com.nextgentool.nudgy.ui.viewmodel.HabitViewModel
  * All text uses the theme tokens (PR #86: never static nudgy_ink /
  * muted on theme surfaces); teal is only the checkbox / add icon,
  * never small text.
+ *
+ * Sprint 7 — design-only restyle to the prototype (scr-habits):
+ * sec-title + prototype-verbatim intro, habit rows (checkbox + name
+ * 15.5sp/500 + streak chip + status line), "+ New habit" soft block
+ * button. The section stays where it lives, inside Today — there is
+ * no standalone Habits screen and no backbar is added.
+ *
+ * DISCLOSED DEVIATIONS (data, not design):
+ * - No "This week" dots card: the week dots need per-day check-in
+ *   dates, and the UI model (HabitStreak) carries only the computed
+ *   counts (currentStreak / longestStreak / checkedInToday) — the
+ *   raw dates exist in the repository (getCheckInDates) but no flow
+ *   carries them into HabitUiState. Deriving 7 dots from a single
+ *   streak count would fabricate per-day data, so the card is left
+ *   out. Wiring it needs a data task (repository + ViewModel).
+ * - No schedule line under the habit name: habits are title-only
+ *   (HabitEntity has no schedule), so the prototype's "Every day ·
+ *   Evening" / "Weekdays" lines have no data. The tiny line under
+ *   the name is the streak status instead ("done today" /
+ *   "not done today yet" / "No current streak" + best).
+ * - The create UI keeps the always-visible field (the prototype's
+ *   button only reveals one); the soft "+ New habit" button sits
+ *   directly under its field instead of at the bottom.
  */
 @Composable
 fun HabitsSection(
@@ -113,15 +145,19 @@ fun HabitsSectionContent(
         ) {
             Text(
                 text = "Habits",
-                style = MaterialTheme.typography.titleMedium,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
                 color = NudgyCharcoal
             )
             Text(
-                text = "One check-in a day keeps the streak alive.",
+                text = "Small things, daily. Tick today off — streaks update right away.",
                 style = MaterialTheme.typography.bodySmall,
                 color = NudgyMuted
             )
             // Add a habit (title only — spec §5: no daily target).
+            // The field stays always visible (the prototype's button
+            // only reveals one); the soft block button below it is
+            // the create action, same callback as before.
             OutlinedTextField(
                 value = state.newTitle,
                 onValueChange = onNewTitleChange,
@@ -129,28 +165,33 @@ fun HabitsSectionContent(
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { onCreateHabit() }),
-                trailingIcon = {
-                    IconButton(
-                        onClick = onCreateHabit,
-                        enabled = state.newTitle.isNotBlank(),
-                        modifier = Modifier.testTag("habit_add")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Add,
-                            contentDescription = "Add habit",
-                            tint = if (state.newTitle.isNotBlank()) {
-                                colorResource(R.color.nudgy_teal)
-                            } else {
-                                NudgyMuted
-                            }
-                        )
-                    }
-                },
                 shape = NudgyTokens.cardRadius,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("habit_new_title")
             )
+            Button(
+                onClick = onCreateHabit,
+                enabled = state.newTitle.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = colorResource(R.color.nudgy_teal_soft),
+                    contentColor = colorResource(R.color.nudgy_teal_dark),
+                    disabledContainerColor = colorResource(R.color.nudgy_teal_soft),
+                    disabledContentColor = NudgyMuted
+                ),
+                shape = RoundedCornerShape(999.dp),
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("habit_add")
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Add,
+                    contentDescription = null
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(text = "New habit")
+            }
             if (!state.isLoading && state.habits.isEmpty()) {
                 Text(
                     text = "No habits yet — add your first one above",
@@ -230,14 +271,37 @@ private fun HabitRow(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = habit.habit.title,
-                        style = MaterialTheme.typography.titleMedium,
+                        fontSize = 15.5.sp,
+                        fontWeight = FontWeight.Medium,
                         color = NudgyCharcoal
                     )
                     Text(
-                        text = streakLabel(habit),
+                        text = streakStatusLabel(habit),
                         style = MaterialTheme.typography.bodySmall,
-                        color = NudgyMuted,
-                        modifier = Modifier.testTag("habit_streak_$id")
+                        color = NudgyMuted
+                    )
+                }
+            }
+            // Streak chip (prototype): the short count on the right;
+            // the tiny line under the name keeps the status ("done
+            // today" / "not done today yet" / best). Hidden while
+            // editing — the edit field + Save/Cancel take the row.
+            if (!isEditing) {
+                Box(
+                    modifier = Modifier
+                        .background(
+                            color = colorResource(R.color.nudgy_teal_soft),
+                            shape = RoundedCornerShape(999.dp)
+                        )
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                        .testTag("habit_streak_$id"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = streakChipLabel(habit),
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = colorResource(R.color.nudgy_teal_dark)
                     )
                 }
             }
@@ -303,16 +367,25 @@ private fun HabitRow(
 }
 
 /**
- * The streak line for one habit (spec §5). The count is the live
- * streak from HabitStreakUseCase: today not checked in yet means
- * "at risk", never 0 while the day is still open — so the label says
- * "not done today yet" next to the count instead of showing a broken
- * streak. A missed day is the only way back to "No current streak".
+ * The streak chip for one habit (prototype): the short count only —
+ * "3-day streak", or "No streak" when there is no current streak.
+ * The status detail lives in [streakStatusLabel] under the name.
  */
-private fun streakLabel(streak: HabitStreak): String {
+private fun streakChipLabel(streak: HabitStreak): String =
+    if (streak.currentStreak > 0) "${streak.currentStreak}-day streak" else "No streak"
+
+/**
+ * The streak status line under the habit name (spec §5). The count
+ * is the live streak from HabitStreakUseCase: today not checked in
+ * yet means "at risk", never 0 while the day is still open — so the
+ * label says "not done today yet" next to the count instead of
+ * showing a broken streak. A missed day is the only way back to
+ * "No current streak".
+ */
+private fun streakStatusLabel(streak: HabitStreak): String {
     val base = when {
-        streak.checkedInToday -> "${streak.currentStreak}-day streak · done today"
-        streak.currentStreak > 0 -> "${streak.currentStreak}-day streak · not done today yet"
+        streak.checkedInToday -> "done today"
+        streak.currentStreak > 0 -> "not done today yet"
         else -> "No current streak"
     }
     return if (streak.longestStreak > 0) "$base · Best ${streak.longestStreak}" else base
