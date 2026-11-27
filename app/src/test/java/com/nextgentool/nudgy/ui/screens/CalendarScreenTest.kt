@@ -2,6 +2,8 @@ package com.nextgentool.nudgy.ui.screens
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -493,5 +495,79 @@ class CalendarScreenTest {
         assertTrue(cells[6].isInMonth)
         assertEquals(28, cells[33].dayOfMonth)
         assertTrue(cells[33].isInMonth)
+    }
+
+    // ------------------------------------------------------ Sprint 7-2b (Calendar-2)
+
+    @Test
+    fun `day event row shows the prototype kv shape`() {
+        composeRule.setContent {
+            CalendarScreen(
+                events = listOf(sampleEvent()),
+                suggestedSlot = sampleSlot(),
+                isCalendarConnected = true
+            )
+        }
+        // The row keeps its tag; the Google marker is now a tagchip
+        // ("Google Calendar event"), not the old "· Google Calendar"
+        // inline text; the location survives in the meta row.
+        composeRule.onNodeWithTag("schedule_event_e1").assertExists()
+        composeRule.onNodeWithText("Google Calendar event").assertExists()
+        composeRule.onNodeWithText("· Google Calendar").assertDoesNotExist()
+        composeRule.onNodeWithText("Room 4B").assertExists()
+        // The meta time appears exactly twice: the row AND the hour
+        // grid block (same event, same range). One would mean the row
+        // lost its time.
+        assertEquals(
+            2,
+            composeRule.onAllNodesWithText("10:00 AM – 11:00 AM")
+                .fetchSemanticsNodes().size
+        )
+    }
+
+    @Test
+    fun `group event row shows the group tagchip and no delete button`() {
+        val start = todayAt(17)
+        val groupEvent = CalendarEventEntity(
+            id = "e3",
+            userId = "test-user-1",
+            title = "DIU class group meeting",
+            startEpochMillis = start,
+            endEpochMillis = start + 60 * 60 * 1000L,
+            eventType = "MEETING",
+            groupId = "g1"
+        )
+        composeRule.setContent {
+            CalendarScreen(
+                events = listOf(groupEvent),
+                suggestedSlot = sampleSlot(),
+                isCalendarConnected = true,
+                groupNames = mapOf("g1" to "DIU class group")
+            )
+        }
+        composeRule.onNodeWithTag("schedule_event_e3").assertExists()
+        // The group name is a cream grp tagchip in the meta row now,
+        // not the separate badge below it. Exact match: the title is
+        // "DIU class group meeting", a different node.
+        composeRule.onNodeWithText("DIU class group").assertExists()
+        // Group rows are never deleted from here (established rule):
+        // with only a group event on screen, no delete button exists.
+        composeRule.onNodeWithContentDescription("Delete event").assertDoesNotExist()
+    }
+
+    @Test
+    fun `suggested slot card carries the Schedule a task section title`() {
+        composeRule.setContent {
+            CalendarScreen(
+                events = listOf(sampleEvent()),
+                suggestedSlot = sampleSlot(),
+                isCalendarConnected = true
+            )
+        }
+        // The prototype's section title, above the card; the card's
+        // own copy and its Block time button are unchanged.
+        composeRule.onNodeWithText("Schedule a task").assertExists()
+        composeRule.onNodeWithText("SUGGESTED FOCUS TIME").assertExists()
+        composeRule.onNodeWithText("Block time").assertExists()
     }
 }
