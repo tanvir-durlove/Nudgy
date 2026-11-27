@@ -53,6 +53,20 @@ fun startOfWeekMillis(now: Long = System.currentTimeMillis()): Long {
     return startOfDayMillis(cal.timeInMillis)
 }
 
+/**
+ * Sprint 7 (Habits data) — the 7 local dates ("yyyy-MM-dd") of the
+ * Mon–Sun week containing [now], Monday first. Steps with
+ * Calendar.add so a DST transition never miscounts a day.
+ */
+fun weekDateStrings(now: Long = System.currentTimeMillis()): List<String> {
+    val cal = Calendar.getInstance().apply { timeInMillis = startOfWeekMillis(now) }
+    return (0..6).map {
+        val date = dateStringOf(cal.timeInMillis)
+        cal.add(Calendar.DAY_OF_MONTH, 1)
+        date
+    }
+}
+
 /** "Mon, Nov 17" style label for a day, device-local. */
 fun dayLabel(epochMillis: Long): String =
     SimpleDateFormat("EEE, MMM d", Locale.getDefault()).format(epochMillis)

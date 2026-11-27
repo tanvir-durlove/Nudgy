@@ -10,7 +10,10 @@ import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.repository.FocusHabitRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.domain.dateStringOf
 import com.nextgentool.nudgy.domain.startOfDayMillis
+import com.nextgentool.nudgy.domain.startOfWeekMillis
+import com.nextgentool.nudgy.domain.weekDateStrings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -354,5 +357,53 @@ class HabitViewModelTest {
         // guest's disappears.
         val signedInState = viewModel.awaitHabit("Signed-in habit")
         assertFalse(signedInState.habits.any { it.habit.title == "Guest habit" })
+    }
+
+    // ---- Sprint 7 (Habits data) ----
+
+    @Test
+    fun `refresh loads the week dates and a check-in flips todays dot`() = vmTest {
+        val now = dayAt(0) // today, noon
+        val weekStart = startOfWeekMillis(now)
+        val monday = weekStart + 10 * 60 * 60 * 1000L
+        val tuesday = weekStart + 24 * 60 * 60 * 1000L + 10 * 60 * 60 * 1000L
+        val seeded = setOf(dateStringOf(monday), dateStringOf(tuesday))
+        // Seed Mon + Tue check-ins directly in the repository, before
+        // the ViewModel is built — the init refresh reads the same
+        // week (today noon IS the real today), so it can never
+        // overwrite the asserted state with a different week.
+        val habit = focusRepository.createHabit(userId, "Read", now = monday)
+        focusRepository.checkIn(habit.id, now = monday)
+        focusRepository.checkIn(habit.id, now = tuesday)
+        // Undo today first (a no-op when today is not checked in
+        // yet): the flip below must always start from unchecked,
+        // whatever weekday today is.
+        focusRepository.undoCheckIn(habit.id, now)
+
+        val viewModel = buildViewModel()
+        viewModel.refresh(now)
+        val loaded = viewModel.uiState.first {
+            it.weekDates.size == 7 && it.habits.any { row -> row.habit.id == habit.id }
+        }
+
+        assertEquals(weekDateStrings(now), loaded.weekDates)
+        assertEquals(dateStringOf(now), loaded.todayDate)
+        val row = loaded.habits.single { it.habit.id == habit.id }
+        assertEquals(seeded - dateStringOf(now), row.thisWeekCheckInDates)
+
+        // The flip: today is unchecked now, so this predicate is
+        // false until the check-in lands — a genuine await, not a
+        // race with the launched refresh.
+        viewModel.checkIn(habit.id, now)
+        val checkedIn = viewModel.uiState.first {
+            it.habits.single { r -> r.habit.id == habit.id }
+                .thisWeekCheckInDates.any { date -> date == dateStringOf(now) }
+        }
+        assertTrue(checkedIn.habits.single { it.habit.id == habit.id }.checkedInToday)
+        // Today joined the seeded Mon + Tue (the flip landed).
+        assertEquals(
+            seeded + dateStringOf(now),
+            checkedIn.habits.single { it.habit.id == habit.id }.thisWeekCheckInDates
+        )
     }
 }

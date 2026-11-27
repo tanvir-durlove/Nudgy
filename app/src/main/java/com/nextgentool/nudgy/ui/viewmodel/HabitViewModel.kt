@@ -8,6 +8,8 @@ import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.repository.FocusHabitRepository
 import com.nextgentool.nudgy.data.repository.HabitStreak
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.domain.dateStringOf
+import com.nextgentool.nudgy.domain.weekDateStrings
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -39,7 +41,14 @@ data class HabitUiState(
     val newTitle: String = "",
     val editingHabitId: String? = null,
     val editTitle: String = "",
-    val confirmingDeleteHabitId: String? = null
+    val confirmingDeleteHabitId: String? = null,
+    // Sprint 7 (Habits data) — the Mon–Sun week the "This week" dots
+    // render (7 "yyyy-MM-dd" strings, Monday first) + today, both
+    // for the same `now` refresh() was called with. The section
+    // renders dots from these + each habit's real check-in dates —
+    // it never reads the clock itself, so tests can pin a week.
+    val weekDates: List<String> = emptyList(),
+    val todayDate: String = ""
 )
 
 /**
@@ -130,7 +139,17 @@ class HabitViewModel @Inject constructor(
     suspend fun refresh(now: Long = System.currentTimeMillis()) {
         refreshMutex.withLock {
             val streaks = focusRepository.getHabitsWithStreaks(currentUserId, now)
-            _uiState.update { it.copy(habits = streaks, isLoading = false) }
+            _uiState.update {
+                it.copy(
+                    habits = streaks,
+                    // Sprint 7 (Habits data) — the week rides the same
+                    // refresh: the dots' dates and today always agree
+                    // with the habits they render.
+                    weekDates = weekDateStrings(now),
+                    todayDate = dateStringOf(now),
+                    isLoading = false
+                )
+            }
         }
     }
 

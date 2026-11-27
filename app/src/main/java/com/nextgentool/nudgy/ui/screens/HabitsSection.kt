@@ -1,6 +1,7 @@
 package com.nextgentool.nudgy.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,7 +11,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -34,8 +37,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -44,6 +50,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.data.repository.HabitStreak
 import com.nextgentool.nudgy.ui.theme.NudgyAccent
+import com.nextgentool.nudgy.ui.theme.NudgyCanvas
 import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
 import com.nextgentool.nudgy.ui.theme.NudgyMuted
 import com.nextgentool.nudgy.ui.theme.NudgyTokens
@@ -74,14 +81,29 @@ import com.nextgentool.nudgy.ui.viewmodel.HabitViewModel
  * button. The section stays where it lives, inside Today — there is
  * no standalone Habits screen and no backbar is added.
  *
+ * Sprint 7 (Habits data) — the "This week" dots card is wired now:
+ * one row per habit (same order as the habit rows) with 7 dots
+ * Mon..Sun — done = that local date is in the habit's real
+ * check-in dates (carried by HabitStreak.thisWeekCheckInDates from
+ * getHabitsWithStreaks, the same read that computes the streaks),
+ * today marked with a teal ring, future days plain. Dots are never
+ * derived from a streak count: a 3-day streak lights exactly the 3
+ * days checked in, no more.
+ *
  * DISCLOSED DEVIATIONS (data, not design):
- * - No "This week" dots card: the week dots need per-day check-in
- *   dates, and the UI model (HabitStreak) carries only the computed
- *   counts (currentStreak / longestStreak / checkedInToday) — the
- *   raw dates exist in the repository (getCheckInDates) but no flow
- *   carries them into HabitUiState. Deriving 7 dots from a single
- *   streak count would fabricate per-day data, so the card is left
- *   out. Wiring it needs a data task (repository + ViewModel).
+ * - FOOTNOTE DROPPED: the prototype's "One missed day does not
+ *   break a streak if you are back the next day" contradicts the
+ *   established model — spec §5 Q6=(a), HabitStreakUseCase KDoc: NO
+ *   grace day, a miss yesterday means the streak is 0. Showing the
+ *   footnote would promise behaviour the app does not have, so it
+ *   is left out entirely (not reworded into a softer promise).
+ * - PLACEMENT: the card sits below the habit rows, at the bottom
+ *   of the section. The brief's "above the create field" clause
+ *   assumed the create field sits below the rows (prototype order:
+ *   list → card → button), but in the app the create field +
+ *   button are at the TOP (PR #139 deviation) — there is nothing
+ *   between the rows and the create field, so below the rows is
+ *   the only place the card can go.
  * - No schedule line under the habit name: habits are title-only
  *   (HabitEntity has no schedule), so the prototype's "Every day ·
  *   Evening" / "Weekdays" lines have no data. The tiny line under
@@ -216,6 +238,18 @@ fun HabitsSectionContent(
                         onCancelDelete = onCancelDelete
                     )
                 }
+            }
+            // "This week" dots (Sprint 7 Habits data) — below the
+            // habit rows, hidden when there is nothing to show (the
+            // hide-when-empty precedent) or when the state carries
+            // no full week (a fabricated state must not render a
+            // partial card).
+            if (!state.isLoading && state.habits.isNotEmpty() && state.weekDates.size == 7) {
+                HabitWeekCard(
+                    habits = state.habits,
+                    weekDates = state.weekDates,
+                    todayDate = state.todayDate
+                )
             }
         }
     }
@@ -390,3 +424,130 @@ private fun streakStatusLabel(streak: HabitStreak): String {
     }
     return if (streak.longestStreak > 0) "$base · Best ${streak.longestStreak}" else base
 }
+
+/**
+ * Sprint 7 (Habits data) — the prototype's "This week" card: one
+ * row per habit (same order as the habit rows) with 7 dots Mon..Sun.
+ * The dots render REAL check-in dates only
+ * (HabitStreak.thisWeekCheckInDates) — never the streak count. The
+ * prototype's grace-day footnote is deliberately NOT here (see the
+ * file KDoc: it contradicts the no-grace-day rule).
+ */
+@Composable
+private fun HabitWeekCard(
+    habits: List<HabitStreak>,
+    weekDates: List<String>,
+    todayDate: String
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = NudgyCanvas,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("habit_week_card")
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "This week",
+                fontSize = 15.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = NudgyCharcoal
+            )
+            habits.forEach { habit ->
+                HabitWeekRow(habit = habit, weekDates = weekDates, todayDate = todayDate)
+            }
+        }
+    }
+}
+
+@Composable
+private fun HabitWeekRow(
+    habit: HabitStreak,
+    weekDates: List<String>,
+    todayDate: String
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("habit_week_row_${habit.habit.id}")
+    ) {
+        Text(
+            text = habit.habit.title,
+            fontSize = 14.sp,
+            color = NudgyMuted,
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 8.dp)
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            weekDates.forEachIndexed { index, date ->
+                HabitWeekDot(
+                    habitId = habit.habit.id,
+                    index = index,
+                    // A future day is plain, never done: a date in
+                    // the set that lies after today cannot be a real
+                    // check-in for this week.
+                    done = date in habit.thisWeekCheckInDates && date <= todayDate,
+                    isToday = date == todayDate
+                )
+            }
+        }
+    }
+}
+
+/** One 22dp week dot (prototype .weekdot): teal when done, a teal ring on today. */
+@Composable
+private fun HabitWeekDot(
+    habitId: String,
+    index: Int,
+    done: Boolean,
+    isToday: Boolean
+) {
+    val dayName = WEEK_DAY_NAMES[index]
+    val description = when {
+        done && isToday -> "$dayName, done, today"
+        done -> "$dayName, done"
+        isToday -> "$dayName, today"
+        else -> "$dayName, not done"
+    }
+    Box(
+        modifier = Modifier
+            .size(22.dp)
+            .background(
+                color = if (done) {
+                    colorResource(R.color.nudgy_teal)
+                } else {
+                    colorResource(R.color.nudgy_track)
+                },
+                shape = CircleShape
+            )
+            .then(
+                if (isToday) {
+                    Modifier.border(2.dp, colorResource(R.color.nudgy_teal), CircleShape)
+                } else {
+                    Modifier
+                }
+            )
+            .semantics { contentDescription = description }
+            .testTag("habit_week_dot_${habitId}_$index"),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = WEEK_DAY_LETTERS[index],
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (done) Color.White else NudgyMuted
+        )
+    }
+}
+
+/** Mon..Sun, matching weekDateStrings order (Monday first). */
+private val WEEK_DAY_LETTERS = listOf("M", "T", "W", "T", "F", "S", "S")
+private val WEEK_DAY_NAMES = listOf(
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"
+)

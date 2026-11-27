@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -35,9 +36,14 @@ import org.robolectric.annotation.Config
  * Sprint 7 — the streak is split across two nodes (a chip with the
  * short count + a status line under the name), the intro is the
  * prototype-verbatim line, and the create action is the soft
- * "+ New habit" block button (same habit_add callback). The
- * "This week" dots card has no data source yet (see
- * HabitsSection.kt KDoc), so no test asserts it.
+ * "+ New habit" block button (same habit_add callback).
+ *
+ * Sprint 7 (Habits data) — the "This week" dots card is wired
+ * (HabitStreak.thisWeekCheckInDates + HabitUiState.weekDates /
+ * todayDate): dots assert their day state by contentDescription
+ * ("Monday, done" / "Wednesday, today" / "Thursday, not done"),
+ * and one test pins that the dots follow the real dates, never the
+ * streak count.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -51,13 +57,23 @@ class HabitsSectionTest {
         title: String = "Drink water",
         currentStreak: Int = 3,
         longestStreak: Int = 5,
-        checkedInToday: Boolean = true
+        checkedInToday: Boolean = true,
+        thisWeekCheckInDates: Set<String> = emptySet()
     ) = HabitStreak(
         habit = HabitEntity(id = id, userId = "user-1", title = title),
         currentStreak = currentStreak,
         longestStreak = longestStreak,
-        checkedInToday = checkedInToday
+        checkedInToday = checkedInToday,
+        thisWeekCheckInDates = thisWeekCheckInDates
     )
+
+    // Pinned week: Mon 2026-11-16 .. Sun 2026-11-22, today Wed
+    // 2026-11-18 (2026-11-16 is a Monday — DayDatesTest).
+    private fun pinnedWeek(): List<String> = listOf(
+        "2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19",
+        "2026-11-20", "2026-11-21", "2026-11-22"
+    )
+    private val pinnedToday = "2026-11-18"
 
     private fun setContent(
         state: HabitUiState,
@@ -91,8 +107,16 @@ class HabitsSectionTest {
         }
     }
 
-    private fun loadedState(habits: List<HabitStreak> = emptyList()) =
-        HabitUiState(habits = habits, isLoading = false)
+    private fun loadedState(
+        habits: List<HabitStreak> = emptyList(),
+        weekDates: List<String> = emptyList(),
+        todayDate: String = ""
+    ) = HabitUiState(
+        habits = habits,
+        isLoading = false,
+        weekDates = weekDates,
+        todayDate = todayDate
+    )
 
     @Test
     fun `empty state shows the add field and the no-habits text`() {
@@ -276,5 +300,74 @@ class HabitsSectionTest {
 
         composeRule.onNodeWithTag("habit_delete_habit-1").performClick()
         assertEquals("habit-1", requested?.habit?.id)
+    }
+
+    // ------------------------------------------------- Sprint 7 (Habits data)
+
+    @Test
+    fun `week card shows done, today and future dots`() {
+        // Mon + Tue checked in, today is Wed (not done yet), Thu–Sun
+        // are future days. Note: the habit name appears twice now
+        // (habit row + week row), so pin nodes by tag, never by text.
+        setContent(
+            loadedState(
+                habits = listOf(
+                    habit(
+                        checkedInToday = false,
+                        thisWeekCheckInDates = setOf("2026-11-16", "2026-11-17")
+                    )
+                ),
+                weekDates = pinnedWeek(),
+                todayDate = pinnedToday
+            )
+        )
+
+        composeRule.onNodeWithTag("habit_week_card").assertExists()
+        composeRule.onNodeWithTag("habit_week_row_habit-1").assertExists()
+        composeRule.onNodeWithText("This week").assertExists()
+        composeRule.onNodeWithContentDescription("Monday, done").assertExists()
+        composeRule.onNodeWithContentDescription("Tuesday, done").assertExists()
+        composeRule.onNodeWithContentDescription("Wednesday, today").assertExists()
+        composeRule.onNodeWithContentDescription("Thursday, not done").assertExists()
+        composeRule.onNodeWithContentDescription("Friday, not done").assertExists()
+        composeRule.onNodeWithContentDescription("Saturday, not done").assertExists()
+        composeRule.onNodeWithContentDescription("Sunday, not done").assertExists()
+        composeRule.onNodeWithContentDescription("Monday, done, today").assertDoesNotExist()
+    }
+
+    @Test
+    fun `week card is hidden when there are no habits`() {
+        setContent(loadedState(weekDates = pinnedWeek(), todayDate = pinnedToday))
+
+        composeRule.onNodeWithTag("habit_week_card").assertDoesNotExist()
+    }
+
+    @Test
+    fun `dots follow the real dates, never the streak count`() {
+        // Deliberately inconsistent on purpose: the streak count is
+        // 3 but only Monday is checked in this week — if the dots
+        // were derived from the count, three dots would light up.
+        setContent(
+            loadedState(
+                habits = listOf(
+                    habit(
+                        currentStreak = 3,
+                        longestStreak = 5,
+                        checkedInToday = false,
+                        thisWeekCheckInDates = setOf("2026-11-16")
+                    )
+                ),
+                weekDates = pinnedWeek(),
+                todayDate = pinnedToday
+            )
+        )
+
+        // The chip still shows the count (3-day streak) — only the
+        // dots must follow the dates.
+        composeRule.onNodeWithText("3-day streak").assertExists()
+        composeRule.onNodeWithContentDescription("Monday, done").assertExists()
+        composeRule.onNodeWithContentDescription("Tuesday, done").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Wednesday, done").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Wednesday, today").assertExists()
     }
 }

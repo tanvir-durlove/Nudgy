@@ -263,6 +263,28 @@ class FocusHabitRepositoryTest {
     }
 
     @Test
+    fun `habits with streaks carry only this weeks check-in dates`() = runTest {
+        // Sprint 7 (Habits data) — the week dots ride the same read
+        // that computes the streaks: Mon–Wed of the week containing
+        // Wed 2026-11-18, and NOT the previous Friday's check-in.
+        val habit = repository.createHabit(userId, "Read", now = at(2026, 11, 13, 9))
+        repository.checkIn(habit.id, now = at(2026, 11, 13, 10))
+        repository.checkIn(habit.id, now = at(2026, 11, 16, 10))
+        repository.checkIn(habit.id, now = at(2026, 11, 17, 10))
+        repository.checkIn(habit.id, now = at(2026, 11, 18, 10))
+        val rows = repository.getHabitsWithStreaks(userId, now = at(2026, 11, 18, 12))
+        assertEquals(1, rows.size)
+        val row = rows.single()
+        assertEquals(
+            setOf("2026-11-16", "2026-11-17", "2026-11-18"),
+            row.thisWeekCheckInDates
+        )
+        // The streak math is untouched by the new field.
+        assertEquals(3, row.currentStreak)
+        assertTrue(row.checkedInToday)
+    }
+
+    @Test
     fun `midnight boundary - check-ins either side of local midnight are two days`() = runTest {
         // Built from the EFFECTIVE default zone at runtime: whether
         // Robolectric honours setDefault (Dhaka) or keeps its own zone,
