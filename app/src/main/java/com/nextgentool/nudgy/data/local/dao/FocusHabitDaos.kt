@@ -67,6 +67,33 @@ interface FocusSessionDao {
 
     @Query("SELECT COUNT(*) FROM focus_sessions WHERE userId = :userId AND completed = 1 AND kind = 'FOCUS' AND startedAtEpochMillis >= :since")
     suspend fun getCompletedFocusCountSince(userId: String, since: Long): Int
+
+    /**
+     * Sprint 7 (Focus data) — completed FOCUS sessions whose session
+     * started in [start, end). The week completion % needs the same
+     * half-open window the minute queries use, not an open-ended
+     * "since" (a session started next week must not count).
+     */
+    @Query("SELECT COUNT(*) FROM focus_sessions WHERE userId = :userId AND completed = 1 AND kind = 'FOCUS' AND startedAtEpochMillis >= :start AND startedAtEpochMillis < :end")
+    suspend fun getCompletedFocusCountInRange(userId: String, start: Long, end: Long): Int
+
+    /**
+     * Sprint 7 (Focus data) — FOCUS sessions that ENDED in
+     * [start, end) but did not complete (cancelled / superseded).
+     * Together with [getCompletedFocusCountInRange] this is the
+     * denominator of the week completion %: completed ÷ all ended.
+     */
+    @Query("SELECT COUNT(*) FROM focus_sessions WHERE userId = :userId AND completed = 0 AND kind = 'FOCUS' AND endedAtEpochMillis IS NOT NULL AND startedAtEpochMillis >= :start AND startedAtEpochMillis < :end")
+    suspend fun getEndedNotCompletedFocusCountInRange(userId: String, start: Long, end: Long): Int
+
+    /**
+     * Sprint 7 (Focus data) — the newest ENDED FOCUS sessions
+     * (completed or stopped early), newest first. The Recent
+     * sessions card takes the first 3; a still-running session has
+     * a null endedAt and never appears here.
+     */
+    @Query("SELECT * FROM focus_sessions WHERE userId = :userId AND kind = 'FOCUS' AND endedAtEpochMillis IS NOT NULL ORDER BY startedAtEpochMillis DESC LIMIT :limit")
+    suspend fun getEndedFocusSessions(userId: String, limit: Int): List<FocusSessionEntity>
 }
 
 /**

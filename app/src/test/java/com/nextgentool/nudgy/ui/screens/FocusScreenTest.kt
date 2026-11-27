@@ -2,6 +2,7 @@ package com.nextgentool.nudgy.ui.screens
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -12,6 +13,7 @@ import com.nextgentool.nudgy.data.model.FocusSessionKind
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
 import com.nextgentool.nudgy.ui.viewmodel.FocusUiState
 import com.nextgentool.nudgy.ui.viewmodel.PomodoroPhase
+import com.nextgentool.nudgy.ui.viewmodel.RecentFocusSession
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -31,9 +33,11 @@ import org.robolectric.annotation.Config
  *
  * Sprint 7 — the timer card (pill, 64sp timerface, "Focusing on:"
  * line, centered buttons) and the "Focus statistics" statbox are
- * asserted here; the week / % / streak statboxes and the Recent
- * sessions card have no data source yet (see FocusScreen.kt KDoc),
- * so no test asserts them.
+ * asserted here.
+ *
+ * Sprint 7 (Focus data) — the week / % / streak statboxes and the
+ * Recent sessions card are wired now (see FocusScreen.kt KDoc), so
+ * they are asserted here too.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -247,5 +251,61 @@ class FocusScreenTest {
         composeRule.onNodeWithText("Break over — ready to focus?").assertIsDisplayed()
         composeRule.onNodeWithTag("focus_start").assertIsDisplayed()
         composeRule.onNodeWithTag("focus_start_break").assertDoesNotExist()
+    }
+
+    // ------------------------------------------------- Sprint 7 (Focus data)
+
+    @Test
+    fun `statistics grid shows the week, completion and streak statboxes`() {
+        setContent(
+            idleState().copy(
+                weekFocusMinutes = 380,
+                weekCompletionPercent = 92,
+                focusStreakDays = 4
+            )
+        )
+
+        composeRule.onNodeWithTag("focus_week_statbox").assertExists()
+        composeRule.onNodeWithText("6h 20m").assertExists()
+        composeRule.onNodeWithText("Focused this week").assertExists()
+        composeRule.onNodeWithTag("focus_completion_statbox").assertExists()
+        composeRule.onNodeWithText("92%").assertExists()
+        composeRule.onNodeWithText("Sessions completed").assertExists()
+        composeRule.onNodeWithTag("focus_streak_statbox").assertExists()
+        composeRule.onNodeWithText("4 days").assertExists()
+        composeRule.onNodeWithText("Focus streak").assertExists()
+    }
+
+    @Test
+    fun `recent sessions card shows the newest rows`() {
+        setContent(
+            idleState().copy(
+                recentSessions = listOf(
+                    RecentFocusSession("Today", "Submit assignment", 25, true),
+                    RecentFocusSession("Today", "Reply to client emails", 25, true),
+                    RecentFocusSession("Yesterday", "Focus study session", 18, false)
+                )
+            )
+        )
+
+        composeRule.onNodeWithTag("focus_recent_sessions").assertExists()
+        composeRule.onNodeWithText("Recent sessions").assertExists()
+        composeRule.onNodeWithText("Today · Submit assignment").assertExists()
+        composeRule.onNodeWithText("Today · Reply to client emails").assertExists()
+        // "25 min · Done" appears on TWO rows, so pin the count.
+        assertEquals(
+            2,
+            composeRule.onAllNodesWithText("25 min · Done").fetchSemanticsNodes().size
+        )
+        composeRule.onNodeWithText("Yesterday · Focus study session").assertExists()
+        composeRule.onNodeWithText("18 min · Stopped early").assertExists()
+    }
+
+    @Test
+    fun `empty week shows a dash for completion and no recent card`() {
+        setContent(idleState())
+
+        composeRule.onNodeWithText("–").assertExists()
+        composeRule.onNodeWithTag("focus_recent_sessions").assertDoesNotExist()
     }
 }

@@ -10,6 +10,7 @@ import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.FocusSessionKind
 import com.nextgentool.nudgy.data.repository.FocusHabitRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.domain.recentDayLabel
 import com.nextgentool.nudgy.domain.startOfDayMillis
 import com.nextgentool.nudgy.focus.PomodoroAlarm
 import com.nextgentool.nudgy.focus.PomodoroCycle
@@ -51,9 +52,31 @@ data class FocusUiState(
     val selectedTaskTitle: String? = null,
     val todaysFocusMinutes: Int = 0,
     val completedFocusToday: Int = 0,
+    // Sprint 7 (Focus data) — the prototype's other 3 statboxes +
+    // the Recent sessions card. [weekCompletionPercent] is null when
+    // nothing ended this week yet (the screen shows "–").
+    val weekFocusMinutes: Int = 0,
+    val weekCompletionPercent: Int? = null,
+    val focusStreakDays: Int = 0,
+    val recentSessions: List<RecentFocusSession> = emptyList(),
     val nextBreakMinutes: Int = PomodoroCycle.SHORT_BREAK_MINUTES,
     val justFinishedKind: FocusSessionKind? = null,
     val availableTasks: List<TaskEntity> = emptyList()
+)
+
+/**
+ * Sprint 7 (Focus data) — one row of the Recent sessions card:
+ * the day label (Today / Yesterday / date), the task title
+ * ("Standalone focus" when the session had no task), the minutes
+ * the session actually ran (Done → the planned minutes; Stopped
+ * early → the elapsed minutes, rounded down), and whether the
+ * timer ran to its end.
+ */
+data class RecentFocusSession(
+    val dayLabel: String,
+    val title: String,
+    val durationMinutes: Int,
+    val completed: Boolean
 )
 
 /**
@@ -364,10 +387,40 @@ class FocusViewModel @Inject constructor(
     private suspend fun refreshStats(now: Long = System.currentTimeMillis()) {
         val minutes = focusRepository.getFocusMinutesForDay(currentUserId, now)
         val count = focusRepository.getCompletedFocusCountSince(currentUserId, startOfDayMillis(now))
+        // Sprint 7 (Focus data) — the week stats load HERE, inside
+        // this same function (the single coroutine sequenced after
+        // restoreRunningSession in init): never a second concurrent
+        // refresh — the S5-5 init race is the reason restore-then-
+        // refresh is one coroutine. finishCurrentSession and
+        // restoreRunningSession call this same function, so the new
+        // fields refresh at the same points, for free.
+        val weekMinutes = focusRepository.getFocusMinutesForWeek(currentUserId, now)
+        val weekCompletion = focusRepository.getFocusWeekCompletionPercent(currentUserId, now)
+        val streak = focusRepository.getFocusStreakDays(currentUserId, now)
+        val recent = focusRepository.getRecentEndedFocusSessions(currentUserId, 3).map { session ->
+            RecentFocusSession(
+                dayLabel = recentDayLabel(session.startedAtEpochMillis, now),
+                title = session.taskId?.let { taskTitle(it) } ?: "Standalone focus",
+                durationMinutes = if (session.completed) {
+                    session.durationMinutes
+                } else {
+                    // Stopped early: the minutes actually elapsed
+                    // (started → ended, rounded down, never below 0).
+                    val endedAt = session.endedAtEpochMillis ?: session.startedAtEpochMillis
+                    ((endedAt - session.startedAtEpochMillis) / 60_000L)
+                        .coerceAtLeast(0L).toInt()
+                },
+                completed = session.completed
+            )
+        }
         _uiState.update {
             it.copy(
                 todaysFocusMinutes = minutes,
                 completedFocusToday = count,
+                weekFocusMinutes = weekMinutes,
+                weekCompletionPercent = weekCompletion,
+                focusStreakDays = streak,
+                recentSessions = recent,
                 nextBreakMinutes = PomodoroCycle.breakMinutesAfter(count)
             )
         }
