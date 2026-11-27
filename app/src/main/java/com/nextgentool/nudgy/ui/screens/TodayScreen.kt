@@ -827,13 +827,22 @@ fun TodayScreen(
         // Sprint 4-2 — Habits (spec §5, Q10=(a)): a section inside
         // Today, below the tab content, on either tab. Sprint 7-2b —
         // the Box measures the section's Y offset inside this Column
-        // so the Habits tile can scroll to it; the guard keeps a
-        // remeasure from re-triggering composition in a loop.
+        // so the Habits tile can scroll to it. Compose 1.7 (BOM
+        // 2024.09.00) has NO positionInParent(), so the offset is
+        // derived from the root positions instead: the Box's root Y
+        // minus its parent Column's root Y, plus the current scroll
+        // — the root position moves up as the page scrolls, so the
+        // raw difference alone would shrink while scrolling. The
+        // guard keeps a remeasure from re-triggering composition
+        // in a loop.
         habitViewModel?.let { habitVm ->
             Spacer(modifier = Modifier.height(24.dp))
             Box(
                 modifier = Modifier.onGloballyPositioned { coordinates ->
-                    val y = coordinates.positionInParent().y.roundToInt()
+                    val parentY = coordinates.parentLayoutCoordinates
+                        ?.positionInRoot()?.y ?: 0f
+                    val y = (coordinates.positionInRoot().y - parentY +
+                        scrollState.value).roundToInt()
                     if (habitsOffsetY != y) habitsOffsetY = y
                 }
             ) {
