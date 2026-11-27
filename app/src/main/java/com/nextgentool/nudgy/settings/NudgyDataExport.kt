@@ -99,7 +99,7 @@ data class NudgyDataExport(
     }
 
     companion object {
-        /** The only schema version this build writes or reads. */
+        /** The schema version this build writes; older versions still read (v1 files read with empty tags). */
         const val CURRENT_SCHEMA_VERSION: Int = 2
 
         fun fromJson(json: String): NudgyDataExport? = try {

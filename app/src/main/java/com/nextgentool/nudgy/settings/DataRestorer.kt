@@ -98,7 +98,7 @@ object DataRestorer {
         val tags = taskRepository.restoreTags(
             export.tags.map { it.copy(userId = userId) }
         )
-        val taskTags = taskRepository.restoreTaskTags(export.taskTags)
+        val taskTags = taskRepository.restoreTaskTags(userId, export.taskTags)
         RestoreSummary(
             tasks = tasks,
             schedules = schedules,

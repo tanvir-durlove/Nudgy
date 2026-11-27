@@ -378,6 +378,45 @@ class DataRestoreTest {
     }
 
     @Test
+    fun `a link to another user's tag is skipped, never inserted`() = runTest {
+        db.tagDao().insertTag(tag(id = "tag-shared", userId = "other-user", name = "Other name"))
+        val json = exportJson(
+            tasks = listOf(task()),
+            schedules = emptyList(),
+            memories = emptyList(),
+            tags = listOf(tag(id = "tag-shared", name = "My name")),
+            taskTags = listOf(TaskTagCrossRef("task-1", "tag-shared"))
+        )
+
+        val outcome = restore(json) as RestoreOutcome.Restored
+
+        assertEquals(0, outcome.summary.tags.inserted)
+        assertEquals(1, outcome.summary.tags.skipped)
+        assertEquals(0, outcome.summary.taskTags.inserted)
+        assertEquals(1, outcome.summary.taskTags.skipped)
+        assertTrue(db.tagDao().getCrossRefsForTasks(listOf("task-1")).isEmpty())
+    }
+
+    @Test
+    fun `a link to another user's task is skipped, never inserted`() = runTest {
+        db.taskDao().insertTask(task(id = "task-1", userId = "other-user"))
+        val json = exportJson(
+            tasks = emptyList(),
+            schedules = emptyList(),
+            memories = emptyList(),
+            tags = listOf(tag()),
+            taskTags = listOf(TaskTagCrossRef("task-1", "tag-1"))
+        )
+
+        val outcome = restore(json) as RestoreOutcome.Restored
+
+        assertEquals(1, outcome.summary.tags.inserted)
+        assertEquals(0, outcome.summary.taskTags.inserted)
+        assertEquals(1, outcome.summary.taskTags.skipped)
+        assertTrue(db.tagDao().getCrossRefsForTasks(listOf("task-1")).isEmpty())
+    }
+
+    @Test
     fun `a v1 file restores tasks with empty tags`() = runTest {
         // A genuine v1 document: schemaVersion 1, no tags keys.
         val v1Json = """{"schemaVersion":1,"exportedAtEpochMillis":1700002000000,"tasks":[{"id":"task-v1-1","userId":"test-user-1","title":"Old task"}],"schedules":[],"memories":[]}"""

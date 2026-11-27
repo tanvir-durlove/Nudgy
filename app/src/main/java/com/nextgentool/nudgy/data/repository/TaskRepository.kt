@@ -886,8 +886,15 @@ class TaskRepository @Inject constructor(
      * foreign key would crash the restore. A link that already exists
      * is skipped. Never [TagDao.setTagsForTask] here: it would delete
      * the task's existing links first.
+     *
+     * Per-user scoping: a link has no userId of its own, so BOTH ends
+     * are checked against the CALLER ([userId]) — the task must be the
+     * caller's ([TaskDao.getTaskByIdForUser]) and the tag must be the
+     * caller's ([TagDao.getTagById]). A link to another user's tag (or
+     * to another user's task) is skipped, never inserted: on a shared
+     * device one user's rows must never leak into another's list.
      */
-    suspend fun restoreTaskTags(crossRefs: List<TaskTagCrossRef>): RestoreCounts =
+    suspend fun restoreTaskTags(userId: String, crossRefs: List<TaskTagCrossRef>): RestoreCounts =
         withContext(Dispatchers.IO) {
             var inserted = 0
             var skipped = 0
@@ -896,8 +903,8 @@ class TaskRepository @Inject constructor(
                     skipped++
                     continue
                 }
-                if (taskDao.getTaskById(ref.taskId) == null ||
-                    tagDao.getTagByIdAnyUser(ref.tagId) == null
+                if (taskDao.getTaskByIdForUser(userId, ref.taskId) == null ||
+                    tagDao.getTagById(userId, ref.tagId) == null
                 ) {
                     skipped++
                     continue
