@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.data.model.FocusSessionKind
+import com.nextgentool.nudgy.domain.formatMinutes
 import com.nextgentool.nudgy.focus.PomodoroCycle
 import com.nextgentool.nudgy.ui.theme.NudgyCanvas
 import com.nextgentool.nudgy.ui.theme.NudgyCard
@@ -78,15 +79,14 @@ import com.nextgentool.nudgy.ui.viewmodel.PomodoroPhase
  * surfaces); the buttons follow the prototype (teal primary,
  * teal-soft Pause, ghost Cancel).
  *
- * DISCLOSED DEVIATION (data, not design): the prototype shows 4
- * statboxes (today / this week / completion % / streak) and a
- * Recent sessions card, but FocusUiState carries ONLY today's
- * minutes + today's session count — no week minutes, no completion
- * %, no streak, no recent-sessions list anywhere in the app (the
- * focus_sessions table has no recent-list query). So the statistics
- * section shows today's statbox only, and there is no Recent
- * sessions card. Wiring the missing stats needs a data task
- * (DAO + repository + ViewModel), not this design-only micro-task.
+ * Sprint 7 (Focus data) — the statistics section is now fully
+ * wired: the prototype's 4 statboxes (today / this week /
+ * completion % / streak) + the Recent sessions card, all from
+ * FocusUiState. CORRECTION to the old KDoc here (it said "the
+ * focus_sessions table has no recent-list query"): that was wrong
+ * — getCompletedFocusSessionsSince existed all along; what was
+ * missing was the ENDED-sessions query + the wiring, both added
+ * by the Focus-data task (DAO + repository + ViewModel).
  */
 @Composable
 fun FocusScreen(
@@ -310,8 +310,9 @@ fun FocusScreenContent(
             }
         }
         Spacer(modifier = Modifier.height(22.dp))
-        // Focus statistics — today's statbox only (see the file KDoc:
-        // week / % / streak have no data source in FocusUiState).
+        // Focus statistics — the prototype's 2-column statgrid
+        // (Sprint 7 design; wired with real data by the Focus-data
+        // task: week minutes, completion %, streak, recent sessions).
         Text(
             text = "Focus statistics",
             fontSize = 17.sp,
@@ -320,27 +321,89 @@ fun FocusScreenContent(
             modifier = Modifier.testTag("focus_statistics_title")
         )
         Spacer(modifier = Modifier.height(10.dp))
-        Surface(
-            shape = NudgyTokens.cardRadius,
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("focus_today_statbox")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "${state.todaysFocusMinutes} min",
-                    fontSize = 26.sp,
-                    fontWeight = FontWeight.Black,
-                    color = NudgyCharcoal,
-                    modifier = Modifier.testTag("focus_today_minutes")
-                )
-                Text(
-                    text = "Focused today · ${state.completedFocusToday} sessions",
-                    fontSize = 13.sp,
-                    color = NudgyMuted
-                )
+            FocusStatBox(
+                value = "${state.todaysFocusMinutes} min",
+                label = "Focused today · ${state.completedFocusToday} sessions",
+                modifier = Modifier.weight(1f).testTag("focus_today_statbox"),
+                valueTestTag = "focus_today_minutes"
+            )
+            FocusStatBox(
+                value = formatMinutes(state.weekFocusMinutes),
+                label = "Focused this week",
+                modifier = Modifier.weight(1f).testTag("focus_week_statbox"),
+                valueTestTag = "focus_week_minutes"
+            )
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            FocusStatBox(
+                // Null = nothing ended this week yet: "–", never a
+                // fabricated 0% or 100% (Stats bar-chart precedent).
+                value = state.weekCompletionPercent?.let { "$it%" } ?: "–",
+                label = "Sessions completed",
+                modifier = Modifier.weight(1f).testTag("focus_completion_statbox"),
+                valueTestTag = "focus_completion_percent"
+            )
+            FocusStatBox(
+                value = "${state.focusStreakDays} days",
+                label = "Focus streak",
+                modifier = Modifier.weight(1f).testTag("focus_streak_statbox"),
+                valueTestTag = "focus_streak_days"
+            )
+        }
+        // Recent sessions — hidden when there are none yet (the
+        // hide-when-empty precedent: the Timeline section).
+        if (state.recentSessions.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(14.dp))
+            Surface(
+                shape = NudgyTokens.cardRadius,
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("focus_recent_sessions")
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Recent sessions",
+                        fontSize = 15.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = NudgyCharcoal
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    state.recentSessions.forEach { session ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${session.dayLabel} · ${session.title}",
+                                fontSize = 14.sp,
+                                color = NudgyMuted,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 8.dp)
+                            )
+                            Text(
+                                text = "${formatMinutes(session.durationMinutes)} · " +
+                                    if (session.completed) "Done" else "Stopped early",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = NudgyCharcoal
+                            )
+                        }
+                    }
+                }
             }
         }
         // Task picker (Q3=(a)) — only while idle; a running session
@@ -375,6 +438,41 @@ fun FocusScreenContent(
 private fun progressOf(state: FocusUiState): Float {
     if (state.totalMillis <= 0L) return 0f
     return (state.remainingMillis.toFloat() / state.totalMillis.toFloat()).coerceIn(0f, 1f)
+}
+
+/**
+ * Sprint 7 (Focus data) — one prototype .statbox: big value + muted
+ * label on a white 22dp card. The testTag lives on the Surface; the
+ * value's own tag (when given) lives on the value Text.
+ */
+@Composable
+private fun FocusStatBox(
+    value: String,
+    label: String,
+    modifier: Modifier = Modifier,
+    valueTestTag: String? = null
+) {
+    Surface(
+        shape = NudgyTokens.cardRadius,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = modifier
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = value,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Black,
+                color = NudgyCharcoal,
+                modifier = if (valueTestTag != null) Modifier.testTag(valueTestTag) else Modifier
+            )
+            Text(
+                text = label,
+                fontSize = 13.sp,
+                color = NudgyMuted
+            )
+        }
+    }
 }
 
 @Composable

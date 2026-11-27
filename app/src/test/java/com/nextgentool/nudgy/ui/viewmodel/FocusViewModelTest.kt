@@ -12,6 +12,7 @@ import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.model.FocusSessionKind
 import com.nextgentool.nudgy.data.repository.FocusHabitRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
+import com.nextgentool.nudgy.domain.startOfDayMillis
 import com.nextgentool.nudgy.focus.PomodoroAlarm
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -483,5 +484,91 @@ class FocusViewModelTest {
             state.availableTasks.any { it.title == "Signed-in task" }
         }
         assertFalse(signedInState.availableTasks.any { it.title == "Guest task" })
+    }
+
+    // ---- Sprint 7 (Focus data) ----
+
+    @Test
+    fun `refreshStats loads the week stats, streak and recent sessions`() = vmTest {
+        val now = System.currentTimeMillis()
+        // Day-relative pins (never "now minus N hours" — those cross
+        // midnight when the test runs early): today 10:00 / 11:00 /
+        // 12:00, yesterday 10:00, eight days ago 10:00. A pin in the
+        // future (early-morning run) is harmless here — the week
+        // range, the streak dates and the recent ordering all key
+        // off calendar days, and every seeded session is ended, so
+        // restoreRunningSession finds nothing to resume.
+        val todayStart = startOfDayMillis(now)
+        val submitTask = taskRepository.createTask(userId, "Submit assignment")
+
+        // Today: two completed 25-minute sessions + one stopped early.
+        val sessionA = focusRepository.startSession(
+            userId, submitTask.id, 25, FocusSessionKind.FOCUS,
+            now = todayStart + 10 * 60 * 60 * 1000L
+        )
+        focusRepository.completeSession(
+            sessionA.id, todayStart + 10 * 60 * 60 * 1000L + 25 * 60_000L
+        )
+        val sessionB = focusRepository.startSession(
+            userId, null, 25, FocusSessionKind.FOCUS,
+            now = todayStart + 11 * 60 * 60 * 1000L
+        )
+        focusRepository.completeSession(
+            sessionB.id, todayStart + 11 * 60 * 60 * 1000L + 25 * 60_000L
+        )
+        val sessionC = focusRepository.startSession(
+            userId, null, 25, FocusSessionKind.FOCUS,
+            now = todayStart + 12 * 60 * 60 * 1000L
+        )
+        focusRepository.cancelSession(
+            sessionC.id, todayStart + 12 * 60 * 60 * 1000L + 5 * 60_000L
+        )
+        // Yesterday: one completed session.
+        val sessionD = focusRepository.startSession(
+            userId, null, 25, FocusSessionKind.FOCUS,
+            now = todayStart - 14 * 60 * 60 * 1000L
+        )
+        focusRepository.completeSession(
+            sessionD.id, todayStart - 14 * 60 * 60 * 1000L + 25 * 60_000L
+        )
+        // Eight days ago: completed, but outside this week — it must
+        // not count toward the week numbers.
+        val sessionE = focusRepository.startSession(
+            userId, null, 25, FocusSessionKind.FOCUS,
+            now = todayStart - 8 * 24 * 60 * 60 * 1000L + 10 * 60 * 60 * 1000L
+        )
+        focusRepository.completeSession(
+            sessionE.id,
+            todayStart - 8 * 24 * 60 * 60 * 1000L + 10 * 60 * 60 * 1000L + 25 * 60_000L
+        )
+
+        val viewModel = buildViewModel()
+        // Both fields land in the SAME refreshStats update, so one
+        // wait pins the whole new state (no partial-state race).
+        val state = viewModel.uiState.first {
+            it.weekFocusMinutes == 75 && it.recentSessions.size == 3
+        }
+
+        assertEquals(75, state.weekFocusMinutes)
+        // 3 completed ÷ 4 ended this week (the cancelled one counts).
+        assertEquals(75, state.weekCompletionPercent)
+        // Today + yesterday, both with a completed session.
+        assertEquals(2, state.focusStreakDays)
+        // Newest first: the stopped-early one, then the two completed.
+        assertEquals("Today", state.recentSessions[0].dayLabel)
+        assertEquals("Standalone focus", state.recentSessions[0].title)
+        assertEquals(5, state.recentSessions[0].durationMinutes)
+        assertFalse(state.recentSessions[0].completed)
+        assertEquals("Today", state.recentSessions[1].dayLabel)
+        assertEquals("Standalone focus", state.recentSessions[1].title)
+        assertEquals(25, state.recentSessions[1].durationMinutes)
+        assertTrue(state.recentSessions[1].completed)
+        assertEquals("Today", state.recentSessions[2].dayLabel)
+        assertEquals("Submit assignment", state.recentSessions[2].title)
+        assertEquals(25, state.recentSessions[2].durationMinutes)
+        assertTrue(state.recentSessions[2].completed)
+        // Today's own numbers still hold (the pre-existing behavior).
+        assertEquals(50, state.todaysFocusMinutes)
+        assertEquals(2, state.completedFocusToday)
     }
 }

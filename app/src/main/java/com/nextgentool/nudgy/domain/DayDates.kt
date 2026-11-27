@@ -58,6 +58,29 @@ fun dayLabel(epochMillis: Long): String =
     SimpleDateFormat("EEE, MMM d", Locale.getDefault()).format(epochMillis)
 
 /**
+ * Sprint 7 (Focus data) — "Today" / "Yesterday" / [dayLabel] for a
+ * past day, device-local. No established helper covered
+ * Today/Yesterday (SearchScreen's searchDayLabel is private and
+ * answers Today/Tomorrow instead), so this small pure function
+ * lives next to [dayLabel] and follows searchDayLabel's
+ * YEAR + DAY_OF_YEAR comparison. The date shape stays [dayLabel].
+ */
+fun recentDayLabel(epochMillis: Long, now: Long = System.currentTimeMillis()): String {
+    val today = Calendar.getInstance().apply { timeInMillis = now }
+    val day = Calendar.getInstance().apply { timeInMillis = epochMillis }
+    val sameDay = today.get(Calendar.YEAR) == day.get(Calendar.YEAR) &&
+        today.get(Calendar.DAY_OF_YEAR) == day.get(Calendar.DAY_OF_YEAR)
+    if (sameDay) return "Today"
+    val yesterday = Calendar.getInstance().apply {
+        timeInMillis = now
+        add(Calendar.DAY_OF_YEAR, -1)
+    }
+    val isYesterday = yesterday.get(Calendar.YEAR) == day.get(Calendar.YEAR) &&
+        yesterday.get(Calendar.DAY_OF_YEAR) == day.get(Calendar.DAY_OF_YEAR)
+    return if (isYesterday) "Yesterday" else dayLabel(epochMillis)
+}
+
+/**
  * Sprint 2-4 — strict "yyyy-MM-dd" → start-of-day millis (local),
  * or null when the string is not a real calendar date.
  *

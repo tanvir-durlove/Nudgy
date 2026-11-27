@@ -119,4 +119,25 @@ class DayDatesTest {
         assertEquals(5, dayIndexInWeek(millisOf(2026, Calendar.NOVEMBER, 21)))
         assertEquals(6, dayIndexInWeek(millisOf(2026, Calendar.NOVEMBER, 22)))
     }
+
+    // ------------------------------------------------------- Sprint 7 (Focus data)
+
+    @Test
+    fun `recentDayLabel says Today for today`() {
+        val now = millisOf(2026, Calendar.NOVEMBER, 18, 15)
+        assertEquals("Today", recentDayLabel(millisOf(2026, Calendar.NOVEMBER, 18, 9), now))
+    }
+
+    @Test
+    fun `recentDayLabel says Yesterday for yesterday`() {
+        val now = millisOf(2026, Calendar.NOVEMBER, 18, 15)
+        assertEquals("Yesterday", recentDayLabel(millisOf(2026, Calendar.NOVEMBER, 17, 9), now))
+    }
+
+    @Test
+    fun `recentDayLabel falls back to the date label`() {
+        val now = millisOf(2026, Calendar.NOVEMBER, 18, 15)
+        // 2026-11-16 is a Monday (see the dayIndexInWeek test above).
+        assertEquals("Mon, Nov 16", recentDayLabel(millisOf(2026, Calendar.NOVEMBER, 16, 9), now))
+    }
 }

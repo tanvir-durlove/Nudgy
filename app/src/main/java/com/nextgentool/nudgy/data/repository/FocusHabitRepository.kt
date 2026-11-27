@@ -9,6 +9,7 @@ import com.nextgentool.nudgy.data.model.FocusSessionKind
 import com.nextgentool.nudgy.domain.dateStringOf
 import com.nextgentool.nudgy.domain.startOfDayMillis
 import com.nextgentool.nudgy.domain.startOfWeekMillis
+import com.nextgentool.nudgy.domain.usecase.FocusStatsUseCase
 import com.nextgentool.nudgy.domain.usecase.HabitStreakUseCase
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +49,7 @@ class FocusHabitRepository @Inject constructor(
     private val focusDao = database.focusSessionDao()
     private val habitDao = database.habitDao()
     private val streakUseCase = HabitStreakUseCase()
+    private val focusStatsUseCase = FocusStatsUseCase(streakUseCase)
 
     // ---- Focus sessions (spec §4) ----
 
@@ -155,6 +157,48 @@ class FocusHabitRepository @Inject constructor(
 
     suspend fun getCompletedFocusCountSince(userId: String, since: Long): Int =
         withContext(Dispatchers.IO) { focusDao.getCompletedFocusCountSince(userId, since) }
+
+    /**
+     * Sprint 7 (Focus data) — the week completion % (completed ÷ all
+     * ENDED FOCUS sessions in the Mon–Sun week containing [now]).
+     * Null when nothing ended yet — the screen shows "–" (never a
+     * fabricated 0% or 100%). Same week as [getFocusMinutesForWeek],
+     * so the two numbers always agree about which week they cover.
+     */
+    suspend fun getFocusWeekCompletionPercent(
+        userId: String,
+        now: Long = System.currentTimeMillis()
+    ): Int? = withContext(Dispatchers.IO) {
+        val start = startOfWeekMillis(now)
+        val end = start + 7 * 24 * 60 * 60 * 1000L
+        val completed = focusDao.getCompletedFocusCountInRange(userId, start, end)
+        val endedNotCompleted = focusDao.getEndedNotCompletedFocusCountInRange(userId, start, end)
+        focusStatsUseCase.completionPercent(completed, endedNotCompleted)
+    }
+
+    /**
+     * Sprint 7 (Focus data) — the focus streak: consecutive days
+     * ending today-or-yesterday with ≥1 completed FOCUS session.
+     * Reads the last 366 days of completed sessions (a generous
+     * window — a run longer than that cannot be proven from a
+     * shorter one, and the streak walk stops at the first missing
+     * day anyway).
+     */
+    suspend fun getFocusStreakDays(
+        userId: String,
+        now: Long = System.currentTimeMillis()
+    ): Int = withContext(Dispatchers.IO) {
+        val since = now - 366L * 24 * 60 * 60 * 1000
+        val sessions = focusDao.getCompletedFocusSessionsSince(userId, since)
+        focusStatsUseCase.focusStreakDays(sessions.map { it.startedAtEpochMillis }, now)
+    }
+
+    /** Sprint 7 (Focus data) — the newest ENDED FOCUS sessions, newest first. */
+    suspend fun getRecentEndedFocusSessions(
+        userId: String,
+        limit: Int = 3
+    ): List<FocusSessionEntity> =
+        withContext(Dispatchers.IO) { focusDao.getEndedFocusSessions(userId, limit) }
 
     // ---- Habits (spec §5) ----
 
