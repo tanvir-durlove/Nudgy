@@ -45,6 +45,15 @@ sealed class NudgyRoute(val route: String) {
      * week's lists + focus minutes + streaks (spec §7, Q9=(a)). */
     data object WeeklyReview : NudgyRoute("weekly_review")
 
+    /** Statistics — NOT a bottom destination. No entry point wires
+     * here yet (Sprint 7 Stats micro-task): the prototype's natural
+     * one is the Settings "Statistics" row (Settings micro-task), or
+     * an S7-2b tile. "See full statistics" on Today still opens the
+     * Weekly Review (S4-4) — deliberately NOT rewired: it shares one
+     * callback with the progress ring and the Settings Weekly-review
+     * row, and the review is a real screen, not a placeholder. */
+    data object Stats : NudgyRoute("stats")
+
     /** Templates — NOT a bottom destination (reached from Tasks, S1-4). */
     data object Templates : NudgyRoute("templates")
 
@@ -68,10 +77,10 @@ sealed class NudgyRoute(val route: String) {
         // NudgyRoute.getRoute:22). A get() evaluates after init completes.
         val startDestination: NudgyRoute get() = Today
 
-        // Tasks, Templates, Focus, Matrix, WeeklyReview, Search and
+        // Tasks, Templates, Focus, Matrix, WeeklyReview, Stats, Search and
         // PrivacyPolicy are in `all` (so fromRoute resolves and no
         // bottom tab is highlighted there) but NOT in bottomNavEntries.
-        val all: List<NudgyRoute> get() = listOf(Today, Calendar, Chat, Groups, Settings, Tasks, Templates, Focus, Matrix, WeeklyReview, Search, PrivacyPolicy)
+        val all: List<NudgyRoute> get() = listOf(Today, Calendar, Chat, Groups, Settings, Tasks, Templates, Focus, Matrix, WeeklyReview, Stats, Search, PrivacyPolicy)
 
         fun fromRoute(route: String?): NudgyRoute =
             all.firstOrNull { it.route == route } ?: Today
