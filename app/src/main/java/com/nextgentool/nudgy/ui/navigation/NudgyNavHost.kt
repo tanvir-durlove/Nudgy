@@ -64,6 +64,7 @@ import com.nextgentool.nudgy.settings.SettingsPreferences
 import com.nextgentool.nudgy.ui.screens.CalendarScreen
 import com.nextgentool.nudgy.ui.screens.ChatScreen
 import com.nextgentool.nudgy.ui.screens.FocusScreen
+import com.nextgentool.nudgy.ui.screens.MatrixScreen
 import com.nextgentool.nudgy.ui.screens.GroupsScreen
 import com.nextgentool.nudgy.ui.screens.HELP_FEEDBACK_EMAIL
 import com.nextgentool.nudgy.ui.screens.OnboardingScreen
@@ -399,6 +400,22 @@ fun NudgyNavHost(
         // highlighted while it is open (see NudgyRoute.all).
         composable(NudgyRoute.Focus.route) {
             FocusScreen(onBackClick = { navController.popBackStack() })
+        }
+        // Sprint 7 — Priority matrix. NOT a bottom destination either:
+        // reached from the "More in Nudgy" tile on Today (S7-2b wires
+        // it); no tab is highlighted while it is open (see
+        // NudgyRoute.all). Tap on a task opens that task's detail
+        // sheet on the Tasks screen, through the same searchOpenTaskId
+        // deep-link the Search results use (S6-4 step 2e) — the sheet
+        // lives on Tasks, so the matrix stays a thin host.
+        composable(NudgyRoute.Matrix.route) {
+            MatrixScreen(
+                onBackClick = { navController.popBackStack() },
+                onTaskClick = { task ->
+                    searchOpenTaskId = task.id
+                    navController.navigate(NudgyRoute.Tasks.route)
+                }
+            )
         }
         // Sprint 4-4 — Weekly review. NOT a bottom destination either:
         // the same screen from the Today progress ring and from

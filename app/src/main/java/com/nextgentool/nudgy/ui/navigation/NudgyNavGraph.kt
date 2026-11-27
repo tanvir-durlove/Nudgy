@@ -35,6 +35,11 @@ sealed class NudgyRoute(val route: String) {
     /** Focus timer — NOT a bottom destination (reached from Today, S4-1). */
     data object Focus : NudgyRoute("focus")
 
+    /** Priority matrix — NOT a bottom destination (reached from the
+     * "More in Nudgy" tile on Today, Sprint 7 S7-2b; the screen itself
+     * lands in the Matrix micro-task). */
+    data object Matrix : NudgyRoute("matrix")
+
     /** Weekly review — NOT a bottom destination (reached from the Today
      * progress ring and from Settings, S4-4). The one report: the
      * week's lists + focus minutes + streaks (spec §7, Q9=(a)). */
@@ -63,10 +68,10 @@ sealed class NudgyRoute(val route: String) {
         // NudgyRoute.getRoute:22). A get() evaluates after init completes.
         val startDestination: NudgyRoute get() = Today
 
-        // Tasks, Templates, Focus, WeeklyReview, Search and
+        // Tasks, Templates, Focus, Matrix, WeeklyReview, Search and
         // PrivacyPolicy are in `all` (so fromRoute resolves and no
         // bottom tab is highlighted there) but NOT in bottomNavEntries.
-        val all: List<NudgyRoute> get() = listOf(Today, Calendar, Chat, Groups, Settings, Tasks, Templates, Focus, WeeklyReview, Search, PrivacyPolicy)
+        val all: List<NudgyRoute> get() = listOf(Today, Calendar, Chat, Groups, Settings, Tasks, Templates, Focus, Matrix, WeeklyReview, Search, PrivacyPolicy)
 
         fun fromRoute(route: String?): NudgyRoute =
             all.firstOrNull { it.route == route } ?: Today
