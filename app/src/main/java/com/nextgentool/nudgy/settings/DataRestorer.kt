@@ -33,17 +33,18 @@ import kotlinx.coroutines.withContext
  * model is the guest→user flip (reassignUser on all three DAOs):
  * local data follows the current account. The existence check is by
  * id alone (the primary key), so a record already present under ANY
- * user is still skipped, never duplicated or overwritten. Tags are
- * NOT restored: the export carries no tags (TaskEntity has no tags
- * column — tags live in a separate table), so there is nothing to
- * merge here.
+ * user is still skipped, never duplicated or overwritten. Step 2-1:
+ * tags ARE restored now (schema v2) — the tag rows first, then the
+ * task↔tag links, each link only when its task AND its tag both
+ * exist after the merge, so a dangling link is skipped, never a
+ * crash.
  *
  * Two honest limits, both by design:
  * - The picker itself ([createOpenDocumentIntent]) and the Uri read
  *   ([restoreFromUri]) are device-gated — no file picker exists on
  *   the JVM — so they are verified by CI compile + the batch-end
  *   device test. Everything below them ([restore], [restoreFromJson]
- *   and the three repositories' restore methods) is unit-tested.
+ *   and the repositories' restore methods) is unit-tested.
  * - This step is restore ONLY. The Settings rows that launch the
  *   picker are step 4d. Nothing here touches the Settings screen.
  */
@@ -74,7 +75,9 @@ object DataRestorer {
     /**
      * Merges one parsed export document into the database for
      * [userId]: every record is re-stamped with [userId] (see the
-     * class KDoc), then id-merged by the three repositories.
+     * class KDoc), then id-merged by the repositories. Order matters:
+     * tasks → schedules → memories → tags → task↔tag links — the
+     * links go last, because both their ends must exist first.
      */
     suspend fun restore(
         export: NudgyDataExport,
@@ -92,7 +95,17 @@ object DataRestorer {
         val memories = memoryRepository.restoreMemories(
             export.memories.map { it.copy(userId = userId) }
         )
-        RestoreSummary(tasks = tasks, schedules = schedules, memories = memories)
+        val tags = taskRepository.restoreTags(
+            export.tags.map { it.copy(userId = userId) }
+        )
+        val taskTags = taskRepository.restoreTaskTags(userId, export.taskTags)
+        RestoreSummary(
+            tasks = tasks,
+            schedules = schedules,
+            memories = memories,
+            tags = tags,
+            taskTags = taskTags
+        )
     }
 
     /**

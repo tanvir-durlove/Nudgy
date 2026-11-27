@@ -6,7 +6,9 @@ import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.NudgyMemoryEntity
+import com.nextgentool.nudgy.data.local.entity.TagEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
+import com.nextgentool.nudgy.data.local.entity.TaskTagCrossRef
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
 import com.nextgentool.nudgy.data.model.TaskStatus
@@ -121,12 +123,22 @@ class DataExportTest {
         createdAtEpochMillis = 1_699_998_000_000
     )
 
+    /** Step 2-1 — every field set, so the round-trip must preserve all of them. */
+    private fun fullTag(id: String = "tag-full-1", name: String = "Home") = TagEntity(
+        id = id,
+        userId = userId,
+        name = name,
+        color = "#0F766E"
+    )
+
     private fun fullExport() = NudgyDataExport(
         schemaVersion = NudgyDataExport.CURRENT_SCHEMA_VERSION,
         exportedAtEpochMillis = 1_700_002_000_000,
         tasks = listOf(fullTask()),
         schedules = listOf(fullSchedule()),
-        memories = listOf(fullMemory())
+        memories = listOf(fullMemory()),
+        tags = listOf(fullTag()),
+        taskTags = listOf(TaskTagCrossRef(taskId = "task-full-1", tagId = "tag-full-1"))
     )
 
     @Test
@@ -145,17 +157,21 @@ class DataExportTest {
     @Test
     fun `json carries the schema version and every record id`() {
         val json = fullExport().toJson()
-        assertTrue(json.contains("\"schemaVersion\":1"))
+        assertTrue(json.contains("\"schemaVersion\":${NudgyDataExport.CURRENT_SCHEMA_VERSION}"))
         assertTrue(json.contains("task-full-1"))
         assertTrue(json.contains("event-full-1"))
         assertTrue(json.contains("memory-full-1"))
+        assertTrue(json.contains("tag-full-1"))
     }
 
     @Test
     fun `unknown enum names degrade to defaults and unknown keys are skipped`() {
         val json = fullExport().toJson()
             .replace("\"priority\":\"HIGH\"", "\"priority\":\"EXTREME\"")
-            .replace("\"schemaVersion\":1", "\"schemaVersion\":1,\"futureField\":1")
+            .replace(
+                "\"schemaVersion\":${NudgyDataExport.CURRENT_SCHEMA_VERSION}",
+                "\"schemaVersion\":${NudgyDataExport.CURRENT_SCHEMA_VERSION},\"futureField\":1"
+            )
         val parsed = NudgyDataExport.fromJson(json)
         assertNotNull(parsed)
         assertEquals(Priority.MEDIUM, parsed!!.tasks.single().priority)
@@ -172,14 +188,17 @@ class DataExportTest {
     @Test
     fun `a future schema version returns null`() {
         val json = fullExport().toJson()
-            .replace("\"schemaVersion\":1", "\"schemaVersion\":99")
+            .replace(
+                "\"schemaVersion\":${NudgyDataExport.CURRENT_SCHEMA_VERSION}",
+                "\"schemaVersion\":99"
+            )
         assertNull(NudgyDataExport.fromJson(json))
     }
 
     @Test
     fun `a missing schema version returns null`() {
         val json = fullExport().toJson()
-            .replace("\"schemaVersion\":1,", "")
+            .replace("\"schemaVersion\":${NudgyDataExport.CURRENT_SCHEMA_VERSION},", "")
         assertNull(NudgyDataExport.fromJson(json))
     }
 
@@ -218,5 +237,68 @@ class DataExportTest {
     fun `defaultFileName has the nudgy-export date shape`() {
         val name = DataExporter.defaultFileName(1_700_000_000_000)
         assertTrue(name.matches(Regex("nudgy-export-\\d{4}-\\d{2}-\\d{2}\\.json")))
+    }
+
+    // ------------------------------------------------------------ Step 2-1: tags
+
+    @Test
+    fun `round-trip preserves tags and task links in schema v2`() {
+        val export = fullExport()
+        val parsed = NudgyDataExport.fromJson(export.toJson())
+        assertEquals(export, parsed)
+        assertEquals(2, parsed!!.schemaVersion)
+        assertEquals(listOf(fullTag()), parsed.tags)
+        assertEquals(
+            listOf(TaskTagCrossRef(taskId = "task-full-1", tagId = "tag-full-1")),
+            parsed.taskTags
+        )
+    }
+
+    @Test
+    fun `a v1 file without tags keys reads with empty tags and task tags`() {
+        // A genuine v1 document: schemaVersion 1, no "tags" / "taskTags"
+        // keys at all. The reader accepts the omitted keys (its own
+        // contract) and the tasks still parse.
+        val v1Json = """{"schemaVersion":1,"exportedAtEpochMillis":1700002000000,"tasks":[{"id":"task-v1-1","userId":"test-user-1","title":"Old task"}],"schedules":[],"memories":[]}"""
+        val parsed = NudgyDataExport.fromJson(v1Json)
+        assertNotNull(parsed)
+        assertEquals(1, parsed!!.schemaVersion)
+        assertEquals(listOf("task-v1-1"), parsed.tasks.map { it.id })
+        assertEquals("Old task", parsed.tasks.single().title)
+        assertTrue(parsed.tags.isEmpty())
+        assertTrue(parsed.taskTags.isEmpty())
+    }
+
+    @Test
+    fun `collectExport reads only the user's tags and only their tasks links`() = runTest {
+        db.taskDao().insertTask(fullTask())
+        db.taskDao().insertTask(
+            TaskEntity(id = "task-other-user", userId = "other-user", title = "Not mine")
+        )
+        db.tagDao().insertTag(fullTag(id = "tag-1", name = "Home"))
+        db.tagDao().insertTag(fullTag(id = "tag-2", name = "Work").copy(color = "#F97360"))
+        db.tagDao().insertTag(
+            TagEntity(id = "tag-other", userId = "other-user", name = "Other", color = "#0F766E")
+        )
+        // Both links of the user's task, plus a link from the user's
+        // tag to the OTHER user's task — that one must not be exported.
+        db.tagDao().insertCrossRef(TaskTagCrossRef("task-full-1", "tag-1"))
+        db.tagDao().insertCrossRef(TaskTagCrossRef("task-full-1", "tag-2"))
+        db.tagDao().insertCrossRef(TaskTagCrossRef("task-other-user", "tag-1"))
+        db.tagDao().insertCrossRef(TaskTagCrossRef("task-other-user", "tag-other"))
+
+        val export = DataExporter.collectExport(
+            userId, taskRepository, calendarRepository, memoryRepository
+        )
+
+        assertEquals(listOf("tag-1", "tag-2"), export.tags.map { it.id })
+        // No ORDER BY on the cross-ref query, so compare as a set.
+        assertEquals(
+            setOf(
+                TaskTagCrossRef("task-full-1", "tag-1"),
+                TaskTagCrossRef("task-full-1", "tag-2")
+            ),
+            export.taskTags.toSet()
+        )
     }
 }

@@ -2,7 +2,9 @@ package com.nextgentool.nudgy.settings
 
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.NudgyMemoryEntity
+import com.nextgentool.nudgy.data.local.entity.TagEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
+import com.nextgentool.nudgy.data.local.entity.TaskTagCrossRef
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
 import com.nextgentool.nudgy.data.model.TaskStatus
@@ -15,15 +17,20 @@ import java.util.UUID
  * Sprint 6-6 (step 4b) — one JSON export document: every task +
  * schedule (calendar event) + memory for one user, each record with
  * its real id so step 4c's restore can id-merge without duplicates.
+ * Step 2-1 added the user's tags + the task↔tag links (schema v2):
+ * a restore brings the tags back; a v1 file (no tags keys) still
+ * reads, with empty tags.
  *
- * Schema:
+ * Schema (v2):
  * ```
  * {
- *   "schemaVersion": 1,
+ *   "schemaVersion": 2,
  *   "exportedAtEpochMillis": 1732...,
  *   "tasks": [ { <every TaskEntity field> }, ... ],
  *   "schedules": [ { <every CalendarEventEntity field> }, ... ],
- *   "memories": [ { <every NudgyMemoryEntity field> }, ... ]
+ *   "memories": [ { <every NudgyMemoryEntity field> }, ... ],
+ *   "tags": [ { <every TagEntity field> }, ... ],
+ *   "taskTags": [ { "taskId": ..., "tagId": ... }, ... ]
  * }
  * ```
  *
@@ -53,7 +60,11 @@ data class NudgyDataExport(
     val exportedAtEpochMillis: Long = 0L,
     val tasks: List<TaskEntity> = emptyList(),
     val schedules: List<CalendarEventEntity> = emptyList(),
-    val memories: List<NudgyMemoryEntity> = emptyList()
+    val memories: List<NudgyMemoryEntity> = emptyList(),
+    /** Step 2-1 — the user's tags (schema v2). Absent in v1 files. */
+    val tags: List<TagEntity> = emptyList(),
+    /** Step 2-1 — the task↔tag links of the exported tasks (schema v2). */
+    val taskTags: List<TaskTagCrossRef> = emptyList()
 ) {
     /** Manual JSON — same streaming pattern as SavedViewFilter. */
     fun toJson(): String {
@@ -74,14 +85,22 @@ data class NudgyDataExport(
         writer.beginArray()
         memories.forEach { it.writeMemory(writer) }
         writer.endArray()
+        writer.name("tags")
+        writer.beginArray()
+        tags.forEach { it.writeTag(writer) }
+        writer.endArray()
+        writer.name("taskTags")
+        writer.beginArray()
+        taskTags.forEach { it.writeTaskTag(writer) }
+        writer.endArray()
         writer.endObject()
         writer.close()
         return buffer.readUtf8()
     }
 
     companion object {
-        /** The only schema version this build writes or reads. */
-        const val CURRENT_SCHEMA_VERSION: Int = 1
+        /** The schema version this build writes; older versions still read (v1 files read with empty tags). */
+        const val CURRENT_SCHEMA_VERSION: Int = 2
 
         fun fromJson(json: String): NudgyDataExport? = try {
             val reader = JsonReader.of(Buffer().writeUtf8(json))
@@ -91,6 +110,8 @@ data class NudgyDataExport(
             var tasks: List<TaskEntity> = emptyList()
             var schedules: List<CalendarEventEntity> = emptyList()
             var memories: List<NudgyMemoryEntity> = emptyList()
+            var tags: List<TagEntity> = emptyList()
+            var taskTags: List<TaskTagCrossRef> = emptyList()
             while (reader.hasNext()) {
                 when (reader.nextName()) {
                     "schemaVersion" -> schemaVersion = reader.nextNullableInt()
@@ -99,6 +120,10 @@ data class NudgyDataExport(
                     "tasks" -> tasks = reader.readTaskList()
                     "schedules" -> schedules = reader.readScheduleList()
                     "memories" -> memories = reader.readMemoryList()
+                    // Step 2-1 (schema v2) — absent in v1 files, which
+                    // then read as empty lists (see the defaults above).
+                    "tags" -> tags = reader.readTagList()
+                    "taskTags" -> taskTags = reader.readTaskTagList()
                     else -> reader.skipValue()
                 }
             }
@@ -111,7 +136,9 @@ data class NudgyDataExport(
                     exportedAtEpochMillis = exportedAtEpochMillis,
                     tasks = tasks,
                     schedules = schedules,
-                    memories = memories
+                    memories = memories,
+                    tags = tags,
+                    taskTags = taskTags
                 )
             }
         } catch (e: Exception) {
@@ -180,6 +207,24 @@ private fun NudgyMemoryEntity.writeMemory(writer: JsonWriter) {
     writer.nameString("userId", userId)
     writer.nameString("content", content)
     writer.nameLong("createdAtEpochMillis", createdAtEpochMillis)
+    writer.endObject()
+}
+
+/** Step 2-1 (schema v2) — every TagEntity field, in entity-declaration order. */
+private fun TagEntity.writeTag(writer: JsonWriter) {
+    writer.beginObject()
+    writer.nameString("id", id)
+    writer.nameString("userId", userId)
+    writer.nameString("name", name)
+    writer.nameString("color", color)
+    writer.endObject()
+}
+
+/** Step 2-1 (schema v2) — one task↔tag link. */
+private fun TaskTagCrossRef.writeTaskTag(writer: JsonWriter) {
+    writer.beginObject()
+    writer.nameString("taskId", taskId)
+    writer.nameString("tagId", tagId)
     writer.endObject()
 }
 
@@ -387,6 +432,76 @@ private fun JsonReader.readMemory(): NudgyMemoryEntity {
         userId = userId ?: "",
         content = content ?: "",
         createdAtEpochMillis = createdAtEpochMillis
+    )
+}
+
+/** Step 2-1 (schema v2) — null array reads as an empty list (same as the other lists). */
+private fun JsonReader.readTagList(): List<TagEntity> =
+    if (peek() == JsonReader.Token.NULL) {
+        skipValue()
+        emptyList()
+    } else {
+        val list = mutableListOf<TagEntity>()
+        beginArray()
+        while (hasNext()) list += readTag()
+        endArray()
+        list
+    }
+
+private fun JsonReader.readTag(): TagEntity {
+    beginObject()
+    var id: String? = null
+    var userId: String? = null
+    var name: String? = null
+    var color: String? = null
+    while (hasNext()) {
+        when (nextName()) {
+            "id" -> id = nextNullableString()
+            "userId" -> userId = nextNullableString()
+            "name" -> name = nextNullableString()
+            "color" -> color = nextNullableString()
+            else -> skipValue()
+        }
+    }
+    endObject()
+    return TagEntity(
+        id = id ?: UUID.randomUUID().toString(),
+        userId = userId ?: "",
+        name = name ?: "",
+        // A missing colour renders as the brand teal through
+        // colorFromHex's fallback, so "" is a safe default here.
+        color = color ?: ""
+    )
+}
+
+/** Step 2-1 (schema v2) — null array reads as an empty list. */
+private fun JsonReader.readTaskTagList(): List<TaskTagCrossRef> =
+    if (peek() == JsonReader.Token.NULL) {
+        skipValue()
+        emptyList()
+    } else {
+        val list = mutableListOf<TaskTagCrossRef>()
+        beginArray()
+        while (hasNext()) list += readTaskTag()
+        endArray()
+        list
+    }
+
+private fun JsonReader.readTaskTag(): TaskTagCrossRef {
+    beginObject()
+    var taskId: String? = null
+    var tagId: String? = null
+    while (hasNext()) {
+        when (nextName()) {
+            "taskId" -> taskId = nextNullableString()
+            "tagId" -> tagId = nextNullableString()
+            else -> skipValue()
+        }
+    }
+    endObject()
+    return TaskTagCrossRef(
+        taskId = taskId ?: "",
+        tagId = tagId ?: ""
     )
 }
 
