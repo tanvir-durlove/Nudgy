@@ -30,7 +30,9 @@ import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Whatshot
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -44,6 +46,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,6 +62,8 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.stringResource
@@ -94,6 +102,8 @@ import com.nextgentool.nudgy.ui.viewmodel.startOfTodayMillis
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 /**
  * Sprint 1-2 — Today + Upcoming (Features 4, 15, 16).
@@ -117,8 +127,16 @@ import java.util.Locale
  *   Unpicked today-due tasks are ALSO listed in Upcoming under "Today".
  * - The screen SCROLLS (S1-1 UI-FIX). Pills are single-line and scroll
  *   horizontally, never wrapping.
- * - The "More in Nudgy" tiles and the Share-preview button are NOT
- *   here (S7-2b): their destinations land later in the sprint.
+ * - "More in Nudgy" (S7-2b, prototype scr-today): Focus / Habits /
+ *   Priority matrix tiles below the This-week card. Focus + Matrix
+ *   navigate to their screens (Matrix access RETURNS here — the
+ *   screen existed since PR #140 with no button reaching it);
+ *   Habits scrolls Today to the Habits section below. The Widget
+ *   tile and the Share-preview button are NOT here (disclosed
+ *   deviations, decided by Tanvir 2026-11-27 on the PM's
+ *   recommendation): the widget has no in-app destination (no
+ *   Settings row, no pin flow — a new feature) and the app has no
+ *   outbound share (the prototype button is a demo).
  *   The weekly review's task lists live on the WeeklyReview screen
  *   only — Today shows the four This-week statboxes + a button there.
  */
@@ -135,6 +153,10 @@ fun TodayScreen(
     // Sprint 4-1: entry point to the Focus timer (Q10=(a)). Defaults
     // to no-op so older call sites keep compiling.
     onFocusClick: () -> Unit = {},
+    // Sprint 7-2b: entry point to the Priority matrix screen
+    // (prototype "More in Nudgy" tile). Defaults to no-op so older
+    // call sites keep compiling.
+    onMatrixClick: () -> Unit = {},
     // Sprint 4-4: entry point to the weekly review screen (Q9=(a)) —
     // the progress ring opens the week's summary. Defaults to no-op
     // so older call sites keep compiling.
@@ -167,6 +189,19 @@ fun TodayScreen(
     val uiState by todayViewModel.uiState.collectAsState()
     val tasksUiState by tasksViewModel.uiState.collectAsState()
     val scrollState = rememberScrollState()
+    // Sprint 7-2b — the Habits tile scrolls Today to the Habits
+    // section (no Habits screen exists). The section's and the
+    // Column's LayoutCoordinates, evaluated FRESH at tap time —
+    // never a cached Offset: the S1-4c lesson (TaskBoard) is that a
+    // cached root Offset goes stale/wrong once the page is scrolled.
+    // localToRoot is the 1.0-era API — Compose 1.7 (BOM 2024.09.00)
+    // has NEITHER positionInParent() NOR positionInRoot() NOR
+    // positionInWindow() (runs 1034–1036 failed compile on each).
+    // The Column composes every child, so the section's coordinates
+    // are measurable even while it sits below the fold.
+    val scope = rememberCoroutineScope()
+    var habitsCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var columnCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     val percent = if (uiState.todayTotal == 0) 0
     else uiState.doneCount * 100 / uiState.todayTotal
     // Sprint 7-2a — the prototype's soft teal: light uses the brand
@@ -192,6 +227,7 @@ fun TodayScreen(
             .background(NudgyCanvas)
             .verticalScroll(scrollState)
             .padding(NudgyTokens.screenPadding)
+            .onGloballyPositioned { columnCoords = it }
     ) {
         // Hero card (prototype scr-today): title + date on the left,
         // the 104px donut on the right, the action row below. The
@@ -691,6 +727,71 @@ fun TodayScreen(
                     )
                 }
             }
+            // Sprint 7-2b — "More in Nudgy" (prototype scr-today):
+            // three tiles in the prototype's 2-column statgrid below
+            // the This-week card. Focus + Matrix navigate to their
+            // screens; Habits scrolls this page to the Habits
+            // section (its offset is measured at the section below).
+            // The Widget tile and the Share-preview button are NOT
+            // here — decided by Tanvir 2026-11-27 (no destination
+            // exists for either; see the file KDoc).
+            Spacer(modifier = Modifier.height(22.dp))
+            SectionCard(modifier = Modifier.testTag("more_in_nudgy_section")) {
+                Text(
+                    text = "More in Nudgy",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = NudgyCharcoal
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        MoreTile(
+                            icon = Icons.Filled.Schedule,
+                            title = "Focus timer",
+                            subtitle = "25-minute Pomodoro",
+                            testTag = "more_tile_focus",
+                            onClick = onFocusClick,
+                            modifier = Modifier.weight(1f)
+                        )
+                        MoreTile(
+                            icon = Icons.Filled.Whatshot,
+                            title = "Habits",
+                            subtitle = "Streaks that stick",
+                            testTag = "more_tile_habits",
+                            onClick = {
+                                // Fresh evaluation at tap time (S1-4c
+                                // lesson): the section's root Y minus
+                                // the Column's root Y, plus the
+                                // current scroll — the root position
+                                // moves up as the page scrolls, so the
+                                // raw difference alone would undershoot
+                                // once the page is already scrolled.
+                                val habits = habitsCoords
+                                val column = columnCoords
+                                if (habits != null && column != null) {
+                                    val y = (habits.localToRoot(Offset.Zero).y -
+                                        column.localToRoot(Offset.Zero).y +
+                                        scrollState.value).roundToInt()
+                                    scope.launch { scrollState.animateScrollTo(y) }
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        MoreTile(
+                            icon = Icons.Filled.GridView,
+                            title = "Priority matrix",
+                            subtitle = "Urgent vs important",
+                            testTag = "more_tile_matrix",
+                            onClick = onMatrixClick,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
         } else {
             // Upcoming — next 7 days (today first) + "No date".
             if (uiState.isLoading) {
@@ -744,10 +845,16 @@ fun TodayScreen(
             }
         }
         // Sprint 4-2 — Habits (spec §5, Q10=(a)): a section inside
-        // Today, below the tab content, on either tab.
+        // Today, below the tab content, on either tab. Sprint 7-2b —
+        // the Box hands its LayoutCoordinates to the Habits tile
+        // (evaluated fresh at tap time — see the state above).
         habitViewModel?.let { habitVm ->
             Spacer(modifier = Modifier.height(24.dp))
-            HabitsSection(viewModel = habitVm)
+            Box(
+                modifier = Modifier.onGloballyPositioned { habitsCoords = it }
+            ) {
+                HabitsSection(viewModel = habitVm)
+            }
         }
         Spacer(modifier = Modifier.height(24.dp))
     }
@@ -874,6 +981,53 @@ private fun StatBox(
             )
             Text(
                 text = label,
+                fontSize = 13.sp,
+                color = NudgyMuted
+            )
+        }
+    }
+}
+
+/**
+ * Sprint 7-2b — one prototype .statbox tile in the "More in Nudgy"
+ * card: teal icon + bold title + muted subtitle, same Surface shape
+ * as StatBox (22dp radius, 1px line border, 13dp padding). The
+ * testTag lives ON the clickable Surface — a tag inside a clickable
+ * is invisible in the merged semantics tree.
+ */
+@Composable
+private fun MoreTile(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    testTag: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .clickable { onClick() }
+            .testTag(testTag),
+        shape = NudgyTokens.cardRadius,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(modifier = Modifier.padding(13.dp)) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = colorResource(R.color.nudgy_teal),
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = title,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                color = NudgyCharcoal
+            )
+            Text(
+                text = subtitle,
                 fontSize = 13.sp,
                 color = NudgyMuted
             )

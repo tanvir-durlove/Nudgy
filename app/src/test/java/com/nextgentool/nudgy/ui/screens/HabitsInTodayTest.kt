@@ -2,10 +2,13 @@ package com.nextgentool.nudgy.ui.screens
 
 import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -27,6 +30,7 @@ import com.nextgentool.nudgy.ui.viewmodel.TasksViewModel
 import com.nextgentool.nudgy.ui.viewmodel.TodayViewModel
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -128,7 +132,14 @@ class HabitsInTodayTest {
                 .fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithTag("habits_section").assertExists()
-        composeRule.onNodeWithText("Habits").assertExists()
+        // Sprint 7-2b — "Habits" now appears TWICE: the More in
+        // Nudgy tile AND the section head. onNodeWithText requires
+        // exactly one match, so pin the count instead — both must
+        // exist.
+        assertEquals(
+            2,
+            composeRule.onAllNodesWithText("Habits").fetchSemanticsNodes().size
+        )
     }
 
     @Test
@@ -145,5 +156,42 @@ class HabitsInTodayTest {
         composeRule.onNodeWithTag("habit_row_${habit.id}").assertExists()
         composeRule.onNodeWithTag("habit_streak_${habit.id}").assertExists()
         composeRule.onNodeWithText("No current streak").assertExists()
+    }
+
+    /**
+     * Sprint 7-2b — the Habits tile scrolls Today to the Habits
+     * section (no Habits screen exists): the tile measures the
+     * section's Y offset and animates the page's scroll state to
+     * it. Proved by the habit row becoming DISPLAYED after the tap
+     * — the row exists from the start (the Column composes every
+     * child), so existence alone would prove nothing.
+     */
+    @Test
+    fun `Habits tile scrolls Today to the Habits section`() {
+        val habit = runBlocking {
+            focusRepository.createHabit(repository.currentUserId(), "Walk")
+        }
+        setTodayContent()
+
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Walk")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        // The guard: the row starts below the fold on Robolectric's
+        // short viewport, so this test would fail loudly — not pass
+        // vacuously — if the viewport ever grew tall enough to show
+        // the whole screen at once.
+        composeRule.onNodeWithTag("habit_row_${habit.id}").assertIsNotDisplayed()
+        // Below the fold: a coordinate click cannot reach the tile —
+        // click via its semantics action (Matrix lesson, PR #140).
+        composeRule.onNodeWithTag("more_tile_habits")
+            .performSemanticsAction(SemanticsActions.OnClick)
+        // The scroll is an animation on the test clock: poll until
+        // the row is actually displayed instead of asserting once.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            runCatching {
+                composeRule.onNodeWithTag("habit_row_${habit.id}").assertIsDisplayed()
+            }.isSuccess
+        }
     }
 }
