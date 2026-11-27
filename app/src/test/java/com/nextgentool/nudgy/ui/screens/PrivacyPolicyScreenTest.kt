@@ -3,6 +3,7 @@ package com.nextgentool.nudgy.ui.screens
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.semantics.SemanticsActions
@@ -24,8 +25,13 @@ import org.robolectric.annotation.Config
  *
  * The screen is pure static content — no ViewModel, no Room —
  * so there is no test-hygiene burden here (no ViewModelStore,
- * no database). Harness rules, all proven in this repo — do NOT
- * "fix" them:
+ * no database).
+ *
+ * Sprint 7 — Privacy layout: the backbar + the per-section cards
+ * are pinned here (backbar tag + title, and the first section's
+ * published heading with the prototype summary's invented "25 MB"
+ * claim absent — the §5 Q8 full-text guard). Harness rules, all
+ * proven in this repo — do NOT "fix" them:
  * - NO performScrollTo(): it hangs the test worker on this harness
  *   (OnboardingScreenTest KDoc, runs 851/852). The screen is a
  *   plain Column with verticalScroll, so every section composes
@@ -72,6 +78,30 @@ class PrivacyPolicyScreenTest {
             composeRule.onNodeWithTag("privacy_section_$index").assertExists()
         }
         assertEquals(11, PRIVACY_POLICY_SECTIONS.size)
+    }
+
+    /**
+     * Sprint 7 — the backbar (prototype scr-privacy): back + the
+     * "Privacy Policy" title, no TopAppBar.
+     */
+    @Test
+    fun `backbar shows the prototype title`() {
+        setContent()
+        composeRule.onNodeWithTag("privacy_backbar").assertExists()
+        composeRule.onNodeWithText("Privacy Policy").assertExists()
+    }
+
+    /**
+     * Sprint 7 — the screen shows the FULL published policy, not
+     * the prototype's short summary: the first section carries its
+     * published heading, and the summary's invented "25 MB"
+     * attachments claim appears nowhere (§5 Q8, banked decision).
+     */
+    @Test
+    fun `first section shows the full published heading not the prototype summary`() {
+        setContent()
+        composeRule.onNodeWithText("1. Data stored on your device").assertExists()
+        composeRule.onNodeWithText("25 MB", substring = true).assertDoesNotExist()
     }
 
     @Test
