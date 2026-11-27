@@ -31,6 +31,44 @@ interface TagDao {
     @Query("SELECT * FROM tags WHERE id = :id AND userId = :userId LIMIT 1")
     suspend fun getTagById(userId: String, id: String): TagEntity?
 
+    /**
+     * Step 2-1 (export/restore) — the restore id-merge checks
+     * existence by id ALONE (the primary key): a tag id already
+     * present under ANY user is skipped, never overwritten. The
+     * user-scoped [getTagById] cannot answer that question.
+     */
+    @Query("SELECT * FROM tags WHERE id = :id LIMIT 1")
+    suspend fun getTagByIdAnyUser(id: String): TagEntity?
+
+    /**
+     * Step 2-1 (export/restore) — the restore FK guard needs the
+     * single link, not the whole table: a link is inserted only when
+     * its task AND its tag both exist after the merge.
+     */
+    @Query("SELECT * FROM task_tags WHERE taskId = :taskId AND tagId = :tagId LIMIT 1")
+    suspend fun getCrossRef(taskId: String, tagId: String): TaskTagCrossRef?
+
+    /**
+     * Step 2-1 (export/restore) — insert that can never overwrite:
+     * the restore path checks existence by id first, and IGNORE is
+     * the second lock. [insertTag] (REPLACE) must never be used on
+     * the restore path — it would overwrite another user's tag.
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertTagIfAbsent(tag: TagEntity)
+
+    @Query("SELECT * FROM task_tags")
+    fun getAllCrossRefsFlow(): Flow<List<TaskTagCrossRef>>
+
+    /**
+     * Step 2-1 (export) — only the links of the exported tasks:
+     * [DataExporter.collectExport] passes the exported task ids, so
+     * no other user's links leak into the file. Callers must pass a
+     * non-empty list (an empty `IN ()` is invalid SQL).
+     */
+    @Query("SELECT * FROM task_tags WHERE taskId IN (:taskIds)")
+    suspend fun getCrossRefsForTasks(taskIds: List<String>): List<TaskTagCrossRef>
+
     @Query("SELECT t.* FROM tags t INNER JOIN task_tags tt ON t.id = tt.tagId WHERE tt.taskId = :taskId ORDER BY t.name COLLATE NOCASE ASC")
     fun getTagsForTaskFlow(taskId: String): Flow<List<TagEntity>>
 

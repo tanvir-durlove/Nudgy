@@ -8,7 +8,9 @@ import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.NudgyMemoryEntity
+import com.nextgentool.nudgy.data.local.entity.TagEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
+import com.nextgentool.nudgy.data.local.entity.TaskTagCrossRef
 import com.nextgentool.nudgy.data.repository.CalendarRepository
 import com.nextgentool.nudgy.data.repository.MemoryRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
@@ -99,11 +101,32 @@ class DataRestoreTest {
         content = content
     )
 
+    /** Step 2-1 — one tag; name/colour vary per test. */
+    private fun tag(
+        id: String = "tag-1",
+        userId: String = this.userId,
+        name: String = "Home",
+        color: String = "#0F766E"
+    ) = TagEntity(
+        id = id,
+        userId = userId,
+        name = name,
+        color = color
+    )
+
     private fun exportJson(
         tasks: List<TaskEntity> = listOf(task()),
         schedules: List<CalendarEventEntity> = listOf(schedule()),
-        memories: List<NudgyMemoryEntity> = listOf(memory())
-    ) = NudgyDataExport(tasks = tasks, schedules = schedules, memories = memories).toJson()
+        memories: List<NudgyMemoryEntity> = listOf(memory()),
+        tags: List<TagEntity> = emptyList(),
+        taskTags: List<TaskTagCrossRef> = emptyList()
+    ) = NudgyDataExport(
+        tasks = tasks,
+        schedules = schedules,
+        memories = memories,
+        tags = tags,
+        taskTags = taskTags
+    ).toJson()
 
     private suspend fun clearAll(userId: String) {
         db.taskDao().clearTasksForUser(userId)
@@ -195,7 +218,10 @@ class DataRestoreTest {
 
     @Test
     fun `malformed json and a future version are NotAnExportFile and touch nothing`() = runTest {
-        val futureJson = exportJson().replace("\"schemaVersion\":1", "\"schemaVersion\":99")
+        val futureJson = exportJson().replace(
+            "\"schemaVersion\":${NudgyDataExport.CURRENT_SCHEMA_VERSION}",
+            "\"schemaVersion\":99"
+        )
 
         assertTrue(restore("not json") is RestoreOutcome.NotAnExportFile)
         assertTrue(restore("") is RestoreOutcome.NotAnExportFile)
@@ -255,5 +281,114 @@ class DataRestoreTest {
         assertEquals(Intent.ACTION_OPEN_DOCUMENT, intent.action)
         assertTrue(intent.categories!!.contains(Intent.CATEGORY_OPENABLE))
         assertEquals("application/json", intent.type)
+    }
+
+    // ------------------------------------------------------------ Step 2-1: tags
+
+    @Test
+    fun `restore inserts tags and links and counts them`() = runTest {
+        val json = exportJson(
+            tasks = listOf(task()),
+            schedules = emptyList(),
+            memories = emptyList(),
+            tags = listOf(tag(), tag(id = "tag-2", name = "Work", color = "#F97360")),
+            taskTags = listOf(
+                TaskTagCrossRef("task-1", "tag-1"),
+                TaskTagCrossRef("task-1", "tag-2")
+            )
+        )
+
+        val outcome = restore(json) as RestoreOutcome.Restored
+
+        assertEquals(2, outcome.summary.tags.inserted)
+        assertEquals(0, outcome.summary.tags.skipped)
+        assertEquals(2, outcome.summary.taskTags.inserted)
+        assertEquals(0, outcome.summary.taskTags.skipped)
+        assertEquals(5, outcome.summary.totalInserted)
+        assertEquals(listOf("tag-1", "tag-2"), taskRepository.getTagsOnce(userId).map { it.id })
+        assertEquals(
+            setOf(TaskTagCrossRef("task-1", "tag-1"), TaskTagCrossRef("task-1", "tag-2")),
+            db.tagDao().getCrossRefsForTasks(listOf("task-1")).toSet()
+        )
+    }
+
+    @Test
+    fun `restoring twice inserts no tags or links the second time`() = runTest {
+        val json = exportJson(
+            tasks = listOf(task()),
+            schedules = emptyList(),
+            memories = emptyList(),
+            tags = listOf(tag()),
+            taskTags = listOf(TaskTagCrossRef("task-1", "tag-1"))
+        )
+        val first = restore(json) as RestoreOutcome.Restored
+        assertEquals(1, first.summary.tags.inserted)
+        assertEquals(1, first.summary.taskTags.inserted)
+
+        val second = restore(json) as RestoreOutcome.Restored
+
+        assertEquals(0, second.summary.tags.inserted)
+        assertEquals(1, second.summary.tags.skipped)
+        assertEquals(0, second.summary.taskTags.inserted)
+        assertEquals(1, second.summary.taskTags.skipped)
+        assertEquals(1, taskRepository.getTagsOnce(userId).size)
+        assertEquals(1, db.tagDao().getCrossRefsForTasks(listOf("task-1")).size)
+    }
+
+    @Test
+    fun `a link to a missing task or tag is skipped, never a crash`() = runTest {
+        val json = exportJson(
+            tasks = listOf(task()),
+            schedules = emptyList(),
+            memories = emptyList(),
+            tags = listOf(tag()),
+            taskTags = listOf(
+                // The task is not in the file; the tag is not either.
+                TaskTagCrossRef("task-missing", "tag-1"),
+                TaskTagCrossRef("task-1", "tag-missing")
+            )
+        )
+
+        val outcome = restore(json) as RestoreOutcome.Restored
+
+        assertEquals(1, outcome.summary.tags.inserted)
+        assertEquals(0, outcome.summary.taskTags.inserted)
+        assertEquals(2, outcome.summary.taskTags.skipped)
+        assertTrue(db.tagDao().getCrossRefsForTasks(listOf("task-1")).isEmpty())
+    }
+
+    @Test
+    fun `a tag id already owned by another user is skipped, never replaced`() = runTest {
+        db.tagDao().insertTag(tag(id = "tag-shared", userId = "other-user", name = "Other name"))
+        val json = exportJson(
+            tasks = emptyList(),
+            schedules = emptyList(),
+            memories = emptyList(),
+            tags = listOf(tag(id = "tag-shared", name = "My name")),
+            taskTags = emptyList()
+        )
+
+        val outcome = restore(json) as RestoreOutcome.Restored
+
+        assertEquals(0, outcome.summary.tags.inserted)
+        assertEquals(1, outcome.summary.tags.skipped)
+        val kept = db.tagDao().getTagByIdAnyUser("tag-shared")
+        assertEquals("Other name", kept!!.name)
+        assertEquals("other-user", kept.userId)
+    }
+
+    @Test
+    fun `a v1 file restores tasks with empty tags`() = runTest {
+        // A genuine v1 document: schemaVersion 1, no tags keys.
+        val v1Json = """{"schemaVersion":1,"exportedAtEpochMillis":1700002000000,"tasks":[{"id":"task-v1-1","userId":"test-user-1","title":"Old task"}],"schedules":[],"memories":[]}"""
+
+        val outcome = restore(v1Json) as RestoreOutcome.Restored
+
+        assertEquals(1, outcome.summary.tasks.inserted)
+        assertEquals(0, outcome.summary.tags.inserted)
+        assertEquals(0, outcome.summary.taskTags.inserted)
+        assertEquals(1, outcome.summary.totalInserted)
+        assertEquals(listOf("task-v1-1"), taskRepository.getAllTasksOnce(userId).map { it.id })
+        assertTrue(taskRepository.getTagsOnce(userId).isEmpty())
     }
 }

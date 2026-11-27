@@ -11,6 +11,7 @@ import com.nextgentool.nudgy.data.local.entity.SavedViewEntity
 import com.nextgentool.nudgy.data.local.entity.TagEntity
 import com.nextgentool.nudgy.data.local.entity.TaskAttachmentEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
+import com.nextgentool.nudgy.data.local.entity.TaskTagCrossRef
 import com.nextgentool.nudgy.data.local.entity.TaskTemplateEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
@@ -834,6 +835,78 @@ class TaskRepository @Inject constructor(
     suspend fun setTaskTags(taskId: String, tagIds: List<String>) = withContext(Dispatchers.IO) {
         tagDao.setTagsForTask(taskId, tagIds)
     }
+
+    /** Step 2-1 (export) — one-shot read of one user's tags. */
+    suspend fun getTagsOnce(userId: String): List<TagEntity> = withContext(Dispatchers.IO) {
+        tagDao.getTagsOnce(userId)
+    }
+
+    /**
+     * Step 2-1 (export) — the links of the given tasks only. An empty
+     * id list returns empty without running the query (an empty
+     * `IN ()` is invalid SQL).
+     */
+    suspend fun getCrossRefsForTasks(taskIds: List<String>): List<TaskTagCrossRef> =
+        withContext(Dispatchers.IO) {
+            if (taskIds.isEmpty()) emptyList() else tagDao.getCrossRefsForTasks(taskIds)
+        }
+
+    /**
+     * Step 2-1 (restore) — restore tags from an export: id-merge,
+     * [restoreTasks]' rule. A row whose id already exists (under ANY
+     * user — ids are the primary key) is SKIPPED: the local row is
+     * never overwritten. Only missing ids are inserted, so restoring
+     * the same file twice inserts nothing the second time.
+     *
+     * The inserted rows arrive with the caller's userId already
+     * applied (see DataRestorer) — this method does not reassign.
+     * The insert is [TagDao.insertTagIfAbsent] (IGNORE), never
+     * [TagDao.insertTag] (REPLACE): REPLACE on this path would
+     * overwrite another user's tag.
+     */
+    suspend fun restoreTags(tags: List<TagEntity>): RestoreCounts =
+        withContext(Dispatchers.IO) {
+            var inserted = 0
+            var skipped = 0
+            for (tag in tags) {
+                if (tagDao.getTagByIdAnyUser(tag.id) != null) {
+                    skipped++
+                    continue
+                }
+                tagDao.insertTagIfAbsent(tag)
+                inserted++
+            }
+            RestoreCounts(inserted = inserted, skipped = skipped)
+        }
+
+    /**
+     * Step 2-1 (restore) — restore task↔tag links from an export,
+     * AFTER tasks and tags are merged. A link is inserted only when
+     * its task AND its tag both exist in the database — otherwise the
+     * foreign key would crash the restore. A link that already exists
+     * is skipped. Never [TagDao.setTagsForTask] here: it would delete
+     * the task's existing links first.
+     */
+    suspend fun restoreTaskTags(crossRefs: List<TaskTagCrossRef>): RestoreCounts =
+        withContext(Dispatchers.IO) {
+            var inserted = 0
+            var skipped = 0
+            for (ref in crossRefs) {
+                if (tagDao.getCrossRef(ref.taskId, ref.tagId) != null) {
+                    skipped++
+                    continue
+                }
+                if (taskDao.getTaskById(ref.taskId) == null ||
+                    tagDao.getTagByIdAnyUser(ref.tagId) == null
+                ) {
+                    skipped++
+                    continue
+                }
+                tagDao.insertCrossRef(ref)
+                inserted++
+            }
+            RestoreCounts(inserted = inserted, skipped = skipped)
+        }
 
     // ---------------------------------------------------------------- projects
 
