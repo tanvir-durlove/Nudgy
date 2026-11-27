@@ -30,6 +30,7 @@ import com.nextgentool.nudgy.ui.viewmodel.TasksViewModel
 import com.nextgentool.nudgy.ui.viewmodel.TodayViewModel
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -131,7 +132,14 @@ class HabitsInTodayTest {
                 .fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithTag("habits_section").assertExists()
-        composeRule.onNodeWithText("Habits").assertExists()
+        // Sprint 7-2b — "Habits" now appears TWICE: the More in
+        // Nudgy tile AND the section head. onNodeWithText requires
+        // exactly one match, so pin the count instead — both must
+        // exist.
+        assertEquals(
+            2,
+            composeRule.onAllNodesWithText("Habits").fetchSemanticsNodes().size
+        )
     }
 
     @Test
