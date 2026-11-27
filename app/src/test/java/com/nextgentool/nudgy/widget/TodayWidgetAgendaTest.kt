@@ -1,16 +1,21 @@
 package com.nextgentool.nudgy.widget
 
 import android.content.Context
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
+import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.domain.timeLabel
 import com.nextgentool.nudgy.domain.todayDateString
+import java.util.Calendar
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -35,6 +40,11 @@ import org.robolectric.annotation.Config
  * Glance test infra in this repo — so the render path
  * (TodayWidget.provideGlance → TodayWidgetContent) is verified by
  * CI compile + the batch-end device test, not by a test here.
+ *
+ * Sprint 7 — Widget restyle: the pure pieces of the restyle ARE
+ * covered here — the priority carried through to the item (the row
+ * pdot), the single-line row format, the header date label, the
+ * 3-row cap, and the pdot color mapping.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -50,7 +60,8 @@ class TodayWidgetAgendaTest {
         due: Long = 0L,
         created: Long = 0L,
         parentId: String? = null,
-        completed: Boolean = false
+        completed: Boolean = false,
+        priority: Priority = Priority.MEDIUM
     ) = TaskEntity(
         userId = "u1",
         title = title,
@@ -59,7 +70,8 @@ class TodayWidgetAgendaTest {
         dueDateEpochMillis = due,
         createdAtEpochMillis = created,
         parentTaskId = parentId,
-        isCompleted = completed
+        isCompleted = completed,
+        priority = priority
     )
 
     @Test
@@ -138,6 +150,78 @@ class TodayWidgetAgendaTest {
         )
         assertEquals(timeLabel(start), items[0].timeLabel)
         assertNull(items[1].timeLabel)
+    }
+
+    // ------------------------------------------------------- Sprint 7 restyle
+
+    @Test
+    fun `priority is carried through to the widget item`() {
+        val items = todayAgendaItems(
+            listOf(
+                task("High", priority = Priority.HIGH, due = 1L, created = 1L),
+                task("Medium", priority = Priority.MEDIUM, due = 2L, created = 2L),
+                task("Low", priority = Priority.LOW, due = 3L, created = 3L)
+            ),
+            today
+        )
+        assertEquals(
+            listOf(Priority.HIGH, Priority.MEDIUM, Priority.LOW),
+            items.map { it.priority }
+        )
+    }
+
+    @Test
+    fun `agenda row line joins time and title, title alone without a time`() {
+        val start = 1_700_000_000_000L
+        val items = todayAgendaItems(
+            listOf(
+                task("Slotted", plannedStart = start, due = 1L, created = 1L),
+                task("Unslotted", plannedStart = null, due = 2L, created = 2L)
+            ),
+            today
+        )
+        assertEquals("${timeLabel(start)} · Slotted", widgetAgendaRowLine(items[0]))
+        assertEquals("Unslotted", widgetAgendaRowLine(items[1]))
+    }
+
+    @Test
+    fun `header date label uses the prototype shape`() {
+        val november = Calendar.getInstance().apply {
+            set(2026, Calendar.NOVEMBER, 16, 10, 30, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        assertEquals("Mon Nov 16", widgetHeaderDateLabel(november))
+        val december = Calendar.getInstance().apply {
+            set(2026, Calendar.DECEMBER, 25, 9, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        assertEquals("Fri Dec 25", widgetHeaderDateLabel(december))
+    }
+
+    @Test
+    fun `widget shows three agenda rows at most`() {
+        assertEquals(3, TODAY_WIDGET_MAX_ITEMS)
+    }
+
+    @Test
+    fun `priority dot colors match the prototype mapping`() {
+        assertEquals(Color(0xFFF97360), widgetPriorityDotColor(Priority.HIGH))
+        assertEquals(Color(0xFF0F766E), widgetPriorityDotColor(Priority.MEDIUM))
+        assertEquals(Color(0xFF757575), widgetPriorityDotColor(Priority.LOW))
+    }
+
+    @Test
+    fun `header shows the date only when the widget is wide enough`() {
+        assertFalse(widgetShowsDateHeader(180.dp))
+        assertFalse(widgetShowsDateHeader(299.dp))
+        assertTrue(widgetShowsDateHeader(300.dp))
+        assertTrue(widgetShowsDateHeader(360.dp))
+    }
+
+    @Test
+    fun `header title joins today and the date, today alone when narrow`() {
+        assertEquals("Today · Mon Nov 16", widgetHeaderTitle("Today", "Mon Nov 16", true))
+        assertEquals("Today", widgetHeaderTitle("Today", "Mon Nov 16", false))
     }
 
     @Test
