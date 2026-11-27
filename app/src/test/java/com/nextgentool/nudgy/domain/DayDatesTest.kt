@@ -140,4 +140,35 @@ class DayDatesTest {
         // 2026-11-16 is a Monday (see the dayIndexInWeek test above).
         assertEquals("Mon, Nov 16", recentDayLabel(millisOf(2026, Calendar.NOVEMBER, 16, 9), now))
     }
+
+    // ------------------------------------------------------- Sprint 7 (Habits data)
+
+    @Test
+    fun `weekDateStrings are the Mon to Sun dates of the week`() {
+        // Wednesday 2026-11-18: the week is Mon 16 .. Sun 22.
+        assertEquals(
+            listOf(
+                "2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19",
+                "2026-11-20", "2026-11-21", "2026-11-22"
+            ),
+            weekDateStrings(millisOf(2026, Calendar.NOVEMBER, 18, 15))
+        )
+    }
+
+    @Test
+    fun `weekDateStrings put Sunday in the week that started six days earlier`() {
+        // Sunday 2026-11-22 belongs to the week starting Mon 16,
+        // never to the week starting Mon 23.
+        assertEquals(
+            listOf(
+                "2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19",
+                "2026-11-20", "2026-11-21", "2026-11-22"
+            ),
+            weekDateStrings(millisOf(2026, Calendar.NOVEMBER, 22, 15))
+        )
+        assertEquals(
+            "2026-11-23",
+            weekDateStrings(millisOf(2026, Calendar.NOVEMBER, 23, 15)).first()
+        )
+    }
 }

@@ -9,6 +9,7 @@ import com.nextgentool.nudgy.data.model.FocusSessionKind
 import com.nextgentool.nudgy.domain.dateStringOf
 import com.nextgentool.nudgy.domain.startOfDayMillis
 import com.nextgentool.nudgy.domain.startOfWeekMillis
+import com.nextgentool.nudgy.domain.weekDateStrings
 import com.nextgentool.nudgy.domain.usecase.FocusStatsUseCase
 import com.nextgentool.nudgy.domain.usecase.HabitStreakUseCase
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -24,7 +25,12 @@ data class HabitStreak(
     val habit: HabitEntity,
     val currentStreak: Int = 0,
     val longestStreak: Int = 0,
-    val checkedInToday: Boolean = false
+    val checkedInToday: Boolean = false,
+    // Sprint 7 (Habits data) — the habit's check-in dates inside the
+    // Mon–Sun week containing `now` (the "This week" dots). Real
+    // dates only, carried from the same read that computes the
+    // streaks — never derived from a streak count.
+    val thisWeekCheckInDates: Set<String> = emptySet()
 )
 
 /**
@@ -282,13 +288,19 @@ class FocusHabitRepository @Inject constructor(
         now: Long = System.currentTimeMillis()
     ): List<HabitStreak> = withContext(Dispatchers.IO) {
         val today = dateStringOf(now)
+        // Sprint 7 (Habits data) — the week's dates come from the
+        // same read that already computes the streaks: the check-in
+        // dates are in hand here and were thrown away before. No new
+        // DAO query, no new read — the dots ride this one.
+        val weekDates = weekDateStrings(now).toSet()
         habitDao.getHabitsOnce(userId).map { habit ->
             val dates = habitDao.getCheckInDates(habit.id).toSet()
             HabitStreak(
                 habit = habit,
                 currentStreak = streakUseCase.currentStreak(dates, today),
                 longestStreak = streakUseCase.longestStreak(dates),
-                checkedInToday = today in dates
+                checkedInToday = today in dates,
+                thisWeekCheckInDates = dates.intersect(weekDates)
             )
         }
     }
