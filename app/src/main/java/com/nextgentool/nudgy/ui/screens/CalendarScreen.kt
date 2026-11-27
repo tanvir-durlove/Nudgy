@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -96,9 +97,7 @@ import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
 import com.nextgentool.nudgy.ui.theme.NudgyChipBackground
 import com.nextgentool.nudgy.ui.theme.NudgyFieldBorder
 import com.nextgentool.nudgy.ui.theme.NudgyGreen
-import com.nextgentool.nudgy.ui.theme.NudgyLavender
 import com.nextgentool.nudgy.ui.theme.NudgyMuted
-import com.nextgentool.nudgy.ui.theme.NudgyPeach
 import com.nextgentool.nudgy.ui.theme.NudgyPrimary
 import com.nextgentool.nudgy.ui.theme.NudgySage
 import com.nextgentool.nudgy.ui.theme.NudgyTokens
@@ -877,17 +876,16 @@ fun CalendarScreen(
             }
         }
 
-        // Schedule Timeline Section
-        Surface(
+        // Sprint 7-2b (Calendar-2) — the day-event list (prototype
+        // scr-calendar #dayEvents): the header stays (established S2
+        // model), but the rows are prototype .task cards — pdot +
+        // title + meta (time + tagchip) — and they sit directly on
+        // the canvas, NOT inside the old wrapping card (the prototype
+        // has no card around #dayEvents).
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            shape = MaterialTheme.shapes.large,
-            color = NudgyCard,
-            border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -931,156 +929,44 @@ fun CalendarScreen(
                         modifier = Modifier.padding(vertical = 12.dp)
                     )
                 } else {
-                    // Vertical Timeline Cards
+                    // Prototype .task rows (Sprint 7-2b): pdot + title +
+                    // meta (time + tagchip), 10dp apart.
                     displayEvents.forEach { event ->
-                        val isMeeting = event.eventType == "MEETING"
-                        val cardBg = if (isMeeting) NudgyPeach else NudgyLavender
-                        val dotColor = if (isMeeting) NudgyPrimary else Color(0xFF7A68E6)
-
-                        val startTimeStr = timeFormatter.format(event.startEpochMillis)
-                        val endTimeStr = timeFormatter.format(event.endEpochMillis)
-
-                        Row(
-                            verticalAlignment = Alignment.Top,
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.width(52.dp)
-                            ) {
-                                Text(
-                                    text = startTimeStr,
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
-                                    color = NudgyMuted
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .size(12.dp)
-                                        .clip(CircleShape)
-                                        .border(2.dp, dotColor, CircleShape)
-                                        .background(Color.White)
-                                )
-                            }
-
-                            Surface(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    // Sprint 2-2: the grid renders the same
-                                    // event title as a block, so the schedule
-                                    // row needs its own tag for tests.
-                                    .testTag("schedule_event_${event.id}")
-                                    .then(
-                                        // Sprint 2-1 (Q8(a)): tap a personal
-                                        // event to edit it. Group rows are
-                                        // never edited from here (same rule
-                                        // as delete).
-                                        if (event.groupId == null) Modifier.clickable { eventPendingEdit = event }
-                                        else Modifier
-                                    ),
-                                shape = MaterialTheme.shapes.large,
-                                color = cardBg
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(14.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "$startTimeStr – $endTimeStr",
-                                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
-                                            color = NudgyMuted
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = event.title,
-                                            style = MaterialTheme.typography.titleMedium.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 15.sp
-                                            ),
-                                            color = NudgyCharcoal
-                                        )
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            val locationText = event.locationOrLink?.takeIf { it.isNotBlank() }
-                                            if (locationText != null) {
-                                                Text(
-                                                    text = locationText,
-                                                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
-                                                    color = NudgyMuted
-                                                )
-                                            }
-                                            if (event.isFromGoogleCalendar) {
-                                                if (locationText != null) {
-                                                    Spacer(modifier = Modifier.width(6.dp))
-                                                }
-                                                Text(
-                                                    text = "· Google Calendar",
-                                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        color = Color(0xFF2E7D32)
-                                                    )
-                                                )
-                                            }
-                                        }
-                                        // Group v1: origin badge for group schedules.
-                                        if (event.groupId != null) {
-                                            Spacer(modifier = Modifier.height(6.dp))
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(CircleShape)
-                                                    .background(NudgyPrimary.copy(alpha = 0.12f))
-                                                    .padding(horizontal = 8.dp, vertical = 2.dp)
-                                            ) {
-                                                Text(
-                                                    text = groupNames[event.groupId] ?: "Group",
-                                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.SemiBold
-                                                    ),
-                                                    color = NudgyAccent
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    // Group v1: members never delete a group schedule
-                                    // from here — only the creator, from the Groups
-                                    // tab, can delete the shared item.
-                                    if (event.groupId == null) {
-                                        IconButton(
-                                            onClick = { eventPendingDelete = event },
-                                            modifier = Modifier.size(32.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.DeleteOutline,
-                                                contentDescription = "Delete event",
-                                                tint = NudgyMuted,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        CalendarDayEventRow(
+                            event = event,
+                            groupName = event.groupId?.let { groupNames[it] },
+                            onEditClick = { eventPendingEdit = event },
+                            onDeleteClick = { eventPendingDelete = event }
+                        )
                     }
                 }
             }
-        }
 
-        // Suggested Focus Time Card (Figma Screen 2) — hidden when the
-        // selected day has no free slot (suggestedSlot is null).
+        // Sprint 7-2b (Calendar-2) — "Schedule a task" (prototype
+        // scr-calendar): the suggestion section takes the prototype's
+        // card — a "Schedule a task" sec-title above it, the card
+        // itself at the prototype's 22dp radius. Copy and behavior
+        // are unchanged (the Block time button still blocks the
+        // suggested slot); the prototype's drag chips + slot buttons
+        // are NOT built — the drag strip already lives above the grid
+        // (S2-2) and the slot list is this single suggested slot
+        // (established model).
         if (suggestedSlot != null) {
         val suggestedStartStr = timeFormatter.format(suggestedStart)
         val suggestedEndStr = timeFormatter.format(suggestedEnd)
 
+        Text(
+            text = "Schedule a task",
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Bold,
+            color = NudgyCharcoal,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 10.dp)
+        )
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = MaterialTheme.shapes.large,
+            shape = NudgyTokens.cardRadius,
             color = NudgyCard,
             border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
         ) {
@@ -1822,5 +1708,180 @@ private fun MonthGridCard(
                 color = NudgyMuted
             )
         }
+    }
+}
+
+/**
+ * Sprint 7-2b (Calendar-2) — one day-event row in the prototype's
+ * .task shape (scr-calendar #dayEvents): a 9dp pdot, a 15.5sp/500
+ * title, and a meta FlowRow (time range + tagchip + location when
+ * present) on a white 18dp card. The testTag lives ON the clickable
+ * Surface (a tag inside a clickable is invisible in the merged
+ * semantics tree), and the tap target is the same as before: a tap
+ * opens the edit dialog for personal events only (Sprint 2-1 Q8(a));
+ * group rows are never edited from here.
+ *
+ * Disclosed deviations (design-only, no behavior change):
+ * - The pdot follows the established event-type distinction
+ *   (MEETING vs FOCUS_TIME) mapped onto the prototype's pdot
+ *   palette — coral (NudgyPrimary) for meetings, muted for focus
+ *   time. The entity carries NO priority, so no priority is
+ *   invented; the old purple "other" dot had no prototype
+ *   equivalent and is gone with the peach/lavender card colors.
+ * - The tagchip is "Google Calendar event" for Google events; a
+ *   "Task · N min" chip has NO row to attach to here — tasks are
+ *   never projected into the schedule (established S2 model: they
+ *   live in the Tasks tab, and only placed tasks appear as blocks
+ *   in the hour grid, which this task does not touch).
+ * - The group name is a cream grp tagchip in the meta row
+ *   (prototype .tagchip.grp), not the separate badge below the
+ *   meta it used to be.
+ * - The delete IconButton stays at the row end (personal events
+ *   only): the prototype has no delete affordance, but this button
+ *   is the screen's only delete entry point — removing it would
+ *   be a behavior change, not a restyle.
+ * - The prototype's shadow is the app's established 1px
+ *   NudgyCardBorder line (same as the Search/Groups rows).
+ */
+@Composable
+private fun CalendarDayEventRow(
+    event: CalendarEventEntity,
+    groupName: String?,
+    onEditClick: () -> Unit,
+    onDeleteClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val timeFormatter = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
+    val startTimeStr = timeFormatter.format(event.startEpochMillis)
+    val endTimeStr = timeFormatter.format(event.endEpochMillis)
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            // Sprint 2-2: the grid renders the same event title as a
+            // block, so the schedule row needs its own tag for tests.
+            .testTag("schedule_event_${event.id}")
+            .then(
+                // Sprint 2-1 (Q8(a)): tap a personal event to edit
+                // it. Group rows are never edited from here (same
+                // rule as delete).
+                if (event.groupId == null) Modifier.clickable { onEditClick() }
+                else Modifier
+            ),
+        shape = RoundedCornerShape(18.dp),
+        color = NudgyCard,
+        border = androidx.compose.foundation.BorderStroke(1.dp, NudgyCardBorder)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            // Prototype .pdot: 9dp, 6dp below the row top so it
+            // aligns with the title's first line.
+            Box(
+                modifier = Modifier
+                    .padding(top = 6.dp)
+                    .size(9.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (event.eventType == "MEETING") NudgyPrimary else NudgyMuted
+                    )
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = event.title,
+                    fontSize = 15.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = NudgyCharcoal
+                )
+                // Prototype .meta: time + tagchip(s), wrapping to a
+                // second line on narrow screens instead of clipping
+                // (the old row put location + marker on one fixed
+                // line). Location is kept — dropping it would lose
+                // content the old row showed.
+                FlowRow(
+                    modifier = Modifier.padding(top = 5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "$startTimeStr – $endTimeStr",
+                        fontSize = 12.5.sp,
+                        color = NudgyMuted
+                    )
+                    if (event.isFromGoogleCalendar) {
+                        CalendarTagChip(text = "Google Calendar event")
+                    }
+                    if (event.groupId != null) {
+                        CalendarTagChip(
+                            text = groupName ?: "Group",
+                            isGroup = true
+                        )
+                    }
+                    val locationText = event.locationOrLink?.takeIf { it.isNotBlank() }
+                    if (locationText != null) {
+                        Text(
+                            text = locationText,
+                            fontSize = 12.5.sp,
+                            color = NudgyMuted
+                        )
+                    }
+                }
+            }
+            // Group v1: members never delete a group schedule from
+            // here — only the creator, from the Groups tab, can
+            // delete the shared item.
+            if (event.groupId == null) {
+                IconButton(
+                    onClick = { onDeleteClick() },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DeleteOutline,
+                        contentDescription = "Delete event",
+                        tint = NudgyMuted,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Sprint 7-2b (Calendar-2) — the prototype's .tagchip: canvas
+ * background, 1px line border, 999dp pill, 2/8dp padding, 11.5sp/500
+ * muted text. The group variant (.tagchip.grp) is cream with a
+ * #FBE3D3 border and ink text.
+ */
+@Composable
+private fun CalendarTagChip(
+    text: String,
+    isGroup: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(
+                if (isGroup) colorResource(R.color.nudgy_cream) else NudgyCanvas
+            )
+            .border(
+                1.dp,
+                if (isGroup) colorResource(R.color.nudgy_cream_dark) else NudgyCardBorder,
+                RoundedCornerShape(999.dp)
+            )
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            fontSize = 11.5.sp,
+            fontWeight = FontWeight.Medium,
+            color = if (isGroup) NudgyCharcoal else NudgyMuted
+        )
     }
 }
