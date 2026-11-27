@@ -226,9 +226,10 @@
     <string name="widget_today_title">Today</string>
     <string name="widget_today_description">Your planned tasks for today</string>
     <string name="widget_today_empty">Nothing planned for today</string>
-    <string name="widget_today_done_count">%1$d / %2$d done</string>
+    <string name="widget_today_done_count">%1$d of %2$d done</string>
     <string name="widget_today_more">+%1$d more</string>
     <string name="widget_today_add_task">Add task</string>
+    <string name="widget_today_quick_add_hint">Quick add for today…</string>
 
     <!-- App lock (S6-6, step 4a) -->
     <string name="app_lock_title">Unlock Nudgy</string>
