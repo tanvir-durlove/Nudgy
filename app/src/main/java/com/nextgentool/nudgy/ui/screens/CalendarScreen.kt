@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -91,6 +92,7 @@ import com.nextgentool.nudgy.intent.IncomingIntent
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 import com.nextgentool.nudgy.ui.theme.NudgyAccent
+import com.nextgentool.nudgy.ui.theme.NudgyCanvas
 import com.nextgentool.nudgy.ui.theme.NudgyCard
 import com.nextgentool.nudgy.ui.theme.NudgyCardBorder
 import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
@@ -1743,6 +1745,7 @@ private fun MonthGridCard(
  * - The prototype's shadow is the app's established 1px
  *   NudgyCardBorder line (same as the Search/Groups rows).
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CalendarDayEventRow(
     event: CalendarEventEntity,
@@ -1804,8 +1807,7 @@ private fun CalendarDayEventRow(
                 FlowRow(
                     modifier = Modifier.padding(top = 5.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
                         text = "$startTimeStr – $endTimeStr",
