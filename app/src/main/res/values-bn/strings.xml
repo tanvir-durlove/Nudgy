@@ -123,9 +123,6 @@
     <string name="settings_theme_light">লাইট</string>
     <string name="settings_theme_dark">ডার্ক</string>
     <string name="settings_appearance_hint">লাইট ডিফল্ট উচ্চ-কনট্রাস্ট থিম</string>
-    <string name="settings_theme_system_sub">সিস্টেমের থিম মেনে চলবে</string>
-    <string name="settings_theme_light_sub">লাইট থিম</string>
-    <string name="settings_theme_dark_sub">ডার্ক থিম</string>
 
     <!-- Sprint 6-2 — language -->
     <string name="settings_language_english">English</string>
@@ -206,7 +203,6 @@
     <string name="widget_today_empty">আজকের জন্য কিছু পরিকল্পনা করা হয়নি</string>
     <string name="widget_today_done_count">%1$d / %2$d শেষ</string>
     <string name="widget_today_more">আরও +%1$dটি</string>
-    <string name="widget_today_add_task">কাজ যোগ করুন</string>
     <string name="widget_today_quick_add_hint">আজকের জন্য দ্রুত যোগ করুন…</string>
 
     <!-- App lock (S6-6, step 4a) -->
