@@ -199,6 +199,21 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
         mirrors[userId]?.remove(groupId)
     }
 
+    // Step 2-2 — Profile Edit fan-out: renames the member doc in
+    // one group. Throws when the doc is missing (the real gateway's
+    // Firestore update() does the same), so the repository's
+    // per-group catch — skip one stale group, rename the rest —
+    // is exercised instead of hidden.
+    override suspend fun updateMemberDisplayName(
+        groupId: String,
+        userId: String,
+        displayName: String
+    ) {
+        maybeThrow()
+        members[groupId]?.get(userId)?.set("displayName", displayName)
+            ?: throw IllegalStateException("no member doc for $userId in $groupId")
+    }
+
     override suspend fun writeGroupItem(
         groupId: String,
         itemId: String,

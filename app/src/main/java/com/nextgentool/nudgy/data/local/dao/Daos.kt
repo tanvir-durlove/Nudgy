@@ -321,6 +321,11 @@ interface GroupMemberDao {
     @Query("DELETE FROM group_members WHERE groupId = :groupId")
     suspend fun deleteMembersByGroupId(groupId: String)
 
+    // Step 2-2 — Profile Edit fan-out: rename one cached member row.
+    // Query-only change: no schema change, no migration.
+    @Query("UPDATE group_members SET displayName = :displayName WHERE groupId = :groupId AND uid = :uid")
+    suspend fun updateMemberDisplayName(groupId: String, uid: String, displayName: String)
+
     // C6: companion to GroupDao.clearAllGroups — the member cache holds
     // other members' display names from the deleted user's groups.
     @Query("DELETE FROM group_members")

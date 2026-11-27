@@ -1,6 +1,7 @@
 package com.nextgentool.nudgy.settings
 
 import com.nextgentool.nudgy.auth.AuthManager
+import com.nextgentool.nudgy.auth.UpdateDisplayNameResult
 import kotlinx.coroutines.CoroutineScope
 
 /**
@@ -22,6 +23,14 @@ interface SettingsAccountActions {
     fun signOut(scope: CoroutineScope, onComplete: () -> Unit = {})
 
     fun deleteAccount(onComplete: () -> Unit = {}, onError: (String) -> Unit = {})
+
+    /**
+     * Step 2-2 — renames the signed-in user (name only, no photo).
+     * The caller trims first; a blank name must never reach here
+     * (the ViewModel guards it too). The result carries the
+     * user-facing message on failure — the ViewModel only toasts it.
+     */
+    suspend fun updateDisplayName(displayName: String): UpdateDisplayNameResult
 }
 
 /** Production [SettingsAccountActions]: the single [AuthManager], behind the seam. */
@@ -31,4 +40,7 @@ class RealSettingsAccountActions(private val authManager: AuthManager) : Setting
 
     override fun deleteAccount(onComplete: () -> Unit, onError: (String) -> Unit) =
         authManager.deleteAccount(onComplete, onError)
+
+    override suspend fun updateDisplayName(displayName: String): UpdateDisplayNameResult =
+        authManager.updateDisplayName(displayName)
 }

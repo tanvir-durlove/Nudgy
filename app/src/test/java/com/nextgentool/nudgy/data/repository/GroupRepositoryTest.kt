@@ -236,6 +236,44 @@ class GroupRepositoryTest {
         assertEquals(listOf("Amy", "Bob"), cached.map { it.displayName })
     }
 
+    // Step 2-2 — Profile Edit fan-out: the member doc and the
+    // local cache row take the new name in EVERY group the user
+    // belongs to. A stale mirror (no member doc left in that
+    // group) is skipped, not fatal — the other groups still rename.
+    @Test
+    fun `updateMemberDisplayName renames the member doc and cache row in every group`() = runTest {
+        val groupA = createTestGroup()
+        val groupB = createTestGroup(name = "Family")
+        repo.refreshGroupMembers(groupA.groupId)
+        repo.refreshGroupMembers(groupB.groupId)
+        fake.mirrors["user-1"]?.set(
+            "g-stale",
+            mutableMapOf("groupId" to "g-stale", "groupName" to "Gone")
+        )
+
+        repo.updateMemberDisplayName("user-1", "Tanvir")
+
+        assertEquals("Tanvir", fake.members[groupA.groupId]?.get("user-1")?.get("displayName"))
+        assertEquals("Tanvir", fake.members[groupB.groupId]?.get("user-1")?.get("displayName"))
+        assertEquals(
+            "Tanvir",
+            db.groupMemberDao().getMembersOnce(groupA.groupId)
+                .first { it.uid == "user-1" }.displayName
+        )
+        assertEquals(
+            "Tanvir",
+            db.groupMemberDao().getMembersOnce(groupB.groupId)
+                .first { it.uid == "user-1" }.displayName
+        )
+    }
+
+    @Test
+    fun `updateMemberDisplayName is a no-op for a guest`() = runTest {
+        val group = createTestGroup()
+        repo.updateMemberDisplayName(AuthManager.GUEST_USER_ID, "Nobody")
+        assertEquals("Creator", fake.members[group.groupId]?.get("user-1")?.get("displayName"))
+    }
+
     // ---------------------------------------------------------------- completion
 
     @Test

@@ -8,8 +8,10 @@ import androidx.lifecycle.viewModelScope
 import com.nextgentool.nudgy.auth.AuthManager
 import com.nextgentool.nudgy.auth.GroupAuth
 import com.nextgentool.nudgy.auth.NudgyUser
+import com.nextgentool.nudgy.auth.UpdateDisplayNameResult
 import com.nextgentool.nudgy.data.local.entity.NudgyMemoryEntity
 import com.nextgentool.nudgy.data.repository.CalendarRepository
+import com.nextgentool.nudgy.data.repository.GroupRepository
 import com.nextgentool.nudgy.data.repository.MemoryRepository
 import com.nextgentool.nudgy.data.repository.TaskRepository
 import com.nextgentool.nudgy.settings.ByokKeyStore
@@ -83,7 +85,12 @@ class SettingsViewModel @Inject constructor(
     // a default on purpose (the S6-1 seams' pattern): call sites
     // that don't pass one get the missing-repository outcome
     // (export false / restore ReadFailed) instead of a crash.
-    private val calendarRepository: CalendarRepository? = null
+    private val calendarRepository: CalendarRepository? = null,
+    // Step 2-2 — the group repository for the Profile Edit fan-out
+    // (TaskModule provides it in production). Nullable with a
+    // default on purpose (the S6-1 seams' pattern): call sites
+    // that don't pass one skip the fan-out instead of crashing.
+    private val groupRepository: GroupRepository? = null
 ) : ViewModel() {
 
     /**
@@ -170,6 +177,14 @@ class SettingsViewModel @Inject constructor(
     private val _deleteCompleted = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
     val deleteCompleted: SharedFlow<Unit> = _deleteCompleted
 
+    private val _isRenaming = MutableStateFlow(false)
+    /** True while a display-name edit runs — the dialog's Save stays disabled. */
+    val isRenaming: StateFlow<Boolean> = _isRenaming.asStateFlow()
+
+    /** Emitted when a display-name edit completes — the dialog closes on it. */
+    private val _renameCompleted = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
+    val renameCompleted: SharedFlow<Unit> = _renameCompleted
+
     // ---- Sign-in / sign-out (GroupsViewModel pattern) ----
 
     /** Starts the Google sign-in flow; errors surface on [settingsError], never silently. */
@@ -212,6 +227,50 @@ class SettingsViewModel @Inject constructor(
                 viewModelScope.launch { _settingsError.emit(message) }
             }
         )
+    }
+
+    // ---- Profile edit (Step 2-2: name only, no photo) ----
+
+    /**
+     * Renames the signed-in user. Blank input is ignored (no seam
+     * call); a second tap while a rename runs is ignored too.
+     * On success the local user is updated at once — initials
+     * recomputed, because [NudgyUser.copy] does NOT recompute them
+     * — so the row shows the new name without waiting for the auth
+     * flow to re-emit (it emits the same user; the equality guard
+     * skips it). The group fan-out is best-effort: the name edit
+     * already succeeded, so a failed group keeps the old name until
+     * the next edit retries it — it never reopens the dialog. A
+     * failure surfaces on [settingsError] and the dialog stays open
+     * so the user can retry.
+     */
+    fun updateDisplayName(displayName: String) {
+        val actions = accountActions ?: return
+        val trimmed = displayName.trim()
+        if (trimmed.isBlank() || _isRenaming.value) return
+        _isRenaming.value = true
+        viewModelScope.launch {
+            when (val result = actions.updateDisplayName(trimmed)) {
+                is UpdateDisplayNameResult.Success -> {
+                    userFlow.value = currentUser.copy(
+                        displayName = trimmed,
+                        initials = NudgyUser.extractInitials(trimmed, currentUser.email)
+                    )
+                    try {
+                        groupRepository?.updateMemberDisplayName(userId, trimmed)
+                    } catch (e: Exception) {
+                        // Best-effort fan-out: logged in the
+                        // repository; the rename itself stands.
+                    }
+                    _isRenaming.value = false
+                    _renameCompleted.emit(Unit)
+                }
+                is UpdateDisplayNameResult.Failed -> {
+                    _isRenaming.value = false
+                    _settingsError.emit(result.message)
+                }
+            }
+        }
     }
 
     // ---- Memories (v1 "Nudgy Memories & Knowledge", Q11=(a)) ----

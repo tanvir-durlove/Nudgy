@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.NudgyMemoryEntity
@@ -65,6 +66,44 @@ class SettingsRowsTest {
             }
         }
         composeRule.waitForIdle()
+    }
+
+    private fun setSignedInShell(
+        onEditDisplayName: (String) -> Unit = {}
+    ) {
+        composeRule.setContent {
+            NudgyTheme {
+                SettingsShell(
+                    user = signedInUser,
+                    onEditDisplayName = onEditDisplayName
+                )
+            }
+        }
+        composeRule.waitForIdle()
+    }
+
+    // Step 2-2 — Profile Edit (name only): the Edit button is
+    // signed-in only, the dialog prefills the current name, and
+    // Save hands the new name to the rename flow.
+    @Test
+    fun `signed-in profile shows Edit and the dialog saves the new name`() {
+        var savedName: String? = null
+        setSignedInShell(onEditDisplayName = { savedName = it })
+
+        composeRule.onNodeWithTag("settings_profile_edit_button").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_profile_edit_button").performClick()
+        composeRule.onNodeWithTag("settings_profile_edit_dialog").assertExists()
+        composeRule.onNodeWithTag("profile_edit_field").performTextClearance()
+        composeRule.onNodeWithTag("profile_edit_field").performTextInput("Tanvir")
+        composeRule.onNodeWithTag("profile_edit_save").performClick()
+        assertEquals("Tanvir", savedName)
+    }
+
+    @Test
+    fun `guest profile shows no Edit button`() {
+        setGuestShell()
+
+        composeRule.onNodeWithTag("settings_profile_edit_button").assertDoesNotExist()
     }
 
     @Test

@@ -160,6 +160,13 @@
     <string name="settings_delete_deleting">Deleting…</string>
     <string name="settings_delete_cancel">Cancel</string>
 
+    <!-- Profile edit dialog (Step 2-2: name only, no photo) -->
+    <string name="settings_profile_edit">Edit</string>
+    <string name="settings_profile_edit_title">Edit your name</string>
+    <string name="settings_profile_edit_label">Name</string>
+    <string name="settings_profile_edit_needs_sign_in">Please sign in again to change your name.</string>
+    <string name="settings_profile_edit_failed">Couldn\'t update your name. Please try again.</string>
+
     <!-- Today screen headers -->
     <string name="today_tab_today">Today</string>
     <string name="today_tab_upcoming">Upcoming</string>
