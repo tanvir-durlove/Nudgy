@@ -2,6 +2,7 @@ package com.nextgentool.nudgy.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,8 +14,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Help
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -23,15 +39,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.settings.SettingsPreferences
-import com.nextgentool.nudgy.ui.theme.NudgyAccent
 import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
 import com.nextgentool.nudgy.ui.theme.NudgyMuted
 import com.nextgentool.nudgy.ui.theme.NudgyPrimary
@@ -50,6 +69,14 @@ import com.nextgentool.nudgy.ui.theme.NudgyTokens
  * design (2026-11-15) is teal/coral, and v1's gold belongs to the
  * old design. A guest shows no fake email — the row says "Guest
  * User" + "Sign in with Google to sync your data".
+ *
+ * Sprint 7 — Settings restyle (prototype scr-settings): every row
+ * carries its prototype leading icon (muted, 24dp) + the prototype
+ * type scale (title 15.5sp/500, subtitle 12.5sp) + a muted chevron
+ * on tappable rows. The Appearance row is an inline Light/Dark/
+ * System seg now (the S6-2 dialog is gone); Language keeps its
+ * dialog (the prototype's select is the same choice). The
+ * Statistics row is new (Sprint 7): it opens the Stats screen.
  */
 
 /** The shared card shell for a Settings row (same as the S6-0 stub). */
@@ -84,15 +111,38 @@ private fun RowScope.SettingsRowTexts(title: String, subtitle: String, titleColo
     Column(modifier = Modifier.weight(1f)) {
         Text(
             text = title,
-            style = MaterialTheme.typography.titleMedium,
+            fontSize = 15.5.sp,
+            fontWeight = FontWeight.Medium,
             color = titleColor
         )
         Text(
             text = subtitle,
-            style = MaterialTheme.typography.bodySmall,
+            fontSize = 12.5.sp,
             color = NudgyMuted
         )
     }
+}
+
+/** A prototype leading icon (muted, 24dp) for a Settings row. */
+@Composable
+private fun SettingsRowIcon(icon: ImageVector) {
+    Icon(
+        imageVector = icon,
+        contentDescription = null,
+        tint = NudgyMuted,
+        modifier = Modifier.size(24.dp)
+    )
+    Spacer(modifier = Modifier.width(12.dp))
+}
+
+/** A prototype chevron (muted) for a tappable Settings row. */
+@Composable
+private fun SettingsRowChevron() {
+    Text(
+        text = "›",
+        fontSize = 20.sp,
+        color = NudgyMuted
+    )
 }
 
 /** Profile row: initials circle + name + email (guest: no fake email). */
@@ -102,14 +152,15 @@ fun SettingsProfileRow(user: NudgyUser?) {
     SettingsRowCard(slug = "profile") {
         Box(
             modifier = Modifier
-                .size(44.dp)
+                .size(52.dp)
                 .clip(CircleShape)
                 .background(NudgyPrimary),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = if (isGuest) "GU" else user!!.initials,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                fontSize = 19.sp,
+                fontWeight = FontWeight.Bold,
                 color = Color.White
             )
         }
@@ -161,11 +212,7 @@ fun SettingsSignInRow(
                 title = stringResource(R.string.settings_sign_out),
                 subtitle = stringResource(R.string.settings_sign_out_sub)
             )
-            Text(
-                text = "›",
-                style = MaterialTheme.typography.titleLarge,
-                color = NudgyAccent
-            )
+            SettingsRowChevron()
         }
     }
 }
@@ -179,17 +226,19 @@ fun SettingsCalendarRow(
     onSyncClick: () -> Unit
 ) {
     SettingsRowCard(slug = "calendar") {
+        SettingsRowIcon(Icons.Filled.CalendarMonth)
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = if (connected) stringResource(R.string.settings_calendar_synced)
                 else stringResource(R.string.settings_calendar_connect),
-                style = MaterialTheme.typography.titleMedium,
+                fontSize = 15.5.sp,
+                fontWeight = FontWeight.Medium,
                 color = NudgyCharcoal
             )
             Text(
                 text = if (connected) stringResource(R.string.settings_calendar_synced_sub)
                 else stringResource(R.string.settings_calendar_connect_sub),
-                style = MaterialTheme.typography.bodySmall,
+                fontSize = 12.5.sp,
                 color = NudgyMuted
             )
         }
@@ -219,22 +268,20 @@ fun SettingsCalendarRow(
     }
 }
 
-/** A tappable row with title + subtitle (BYOK, Privacy, Help, Memories, Delete). */
+/** A tappable row with title + subtitle (Statistics, BYOK, Privacy, Help, Memories, Delete). */
 @Composable
 fun SettingsActionRow(
     slug: String,
     title: String,
     subtitle: String,
     titleColor: Color = NudgyCharcoal,
+    icon: ImageVector? = null,
     onClick: () -> Unit
 ) {
     SettingsRowCard(slug = slug, onClick = onClick) {
+        if (icon != null) SettingsRowIcon(icon)
         SettingsRowTexts(title = title, subtitle = subtitle, titleColor = titleColor)
-        Text(
-            text = "›",
-            style = MaterialTheme.typography.titleLarge,
-            color = NudgyAccent
-        )
+        SettingsRowChevron()
     }
 }
 
@@ -265,6 +312,7 @@ fun SettingsNotificationsRow(
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                SettingsRowIcon(Icons.Filled.WbSunny)
                 SettingsRowTexts(
                     title = stringResource(R.string.settings_morning_brief_title),
                     subtitle = stringResource(R.string.settings_morning_brief_sub)
@@ -277,6 +325,7 @@ fun SettingsNotificationsRow(
             }
             Spacer(modifier = Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
+                SettingsRowIcon(Icons.Filled.VolumeUp)
                 SettingsRowTexts(
                     title = stringResource(R.string.settings_sound_title),
                     subtitle = stringResource(R.string.settings_sound_sub)
@@ -293,30 +342,80 @@ fun SettingsNotificationsRow(
 
 /**
  * Sprint 6-2 — the Appearance row (spec §2 Q9=(a)).
- *
- * Shows the current mode; tapping opens the Appearance dialog
- * (v1's radio rows: System default / Light / Dark). The subtitle
- * names the effective mode — never a bare code string.
+ * Sprint 7 — the prototype's inline Light/Dark/System seg (the
+ * S6-2 AppearanceDialog is gone: same preference write, no dialog
+ * in between — the Templates/Groups inline precedent). The subtitle
+ * is the prototype's static line; the selected pill shows the
+ * current mode. Pill testTags keep the dialog rows' names
+ * (`settings_theme_<mode>`) so the contract carries over.
  */
 @Composable
 fun SettingsAppearanceRow(
     themeMode: String,
-    onClick: () -> Unit
+    onThemeModeChange: (String) -> Unit
 ) {
-    SettingsRowCard(slug = "appearance", onClick = onClick) {
-        SettingsRowTexts(
-            title = stringResource(R.string.settings_section_appearance),
-            subtitle = when (themeMode) {
-                SettingsPreferences.THEME_LIGHT -> stringResource(R.string.settings_theme_light_sub)
-                SettingsPreferences.THEME_DARK -> stringResource(R.string.settings_theme_dark_sub)
-                else -> stringResource(R.string.settings_theme_system_sub)
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("settings_row_appearance"),
+        shape = NudgyTokens.cardRadius,
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = NudgyTokens.cardElevation
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Text(
+                text = stringResource(R.string.settings_section_appearance),
+                fontSize = 15.5.sp,
+                fontWeight = FontWeight.Medium,
+                color = NudgyCharcoal
+            )
+            Text(
+                text = stringResource(R.string.settings_appearance_hint),
+                fontSize = 12.5.sp,
+                color = NudgyMuted
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        color = colorResource(R.color.nudgy_track),
+                        shape = CircleShape
+                    )
+                    .padding(4.dp)
+            ) {
+                for ((mode, labelRes) in listOf(
+                    SettingsPreferences.THEME_LIGHT to R.string.settings_theme_light,
+                    SettingsPreferences.THEME_DARK to R.string.settings_theme_dark,
+                    SettingsPreferences.THEME_SYSTEM to R.string.settings_theme_system_short
+                )) {
+                    val selected = themeMode == mode
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(38.dp)
+                            .then(
+                                if (selected) Modifier.shadow(1.dp, CircleShape) else Modifier
+                            )
+                            .background(
+                                color = if (selected) Color.White else Color.Transparent,
+                                shape = CircleShape
+                            )
+                            .clickable { onThemeModeChange(mode) }
+                            .testTag("settings_theme_$mode")
+                    ) {
+                        Text(
+                            text = stringResource(labelRes),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (selected) NudgyCharcoal else NudgyMuted
+                        )
+                    }
+                }
             }
-        )
-        Text(
-            text = "›",
-            style = MaterialTheme.typography.titleLarge,
-            color = NudgyAccent
-        )
+        }
     }
 }
 
@@ -334,6 +433,7 @@ fun SettingsLanguageRow(
     onClick: () -> Unit
 ) {
     SettingsRowCard(slug = "language", onClick = onClick) {
+        SettingsRowIcon(Icons.Filled.Language)
         SettingsRowTexts(
             title = stringResource(R.string.settings_section_language),
             subtitle = if (language == SettingsPreferences.LANGUAGE_BENGALI) {
@@ -342,11 +442,7 @@ fun SettingsLanguageRow(
                 stringResource(R.string.settings_language_english)
             }
         )
-        Text(
-            text = "›",
-            style = MaterialTheme.typography.titleLarge,
-            color = NudgyAccent
-        )
+        SettingsRowChevron()
     }
 }
 
@@ -380,6 +476,7 @@ fun SettingsAppLockRow(
                 .fillMaxWidth()
                 .padding(16.dp)
         ) {
+            SettingsRowIcon(Icons.Filled.Lock)
             SettingsRowTexts(
                 title = stringResource(R.string.settings_section_app_lock),
                 subtitle = if (appLockEnabled) {
@@ -430,15 +527,12 @@ fun SettingsDataRow(
                     .clickable { onExportClick() }
                     .testTag("settings_export_row")
             ) {
+                SettingsRowIcon(Icons.Filled.Download)
                 SettingsRowTexts(
                     title = stringResource(R.string.settings_export_title),
                     subtitle = stringResource(R.string.settings_export_sub)
                 )
-                Text(
-                    text = "›",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = NudgyAccent
-                )
+                SettingsRowChevron()
             }
             Spacer(modifier = Modifier.height(12.dp))
             Row(
@@ -448,15 +542,12 @@ fun SettingsDataRow(
                     .clickable { onRestoreClick() }
                     .testTag("settings_restore_row")
             ) {
+                SettingsRowIcon(Icons.Filled.Restore)
                 SettingsRowTexts(
                     title = stringResource(R.string.settings_restore_title),
                     subtitle = stringResource(R.string.settings_restore_sub)
                 )
-                Text(
-                    text = "›",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = NudgyAccent
-                )
+                SettingsRowChevron()
             }
         }
     }

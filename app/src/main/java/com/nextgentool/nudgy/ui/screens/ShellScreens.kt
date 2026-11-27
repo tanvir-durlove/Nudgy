@@ -19,6 +19,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Help
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -35,13 +42,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.NudgyMemoryEntity
 import kotlinx.coroutines.flow.SharedFlow
 import com.nextgentool.nudgy.settings.SettingsPreferences
-import com.nextgentool.nudgy.ui.theme.NudgyAccent
 import com.nextgentool.nudgy.ui.theme.NudgyCanvas
 import com.nextgentool.nudgy.ui.theme.NudgyCharcoal
 import com.nextgentool.nudgy.ui.theme.NudgyMuted
@@ -163,6 +171,12 @@ private data class SettingsSection(
 private val SETTINGS_SECTIONS = listOf(
     SettingsSection("profile", R.string.settings_section_profile, R.string.settings_section_profile_sub),
     SettingsSection("sign_in", R.string.settings_section_sign_in, R.string.settings_section_sign_in_sub),
+    // Sprint 7 — Statistics (prototype scr-settings, General group):
+    // NEW in this task — no such row existed before (the brief's
+    // "keep the current destination" assumed one; there was none).
+    // It opens the Stats screen (PR #141), wired via
+    // onStatisticsClick below.
+    SettingsSection("statistics", R.string.settings_section_statistics, R.string.settings_section_statistics_sub),
     SettingsSection("notifications", R.string.settings_section_notifications, R.string.settings_section_notifications_sub),
     SettingsSection("appearance", R.string.settings_section_appearance, R.string.settings_section_appearance_sub),
     SettingsSection("language", R.string.settings_section_language, R.string.settings_section_language_sub),
@@ -183,14 +197,18 @@ private val SETTINGS_SECTIONS = listOf(
 
 @Composable
 private fun SettingsSectionHeader(title: String, slug: String) {
+    // Sprint 7 — the prototype's group title: 13sp/700, uppercase,
+    // tracked, muted (was labelLarge, 16dp top padding).
     Text(
-        text = title,
-        style = MaterialTheme.typography.labelLarge,
+        text = title.uppercase(),
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 0.5.sp,
         color = NudgyMuted,
         modifier = Modifier
             .fillMaxWidth()
             .testTag("settings_section_$slug")
-            .padding(start = 4.dp, top = 16.dp, bottom = 8.dp)
+            .padding(start = 4.dp, top = 20.dp, bottom = 8.dp)
     )
 }
 
@@ -238,6 +256,10 @@ fun SettingsShell(
     // (spec §7, Q9=(a)): the same screen the Today progress ring
     // opens. Defaults to no-op so older call sites keep compiling.
     onWeeklyReviewClick: () -> Unit = {},
+    // Sprint 7 — the Statistics row (new section, prototype General
+    // group): opens the Stats screen (NudgyRoute.Stats, PR #141).
+    // Defaults to no-op so older call sites keep compiling.
+    onStatisticsClick: () -> Unit = {},
     // Sprint 6-1 — the wired rows (spec §4–§5). All defaulted so the
     // S6-0 shell test (no params) still renders one row per section:
     // with no user the profile/sign-in rows render the guest state.
@@ -287,8 +309,8 @@ fun SettingsShell(
     var showByokDialog by remember { mutableStateOf(false) }
     var showMemoriesDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
-    // Sprint 6-2 — the Appearance + Language dialogs.
-    var showAppearanceDialog by remember { mutableStateOf(false) }
+    // Sprint 6-2 — the Language dialog. (The Appearance dialog is
+    // gone in Sprint 7 — the row is an inline seg now.)
     var showLanguageDialog by remember { mutableStateOf(false) }
     // The delete dialog closes on success (v1 C7: it stays up while
     // the deletion runs, and a failure keeps it open for a retry).
@@ -299,9 +321,11 @@ fun SettingsShell(
     // Sprint 6-0 — the real Settings structure (spec §4): the
     // static placeholder rows are gone (the S5 fix-round blink
     // guard stays relevant — no shimmer anywhere on this screen).
-    // Scrollable: eleven sections + the Weekly review row do not
+    // Scrollable: fifteen sections + the Weekly review row do not
     // fit one screen. The Weekly review row is unchanged from
-    // Sprint 4-4 (same testTag, same behaviour).
+    // Sprint 4-4 (same testTag, same behaviour). Settings is a
+    // bottom-nav destination, so there is no backbar — the
+    // prototype's title is the 21sp/800 "Settings" heading.
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -309,7 +333,13 @@ fun SettingsShell(
             .padding(NudgyTokens.screenPadding)
             .verticalScroll(rememberScrollState())
     ) {
-        Text(text = stringResource(R.string.settings_title), color = NudgyCharcoal)
+        Text(
+            text = stringResource(R.string.settings_title),
+            fontSize = 21.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = NudgyCharcoal,
+            modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+        )
         for (section in SETTINGS_SECTIONS) {
             SettingsSectionHeader(title = stringResource(section.titleRes), slug = section.slug)
             // Sprint 6-1 — the wired sections replace their stub row
@@ -323,15 +353,26 @@ fun SettingsShell(
                     onSignInClick = onSignInClick,
                     onSignOutClick = onSignOutClick
                 )
+                // Sprint 7 — Statistics (new section): opens the Stats
+                // screen via onStatisticsClick (NavHost wires it to
+                // NudgyRoute.Stats).
+                "statistics" -> SettingsActionRow(
+                    slug = "statistics",
+                    title = stringResource(R.string.settings_section_statistics),
+                    subtitle = stringResource(R.string.settings_section_statistics_sub),
+                    icon = Icons.Filled.BarChart,
+                    onClick = onStatisticsClick
+                )
                 "notifications" -> SettingsNotificationsRow(
                     morningBriefEnabled = morningBriefEnabled,
                     soundEnabled = soundEnabled,
                     onMorningBriefChange = onMorningBriefChange,
                     onSoundChange = onSoundChange
                 )
+                // Sprint 7 — inline seg (was the Appearance dialog).
                 "appearance" -> SettingsAppearanceRow(
                     themeMode = themeMode,
-                    onClick = { showAppearanceDialog = true }
+                    onThemeModeChange = onThemeModeChange
                 )
                 "language" -> SettingsLanguageRow(
                     language = language,
@@ -356,24 +397,28 @@ fun SettingsShell(
                     title = stringResource(R.string.settings_section_gemini_key),
                     subtitle = if (byokKey.isNotBlank()) stringResource(R.string.settings_gemini_custom_key)
                     else stringResource(R.string.settings_gemini_builtin),
+                    icon = Icons.Filled.VpnKey,
                     onClick = { showByokDialog = true }
                 )
                 "privacy" -> SettingsActionRow(
                     slug = "privacy",
                     title = stringResource(R.string.settings_section_privacy),
                     subtitle = stringResource(R.string.settings_section_privacy_sub),
+                    icon = Icons.Filled.Shield,
                     onClick = onPrivacyClick
                 )
                 "help_feedback" -> SettingsActionRow(
                     slug = "help_feedback",
                     title = stringResource(R.string.settings_section_help_feedback),
                     subtitle = stringResource(R.string.settings_section_help_feedback_sub),
+                    icon = Icons.Filled.Help,
                     onClick = onHelpFeedbackClick
                 )
                 "onboarding" -> SettingsActionRow(
                     slug = "onboarding",
                     title = stringResource(R.string.settings_section_onboarding),
                     subtitle = stringResource(R.string.settings_section_onboarding_sub),
+                    icon = Icons.Filled.MenuBook,
                     onClick = onShowOnboardingClick
                 )
                 "memories" -> SettingsActionRow(
@@ -381,6 +426,7 @@ fun SettingsShell(
                     title = stringResource(R.string.settings_section_memories),
                     subtitle = if (memories.isEmpty()) stringResource(R.string.settings_memories_empty)
                     else stringResource(R.string.settings_memories_facts, memories.size),
+                    icon = Icons.Filled.Favorite,
                     onClick = { showMemoriesDialog = true }
                 )
                 "delete_account" -> SettingsActionRow(
@@ -423,8 +469,8 @@ fun SettingsShell(
                 }
                 Text(
                     text = "›",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = NudgyAccent
+                    fontSize = 20.sp,
+                    color = NudgyMuted
                 )
             }
         }
@@ -460,17 +506,8 @@ fun SettingsShell(
             onDismiss = { showDeleteDialog = false }
         )
     }
-    // Sprint 6-2 — the Appearance + Language dialogs (SettingsDialogs.kt).
-    if (showAppearanceDialog) {
-        AppearanceDialog(
-            currentMode = themeMode,
-            onSelect = { mode ->
-                onThemeModeChange(mode)
-                showAppearanceDialog = false
-            },
-            onDismiss = { showAppearanceDialog = false }
-        )
-    }
+    // Sprint 6-2 — the Language dialog (SettingsDialogs.kt).
+    // (No Appearance dialog any more — Sprint 7 inline seg.)
     if (showLanguageDialog) {
         LanguageDialog(
             currentLanguage = language,

@@ -19,6 +19,8 @@
     <string name="settings_section_profile_sub">Your name, email and photo</string>
     <string name="settings_section_sign_in">Sign in</string>
     <string name="settings_section_sign_in_sub">Google sign-in and guest mode</string>
+    <string name="settings_section_statistics">Statistics</string>
+    <string name="settings_section_statistics_sub">Completed, streaks, focus time</string>
     <string name="settings_section_notifications">Notifications</string>
     <string name="settings_section_notifications_sub">Morning brief, sound and haptics</string>
     <string name="settings_section_appearance">Appearance</string>
@@ -127,8 +129,10 @@
 
     <!-- Sprint 6-2 — appearance (v1 radio rows) -->
     <string name="settings_theme_system">System default</string>
+    <string name="settings_theme_system_short">System</string>
     <string name="settings_theme_light">Light</string>
     <string name="settings_theme_dark">Dark</string>
+    <string name="settings_appearance_hint">Light is the default high-contrast theme</string>
     <string name="settings_theme_system_sub">Follow system theme</string>
     <string name="settings_theme_light_sub">Light theme</string>
     <string name="settings_theme_dark_sub">Dark theme</string>

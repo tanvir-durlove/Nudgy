@@ -289,68 +289,6 @@ fun DeleteAccountDialog(
 }
 
 /**
- * Sprint 6-2 — the Appearance dialog (spec §2 Q9=(a)).
- *
- * v1's radio rows (YourNudgySheet "Appearance" dialog): System
- * default / Light / Dark. Selecting one writes theme_mode at once
- * (the app recomposes with no restart — the MainActivity theme
- * flow); the dialog closes on selection.
- */
-@Composable
-fun AppearanceDialog(
-    currentMode: String,
-    onSelect: (String) -> Unit,
-    onDismiss: () -> Unit
-) {
-    val options = listOf(
-        SettingsPreferences.THEME_SYSTEM to stringResource(R.string.settings_theme_system),
-        SettingsPreferences.THEME_LIGHT to stringResource(R.string.settings_theme_light),
-        SettingsPreferences.THEME_DARK to stringResource(R.string.settings_theme_dark)
-    )
-    AlertDialog(
-        modifier = Modifier.testTag("settings_appearance_dialog"),
-        onDismissRequest = onDismiss,
-        title = {
-            Text(stringResource(R.string.settings_section_appearance), fontWeight = FontWeight.Bold, color = NudgyCharcoal)
-        },
-        text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                options.forEach { (mode, label) ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .selectable(
-                                selected = currentMode == mode,
-                                onClick = { onSelect(mode) },
-                                role = Role.RadioButton
-                            )
-                            .padding(vertical = 8.dp)
-                            .testTag("settings_theme_$mode")
-                    ) {
-                        RadioButton(
-                            selected = currentMode == mode,
-                            onClick = { onSelect(mode) }
-                        )
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = NudgyCharcoal,
-                            modifier = Modifier.padding(start = 8.dp)
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.settings_memories_done))
-            }
-        }
-    )
-}
-
-/**
  * Sprint 6-2 — the Language dialog (spec §2 Q10=(a)).
  *
  * English / বাংলা. Selecting one writes the preference and the
