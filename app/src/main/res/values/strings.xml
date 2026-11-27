@@ -192,6 +192,8 @@
     <string name="search_section_groups">Groups</string>
     <string name="search_type_to_search">Type to search</string>
     <string name="search_no_results">No results</string>
+    <string name="search_nothing_matches">Nothing matches. Search covers tasks, schedules, notes and groups — try a shorter word.</string>
+    <string name="search_group_meta">Group</string>
     <string name="tasks_completed">Completed (%1$d)</string>
     <string name="tasks_filter_all">All</string>
     <string name="tasks_filter_group">Group</string>

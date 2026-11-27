@@ -155,19 +155,44 @@ class SearchScreenTest {
         }
     }
 
+    /**
+     * Sprint 7 — the backbar ("Search") + the field with the
+     * prototype's placeholder verbatim + all four section headers.
+     */
     @Test
-    fun `typing a query shows no-results states and no fake results`() {
+    fun `backbar and field match the prototype`() {
+        setSearchContent()
+
+        composeRule.onNodeWithTag("search_backbar").assertExists()
+        composeRule.onNodeWithText("Search").assertExists()
+        composeRule.onNodeWithText("Search tasks, schedules, notes, groups…").assertExists()
+        listOf("tasks", "schedules", "notes", "groups").forEach { group ->
+            composeRule.onNodeWithTag("search_section_$group").assertExists()
+        }
+    }
+
+    /**
+     * Sprint 7 — when a non-blank query matches NOTHING anywhere, the
+     * prototype's single centered sentence replaces the four
+     * per-section "No results" (the sections hide).
+     */
+    @Test
+    fun `typing a query with no matches anywhere shows the prototype empty sentence`() {
         setSearchContent()
 
         composeRule.onNodeWithTag("search_field").performTextInput("buy")
-        // The database is empty — so every section honestly reports
-        // no results, and no invented row appears.
+        // The database is empty — so the global empty state appears
+        // and no invented row appears.
+        waitForRow("search_empty_all")
+        composeRule.onNodeWithTag("search_empty_all").assertExists()
+        assertTrue(
+            "global empty state should use the prototype sentence, was: " +
+                nodeText("search_empty_all"),
+            nodeText("search_empty_all").contains("Nothing matches")
+        )
         listOf("tasks", "schedules", "notes", "groups").forEach { group ->
-            assertTrue(
-                "empty state for $group should report no results, was: " +
-                    nodeText("search_empty_$group"),
-                nodeText("search_empty_$group").contains("No results")
-            )
+            composeRule.onNodeWithTag("search_section_$group").assertDoesNotExist()
+            composeRule.onNodeWithTag("search_empty_$group").assertDoesNotExist()
         }
     }
 
@@ -198,6 +223,31 @@ class SearchScreenTest {
             "schedules empty state should report no results, was: " +
                 nodeText("search_empty_schedules"),
             nodeText("search_empty_schedules").contains("No results")
+        )
+    }
+
+    /**
+     * Sprint 7 — a task row shows the due meta ("Today · …"): the
+     * seeded task is due now, so the meta names today.
+     */
+    @Test
+    fun `task result row shows the due meta`() {
+        val task = runBlocking {
+            repository.createTask(
+                userId = repository.currentUserId(),
+                title = "Buy groceries",
+                description = "Weekly shop at the market"
+            )
+        }
+        setSearchContent()
+
+        composeRule.onNodeWithTag("search_field").performTextInput("buy")
+        waitForRow("search_result_task_${task.id}")
+
+        assertTrue(
+            "task row meta should name today, was: " +
+                nodeText("search_result_task_${task.id}"),
+            nodeText("search_result_task_${task.id}").contains("Today")
         )
     }
 
