@@ -35,7 +35,7 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextDecoration
 import androidx.glance.text.TextStyle
-import androidx.glance.appwidget.DpSize
+import androidx.compose.ui.unit.DpSize
 import androidx.glance.unit.ColorProvider
 import com.nextgentool.nudgy.MainActivity
 import com.nextgentool.nudgy.R
