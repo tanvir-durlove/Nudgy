@@ -127,6 +127,23 @@ class TodayMyDayNoSwitcherTest {
     }
 
     /**
+     * Sprint 7 Habits fix round — the Room Flow re-emission of the
+     * seeded planned task can lag behind setTodayContent()'s "Add task"
+     * wait, so a my_day_section fetch right after it can return an
+     * empty subtree and the title assertion fails on a race (PR #139
+     * run 1014: two failures on the same bare assertTrue). Wait for the
+     * seeded title to be present anywhere first — My Day and the
+     * Timeline render from the same state, so the section fetch after
+     * this is stable. Assertions unchanged.
+     */
+    private fun waitForMyDayTask(title: String) {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText(title)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    /**
      * True when [text] appears in the semantics Text of [node] or any
      * of its descendants. A Plan-picked task with a planned start
      * renders in BOTH My Day and the Timeline (correct product
@@ -171,6 +188,7 @@ class TodayMyDayNoSwitcherTest {
         // Scoped to the My Day section: it also renders as a Timeline
         // block (correct product behaviour), so a bare global assertion
         // would find two nodes.
+        waitForMyDayTask("Call the bank")
         val section = composeRule.onNodeWithTag("my_day_section").fetchSemanticsNode()
         assertTrue(subtreeHasText(section, "Call the bank"))
     }
@@ -182,6 +200,7 @@ class TodayMyDayNoSwitcherTest {
 
         // Scoped to the My Day section (see the test above: the task
         // also renders as a Timeline block).
+        waitForMyDayTask("Call the bank")
         val section = composeRule.onNodeWithTag("my_day_section").fetchSemanticsNode()
         assertTrue(subtreeHasText(section, "Call the bank"))
         composeRule.onNodeWithTag("matrix_count_Q1").assertDoesNotExist()
