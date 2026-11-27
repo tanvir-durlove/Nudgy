@@ -431,7 +431,11 @@ class SettingsRowsTest {
         }
         composeRule.waitForIdle()
         composeRule.onNodeWithText("সেটিংস").assertIsDisplayed()
-        composeRule.onNodeWithText("নোটিফিকেশন").assertIsDisplayed()
+        // Sprint 7 — the Statistics section + taller title/headers
+        // pushed this header below the fold at scroll 0 (it was at
+        // ~276dp, now ~414dp); scroll it into view first, like the
+        // appearance/language header reads below.
+        composeRule.onNodeWithText("নোটিফিকেশন").performScrollTo().assertIsDisplayed()
         // The appearance / language rows repeat their section title as
         // the row title, so the Bengali title text exists TWICE —
         // onNodeWithText would throw on the duplicate. Disambiguate by
