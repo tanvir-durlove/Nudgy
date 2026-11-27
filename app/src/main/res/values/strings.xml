@@ -133,9 +133,6 @@
     <string name="settings_theme_light">Light</string>
     <string name="settings_theme_dark">Dark</string>
     <string name="settings_appearance_hint">Light is the default high-contrast theme</string>
-    <string name="settings_theme_system_sub">Follow system theme</string>
-    <string name="settings_theme_light_sub">Light theme</string>
-    <string name="settings_theme_dark_sub">Dark theme</string>
 
     <!-- Sprint 6-2 — language -->
     <string name="settings_language_english">English</string>
@@ -228,7 +225,6 @@
     <string name="widget_today_empty">Nothing planned for today</string>
     <string name="widget_today_done_count">%1$d of %2$d done</string>
     <string name="widget_today_more">+%1$d more</string>
-    <string name="widget_today_add_task">Add task</string>
     <string name="widget_today_quick_add_hint">Quick add for today…</string>
 
     <!-- App lock (S6-6, step 4a) -->
