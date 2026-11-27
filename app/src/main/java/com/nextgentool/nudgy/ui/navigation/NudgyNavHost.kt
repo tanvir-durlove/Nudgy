@@ -73,6 +73,7 @@ import com.nextgentool.nudgy.ui.screens.PlanScreen
 import com.nextgentool.nudgy.ui.screens.PrivacyPolicyScreen
 import com.nextgentool.nudgy.ui.screens.SearchScreen
 import com.nextgentool.nudgy.ui.screens.SettingsShell
+import com.nextgentool.nudgy.ui.screens.StatsScreen
 import com.nextgentool.nudgy.ui.screens.TasksScreen
 import com.nextgentool.nudgy.ui.screens.TemplatesScreen
 import com.nextgentool.nudgy.ui.screens.TodayScreen
@@ -422,6 +423,14 @@ fun NudgyNavHost(
         // Settings (spec §7, Q9=(a)).
         composable(NudgyRoute.WeeklyReview.route) {
             WeeklyReviewScreen(onBackClick = { navController.popBackStack() })
+        }
+        // Sprint 7 — Statistics. NOT a bottom destination either:
+        // no tab is highlighted while it is open (see NudgyRoute.all).
+        // No entry point wires here yet (see NudgyRoute.Stats) — the
+        // screen reuses the WeeklyReviewStats data, so it stays fresh
+        // the same way the review does.
+        composable(NudgyRoute.Stats.route) {
+            StatsScreen(onBackClick = { navController.popBackStack() })
         }
         // Sprint 1-1 — Tasks list. NOT a bottom destination: no tab is
         // highlighted while it is open (see NudgyRoute.all).
