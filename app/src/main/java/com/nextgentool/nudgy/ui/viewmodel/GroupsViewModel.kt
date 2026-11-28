@@ -8,6 +8,7 @@ import com.nextgentool.nudgy.auth.GroupAuth
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
+import com.nextgentool.nudgy.data.local.entity.SharedListEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
@@ -122,6 +123,32 @@ class GroupsViewModel @Inject constructor(
     /** The activity history of one group, newest first (live — the listener feeds it). */
     fun observeActivity(groupId: String): Flow<List<GroupActivityEntry>> =
         groupRepository.observeActivity(groupId)
+
+    /** The shared lists of one group, oldest first (live — the Room flow; the poll worker feeds it). */
+    fun observeSharedLists(groupId: String): Flow<List<SharedListEntity>> =
+        groupRepository.observeSharedLists(groupId)
+
+    /**
+     * Shared lists (micro-task 3, Q1=(a)): ANY member may create a
+     * list — no creator gate (unlike group tasks, Q3=(b)). The repo
+     * enforces the blank-name + guest guards; an Err surfaces on
+     * [groupTaskError] and the inline card stays open with the typed
+     * name (the screen only closes the card when the new list lands
+     * in the flow).
+     */
+    fun createSharedList(groupId: String, name: String) {
+        viewModelScope.launch {
+            val result = groupRepository.createSharedList(
+                groupId, userId, currentUser.displayName, name
+            )
+            if (result is GroupResult.Err) _groupTaskError.emit(result.message)
+        }
+    }
+
+    /** "N items · M done" for one shared-list row (the repo has no counts Flow). */
+    suspend fun getSharedListCounts(listId: String): Pair<Int, Int> =
+        groupRepository.getSharedListItemCount(listId) to
+            groupRepository.getSharedListDoneCount(listId)
 
     /** One-shot activity refresh for the detail (warms the flow before the listener fires). */
     suspend fun refreshActivity(groupId: String): List<GroupActivityEntry> =
