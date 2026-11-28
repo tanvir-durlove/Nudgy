@@ -3,7 +3,6 @@ package com.nextgentool.nudgy.ui.screens
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.hasRole
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -12,7 +11,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.semantics.Role
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
@@ -814,9 +812,10 @@ class GroupsScreenTest {
             initialSelectedSharedList = sharedList()
         )
 
-        // onAllNodes is a rule MEMBER in Compose 1.7 (importing it
-        // fails to compile) — hasRole builds the matcher.
-        composeRule.onAllNodes(hasRole(Role.Checkbox))[0].performClick()
+        // The checkbox carries its own test tag (NudgyCheckbox's
+        // optional testTag param) — neither onAllNodesWithRole nor
+        // hasRole exists in this Compose 1.7 build.
+        composeRule.onNodeWithTag("shared_list_item_checkbox_i-1").performClick()
         composeRule.waitForIdle()
 
         assertEquals(listOf(Triple("g-1", "l-1", sharedListItem())), toggled)

@@ -2009,7 +2009,8 @@ fun GroupsScreen(
                                             onToggleSharedListItem(
                                                 group.groupId, sharedList.id, item
                                             )
-                                        }
+                                        },
+                                        testTag = "shared_list_item_checkbox_${item.id}"
                                     )
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
