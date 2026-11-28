@@ -452,8 +452,11 @@ class CalendarScreenTest {
                     startOfDayMillis(selectedDay) == startOfDayMillis(plusTwo.timeInMillis)
             }
             reached = true
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             // Timeout: fall through to the probe failure below.
+            // Throwable, not Exception: ComposeTimeoutException is an
+            // AssertionError (an Error), so `catch (_: Exception)` let
+            // it escape and the PROBE message never appeared (run 1065).
         }
         val stuckDay = if (selectedDay == -1L) "never-called" else dateStringOf(selectedDay)
         assertTrue(
