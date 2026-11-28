@@ -410,6 +410,19 @@ class CalendarScreenTest {
         composeRule.onNodeWithTag("calendar_month_dot_$plusThreeStr", useUnmergedTree = true).assertDoesNotExist()
     }
 
+    /**
+     * Grid-day tap → onDayClick → jumpToDay → selectedDayMillis changes →
+     * LaunchedEffect(selectedDayMillis) fires onSelectDay. In Robolectric
+     * the LaunchedEffect callback can arrive after the click itself has
+     * been delivered, so the wait below needs room: waitForIdle() first
+     * (already used on this screen), then a 10 s waitUntil (was 5 s).
+     * Merge run 1063 failed this wait twice (attempts 1 and 2,
+     * ComposeTimeoutException at the waitUntil) while the identical tree
+     * passed PR run 1062 — a harness timing flake, not a product defect:
+     * performClick itself never threw, and the product chain (DayDates
+     * week math) was verified correct. The assertion is unchanged: the
+     * tapped day must be exactly the selected day.
+     */
     @Test
     fun `tapping a grid day selects it`() {
         val plusTwo = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, 2) }
@@ -434,7 +447,10 @@ class CalendarScreenTest {
         // sync-pill and seg tests use on this screen. The selection
         // assertion below is unchanged.
         composeRule.onNodeWithTag("calendar_month_day_$plusTwoStr").performClick()
-        composeRule.waitUntil(timeoutMillis = 5_000) {
+        // Let the click's recomposition settle before waiting on the
+        // LaunchedEffect callback (see the KDoc above).
+        composeRule.waitForIdle()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
             selectedDay != -1L &&
                 startOfDayMillis(selectedDay) == startOfDayMillis(plusTwo.timeInMillis)
         }
