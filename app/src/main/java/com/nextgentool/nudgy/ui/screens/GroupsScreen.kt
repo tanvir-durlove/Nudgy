@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
@@ -81,6 +82,7 @@ import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
+import com.nextgentool.nudgy.data.local.entity.SharedListEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
@@ -227,6 +229,15 @@ fun GroupsScreen(
     onObserveActivity: (groupId: String) -> Flow<List<GroupActivityEntry>> = { flowOf(emptyList()) },
     onRefreshActivity: suspend (groupId: String) -> List<GroupActivityEntry> = { emptyList() },
     onAssignGroupTask: (groupId: String, itemId: String, assigneeUid: String?) -> Unit = { _, _, _ -> },
+    // Shared lists (micro-task 3): same observe pattern as
+    // notices/activity; the create callback is fire-and-forget (the
+    // ViewModel toasts errors on groupTaskError) and the counts
+    // callback loads "N items · M done" per list (the repo has no
+    // counts Flow). No creator gate — any member may create a list
+    // (Q1=(a)); guests never reach the detail.
+    onObserveSharedLists: (groupId: String) -> Flow<List<SharedListEntity>> = { flowOf(emptyList()) },
+    onCreateSharedList: (groupId: String, name: String) -> Unit = { _, _ -> },
+    onGetSharedListCounts: suspend (listId: String) -> Pair<Int, Int> = { 0 to 0 },
     // Sprint 5-3 — notification tap: opens the detail for this group
     // (the worker puts the group id in the launch intent; MainActivity
     // feeds it through NudgyApp → NavHost). Consumed once — even when
@@ -362,6 +373,45 @@ fun GroupsScreen(
             onRefreshActivity(groupId)
         } catch (e: Exception) {
             // Refresh is best-effort — the listener feeds the list.
+        }
+    }
+    // Shared lists (micro-task 3) — observed declaratively, same
+    // pattern as notices/activity. An empty list is a real state
+    // ("No shared lists yet."), not loading — no tri-state needed.
+    // The counts have no Flow (the repo only has the suspend
+    // getters), so they load in an effect and sit in state.
+    val sharedListsFlow = remember(selectedGroupId) {
+        if (selectedGroupId == null) flowOf(emptyList())
+        else onObserveSharedLists(selectedGroupId)
+    }
+    val sharedLists by sharedListsFlow.collectAsState(initial = emptyList())
+    var sharedListCounts by remember(selectedGroupId) { mutableStateOf<Map<String, Pair<Int, Int>>>(emptyMap()) }
+    LaunchedEffect(sharedLists) {
+        val counts = mutableMapOf<String, Pair<Int, Int>>()
+        for (list in sharedLists) {
+            counts[list.id] = try {
+                onGetSharedListCounts(list.id)
+            } catch (e: Exception) {
+                0 to 0
+            }
+        }
+        sharedListCounts = counts
+    }
+    var showCreateSharedList by remember(selectedGroupId) { mutableStateOf(false) }
+    var newSharedListName by remember(selectedGroupId) { mutableStateOf("") }
+    // The create call is fire-and-forget, so the card closes only
+    // when the new list actually lands in the flow — on failure the
+    // card stays open with the typed name intact (the error toasts
+    // on groupTaskError). The pending total is the list size at
+    // submit time, so a duplicate name still needs a genuinely new
+    // row to close the card.
+    var pendingSharedListTotal by remember(selectedGroupId) { mutableStateOf<Int?>(null) }
+    LaunchedEffect(sharedLists, pendingSharedListTotal) {
+        val pending = pendingSharedListTotal ?: return@LaunchedEffect
+        if (sharedLists.size > pending) {
+            showCreateSharedList = false
+            newSharedListName = ""
+            pendingSharedListTotal = null
         }
     }
     // Sprint 5-3 — notification tap: open the detail once the group
@@ -1459,6 +1509,173 @@ fun GroupsScreen(
                                 )
                             }
                         }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+            // Shared lists (micro-task 3, prototype scr-group-detail):
+            // sec-title + verbatim intro + .task rows (list icon +
+            // name + "N items · M done · tap to open" + chevron) +
+            // soft "New shared list" button + inline create card.
+            // The row tap is a NO-OP for now — the list detail
+            // screen lands in micro-task 4, so no fake screen, no
+            // placeholder navigation, no dead navigation is wired
+            // here. Any member may create a list (Q1=(a)) — no
+            // isCreator gate on the button.
+            Text(
+                text = "Shared lists",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontSize = 17.sp, fontWeight = FontWeight.Bold
+                ),
+                color = NudgyCharcoal,
+                modifier = Modifier.padding(start = 2.dp, bottom = 10.dp)
+            )
+            Text(
+                text = "A shared list belongs to the whole group — for shopping, supplies, anything. Each item can be assigned to a member, and everyone can comment on it. Tap a list to open it.",
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                color = NudgyMuted,
+                modifier = Modifier.padding(start = 2.dp, bottom = 12.dp)
+            )
+            if (sharedLists.isEmpty()) {
+                Text(
+                    text = "No shared lists yet.",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    color = NudgyMuted
+                )
+            } else {
+                sharedLists.forEach { sharedList ->
+                    val counts = sharedListCounts[sharedList.id] ?: (0 to 0)
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = NudgyCard,
+                        shadowElevation = 2.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp)
+                            .testTag("shared_list_row_${sharedList.id}")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                // Micro-task 4 wires the detail
+                                // screen — no-op until then.
+                                .clickable { }
+                                .padding(14.dp)
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(tealSoft)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.List,
+                                    contentDescription = null,
+                                    tint = tealDark,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = sharedList.name,
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.SemiBold, fontSize = 14.sp
+                                    ),
+                                    color = NudgyCharcoal
+                                )
+                                Text(
+                                    text = "${counts.first} items · ${counts.second} done · tap to open",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                    color = NudgyMuted
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = NudgyMuted,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                onClick = { showCreateSharedList = !showCreateSharedList },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = tealSoft,
+                    contentColor = tealDark
+                ),
+                shape = RoundedCornerShape(100.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("new_shared_list_open")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "New shared list",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = tealDark
+                )
+            }
+            if (showCreateSharedList) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Surface(
+                    shape = NudgyTokens.cardRadius,
+                    color = NudgyCard,
+                    shadowElevation = NudgyTokens.cardElevation,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        OutlinedTextField(
+                            value = newSharedListName,
+                            onValueChange = { newSharedListName = it },
+                            placeholder = { Text("List name, e.g. Eid shopping") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = teal,
+                                unfocusedBorderColor = NudgyFieldBorder
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("new_shared_list_field")
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                val name = newSharedListName.trim()
+                                if (name.isEmpty()) return@Button
+                                pendingSharedListTotal = sharedLists.size
+                                onCreateSharedList(group.groupId, name)
+                            },
+                            enabled = newSharedListName.isNotBlank(),
+                            colors = ButtonDefaults.buttonColors(containerColor = teal),
+                            shape = RoundedCornerShape(100.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("create_shared_list_submit")
+                        ) {
+                            Text(
+                                text = "Create shared list",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = Color.White
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Everyone in the group can add items, assign them and comment.",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                            color = NudgyMuted
+                        )
                     }
                 }
             }

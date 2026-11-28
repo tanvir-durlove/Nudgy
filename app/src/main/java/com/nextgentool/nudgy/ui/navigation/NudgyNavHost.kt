@@ -762,6 +762,11 @@ fun NudgyNavHost(
                 onAssignGroupTask = { groupId, itemId, assigneeUid ->
                     groupsViewModel.assignGroupTask(groupId, itemId, assigneeUid)
                 },
+                // Shared lists (micro-task 3): the detail section +
+                // inline create card (any member may create — Q1=(a)).
+                onObserveSharedLists = { groupId -> groupsViewModel.observeSharedLists(groupId) },
+                onCreateSharedList = { groupId, name -> groupsViewModel.createSharedList(groupId, name) },
+                onGetSharedListCounts = { listId -> groupsViewModel.getSharedListCounts(listId) },
                 openGroupId = pendingOpenGroupId ?: searchOpenGroupId,
                 onOpenGroupIdConsumed = {
                     // Sprint 6-4 (step 2c) — the search tap's id is

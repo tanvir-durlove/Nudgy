@@ -436,6 +436,40 @@ class GroupsViewModelTest {
         assertTrue(fake.notices[entity.groupId].isNullOrEmpty())
     }
 
+    // ---- Shared lists (micro-task 3, Q1=(a)) ----
+
+    @Test
+    fun `createSharedList as a member creates the list in the repo and the flow`() = vmTest {
+        val created = groupRepository.createGroup(userId, "Creator", "DIU 41")
+        val entity = (created as GroupResult.Ok).value
+        // user-2 is a member, not the creator — Q1=(a) says any
+        // member may create a list (unlike group tasks, Q3=(b)).
+        setActiveUser("user-2")
+        val viewModel = buildViewModel()
+
+        viewModel.createSharedList(entity.groupId, "Eid shopping")
+
+        val lists = viewModel.observeSharedLists(entity.groupId).first { it.isNotEmpty() }
+        assertEquals(listOf("Eid shopping"), lists.map { it.name })
+        assertEquals(
+            "Eid shopping",
+            fake.sharedLists[entity.groupId]?.values?.single()?.get("name")
+        )
+    }
+
+    @Test
+    fun `createSharedList with a blank name emits the error`() = vmTest {
+        val viewModel = buildViewModel()
+        val created = viewModel.createGroup("DIU 41")
+        val entity = (created as GroupResult.Ok).value
+        val errorDeferred = backgroundScope.async { viewModel.groupTaskError.first() }
+
+        viewModel.createSharedList(entity.groupId, "   ")
+
+        assertEquals("তালিকার নাম লেখো।", errorDeferred.await())
+        assertTrue(fake.sharedLists[entity.groupId].isNullOrEmpty())
+    }
+
     @Test
     fun `refreshNotices returns the fresh list from the gateway`() = vmTest {
         val viewModel = buildViewModel()

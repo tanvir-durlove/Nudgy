@@ -3,6 +3,7 @@ package com.nextgentool.nudgy.ui.screens
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -12,6 +13,7 @@ import androidx.compose.ui.test.performTextInput
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
+import com.nextgentool.nudgy.data.local.entity.SharedListEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.repository.GroupActivityEntry
 import com.nextgentool.nudgy.data.repository.GroupActivityType
@@ -20,6 +22,8 @@ import com.nextgentool.nudgy.data.repository.GroupMember
 import com.nextgentool.nudgy.data.repository.GroupNotice
 import com.nextgentool.nudgy.data.repository.GroupResult
 import com.nextgentool.nudgy.ui.theme.NudgyTheme
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -98,6 +102,10 @@ class GroupsScreenTest {
         groupAssignEnabled: Boolean = false,
         noticesOverride: List<GroupNotice> = emptyList(),
         activityOverride: List<GroupActivityEntry> = emptyList(),
+        sharedListsOverride: List<SharedListEntity> = emptyList(),
+        sharedListsFlowOverride: Flow<List<SharedListEntity>>? = null,
+        onCreateSharedList: (String, String) -> Unit = { _, _ -> },
+        onGetSharedListCounts: suspend (String) -> Pair<Int, Int> = { 0 to 0 },
         onAssignGroupTask: (String, String, String?) -> Unit = { _, _, _ -> },
         onSendNotice: (String, String) -> Unit = { _, _ -> },
         onDeleteGroup: (String) -> Unit = {},
@@ -137,6 +145,9 @@ class GroupsScreenTest {
                     onRefreshNotices = { noticesOverride },
                     onObserveActivity = { flowOf(activityOverride) },
                     onRefreshActivity = { activityOverride },
+                    onObserveSharedLists = { sharedListsFlowOverride ?: flowOf(sharedListsOverride) },
+                    onCreateSharedList = onCreateSharedList,
+                    onGetSharedListCounts = onGetSharedListCounts,
                     onSendNotice = onSendNotice,
                     onSignInClick = onSignInClick,
                     openGroupId = openGroupId,
@@ -653,6 +664,82 @@ class GroupsScreenTest {
             "Members who leave can rejoin with the same code.",
             substring = true
         ).assertExists()
+    }
+
+    // Shared lists (micro-task 3): the detail section sits between
+    // Members and Invite (prototype scr-group-detail) — sec-title +
+    // verbatim intro + empty state + the "New shared list" button
+    // (no creator gate — any member may create, Q1=(a)).
+    @Test
+    fun `detail shows the Shared lists section with the empty state`() {
+        render(initialSelectedGroup = group())
+
+        composeRule.onNodeWithText("Shared lists").assertExists()
+        composeRule.onNodeWithText(
+            "A shared list belongs to the whole group",
+            substring = true
+        ).assertExists()
+        composeRule.onNodeWithText("No shared lists yet.").assertExists()
+        composeRule.onNodeWithTag("new_shared_list_open").assertExists()
+    }
+
+    @Test
+    fun `detail shared-list row shows the name and counts`() {
+        render(
+            sharedListsOverride = listOf(
+                SharedListEntity(
+                    id = "l-1", groupId = "g-1", name = "Monthly shopping",
+                    createdByUid = "user-1", createdByName = "Ayesha"
+                )
+            ),
+            onGetSharedListCounts = { 3 to 1 },
+            initialSelectedGroup = group()
+        )
+
+        // The counts load in an effect, so wait for the meta text
+        // instead of asserting the initial 0/0.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("3 items · 1 done · tap to open")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("Monthly shopping").assertExists()
+    }
+
+    @Test
+    fun `new shared list card creates through the callback and closes when the list lands`() {
+        val created = mutableListOf<Pair<String, String>>()
+        val listsFlow = MutableStateFlow<List<SharedListEntity>>(emptyList())
+        render(
+            sharedListsFlowOverride = listsFlow,
+            onCreateSharedList = { groupId, name -> created += groupId to name },
+            initialSelectedGroup = group()
+        )
+
+        composeRule.onNodeWithTag("new_shared_list_open").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("new_shared_list_field").performScrollTo()
+        composeRule.onNodeWithTag("new_shared_list_field").assertIsDisplayed()
+        composeRule.onNodeWithTag("new_shared_list_field").performTextInput("Eid shopping")
+        composeRule.onNodeWithTag("create_shared_list_submit").performScrollTo().performClick()
+        composeRule.waitForIdle()
+
+        assertEquals(listOf("g-1" to "Eid shopping"), created)
+        // The list has not landed in the flow yet, so the card stays
+        // open with the typed name intact (the error case behaves
+        // the same — the card only closes on a real new row).
+        composeRule.onNodeWithTag("new_shared_list_field").assertIsDisplayed()
+
+        listsFlow.value = listOf(
+            SharedListEntity(
+                id = "l-1", groupId = "g-1", name = "Eid shopping",
+                createdByUid = "user-2", createdByName = "Tanvir"
+            )
+        )
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("create_shared_list_submit")
+                .fetchSemanticsNodes().isEmpty()
+        }
+        composeRule.onNodeWithTag("create_shared_list_submit").assertDoesNotExist()
     }
 
     private fun groupEvent(
