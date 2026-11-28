@@ -470,6 +470,74 @@ class GroupsViewModelTest {
         assertTrue(fake.sharedLists[entity.groupId].isNullOrEmpty())
     }
 
+    // ---- Shared lists (micro-task 4) ----
+
+    private suspend fun seedSharedListWithItem(
+        groupId: String,
+        adderUid: String = userId
+    ): Pair<String, String> {
+        val list = (
+            groupRepository.createSharedList(groupId, userId, "Creator", "Monthly shopping")
+                as GroupResult.Ok
+            ).value
+        val item = (
+            groupRepository.addSharedListItem(groupId, list.id, adderUid, "Creator", "Milk 2 L")
+                as GroupResult.Ok
+            ).value
+        return list.id to item.id
+    }
+
+    @Test
+    fun `toggleSharedListItem as a member flips done in the repo and the flow`() = vmTest {
+        val created = groupRepository.createGroup(userId, "Creator", "DIU 41")
+        val entity = (created as GroupResult.Ok).value
+        val (listId, itemId) = seedSharedListWithItem(entity.groupId)
+        // user-2 is a member, not the creator — Q1=(a) says any
+        // member may flip done.
+        setActiveUser("user-2")
+        val viewModel = buildViewModel()
+        val item = viewModel.observeSharedListItems(listId).first { it.isNotEmpty() }.single()
+
+        viewModel.toggleSharedListItem(entity.groupId, listId, item)
+
+        val flipped = viewModel.observeSharedListItems(listId).first { it.single().done }
+        assertEquals(itemId, flipped.single().id)
+        assertEquals(
+            true,
+            fake.sharedItems[entity.groupId]?.get(listId)?.get(itemId)?.get("done")
+        )
+    }
+
+    @Test
+    fun `addSharedListItem with a blank name emits the error`() = vmTest {
+        val viewModel = buildViewModel()
+        val created = viewModel.createGroup("DIU 41")
+        val entity = (created as GroupResult.Ok).value
+        val list = (
+            groupRepository.createSharedList(entity.groupId, userId, "Creator", "Monthly shopping")
+                as GroupResult.Ok
+            ).value
+        val errorDeferred = backgroundScope.async { viewModel.groupTaskError.first() }
+
+        viewModel.addSharedListItem(entity.groupId, list.id, "   ")
+
+        assertEquals("আইটেমের নাম লেখো।", errorDeferred.await())
+        assertTrue(fake.sharedItems[entity.groupId]?.get(list.id).isNullOrEmpty())
+    }
+
+    @Test
+    fun `deleteSharedListItem as the adder removes it from the repo and the flow`() = vmTest {
+        val created = groupRepository.createGroup(userId, "Creator", "DIU 41")
+        val entity = (created as GroupResult.Ok).value
+        val (listId, itemId) = seedSharedListWithItem(entity.groupId)
+        val viewModel = buildViewModel()
+
+        viewModel.deleteSharedListItem(entity.groupId, listId, itemId)
+
+        viewModel.observeSharedListItems(listId).first { it.isEmpty() }
+        assertTrue(fake.sharedItems[entity.groupId]?.get(listId).isNullOrEmpty())
+    }
+
     @Test
     fun `refreshNotices returns the fresh list from the gateway`() = vmTest {
         val viewModel = buildViewModel()

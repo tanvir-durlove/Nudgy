@@ -2,7 +2,9 @@ package com.nextgentool.nudgy.ui.screens
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithRole
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -10,10 +12,12 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.semantics.Role
 import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.SharedListEntity
+import com.nextgentool.nudgy.data.local.entity.SharedListItemEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.repository.GroupActivityEntry
 import com.nextgentool.nudgy.data.repository.GroupActivityType
@@ -106,6 +110,12 @@ class GroupsScreenTest {
         sharedListsFlowOverride: Flow<List<SharedListEntity>>? = null,
         onCreateSharedList: (String, String) -> Unit = { _, _ -> },
         onGetSharedListCounts: suspend (String) -> Pair<Int, Int> = { 0 to 0 },
+        sharedListItemsOverride: List<SharedListItemEntity> = emptyList(),
+        sharedListItemsFlowOverride: Flow<List<SharedListItemEntity>>? = null,
+        onAddSharedListItem: (String, String, String) -> Unit = { _, _, _ -> },
+        onToggleSharedListItem: (String, String, SharedListItemEntity) -> Unit = { _, _, _ -> },
+        onDeleteSharedListItem: (String, String, String) -> Unit = { _, _, _ -> },
+        initialSelectedSharedList: SharedListEntity? = null,
         onAssignGroupTask: (String, String, String?) -> Unit = { _, _, _ -> },
         onSendNotice: (String, String) -> Unit = { _, _ -> },
         onDeleteGroup: (String) -> Unit = {},
@@ -148,11 +158,16 @@ class GroupsScreenTest {
                     onObserveSharedLists = { sharedListsFlowOverride ?: flowOf(sharedListsOverride) },
                     onCreateSharedList = onCreateSharedList,
                     onGetSharedListCounts = onGetSharedListCounts,
+                    onObserveSharedListItems = { sharedListItemsFlowOverride ?: flowOf(sharedListItemsOverride) },
+                    onAddSharedListItem = onAddSharedListItem,
+                    onToggleSharedListItem = onToggleSharedListItem,
+                    onDeleteSharedListItem = onDeleteSharedListItem,
                     onSendNotice = onSendNotice,
                     onSignInClick = onSignInClick,
                     openGroupId = openGroupId,
                     prefillJoinCode = prefillJoinCode,
-                    initialSelectedGroup = initialSelectedGroup
+                    initialSelectedGroup = initialSelectedGroup,
+                    initialSelectedSharedList = initialSelectedSharedList
                 )
             }
         }
@@ -740,6 +755,172 @@ class GroupsScreenTest {
                 .fetchSemanticsNodes().isEmpty()
         }
         composeRule.onNodeWithTag("create_shared_list_submit").assertDoesNotExist()
+    }
+
+    // Shared lists (micro-task 4): the list detail screen — backbar
+    // + intro + items card (checkbox + text) + ADD AN ITEM card +
+    // Activity history filtered to this list. The row body tap is a
+    // no-op (the item sheet lands in micro-task 5); the checkbox
+    // toggles, the delete icon is adder-or-creator only.
+    private fun sharedList(
+        id: String = "l-1",
+        name: String = "Monthly shopping"
+    ) = SharedListEntity(
+        id = id, groupId = "g-1", name = name,
+        createdByUid = "user-1", createdByName = "Ayesha"
+    )
+
+    private fun sharedListItem(
+        id: String = "i-1",
+        text: String = "Milk 2 L",
+        addedByUid: String = "user-1",
+        done: Boolean = false
+    ) = SharedListItemEntity(
+        id = id, listId = "l-1", groupId = "g-1", text = text,
+        addedByUid = addedByUid, addedByName = "Ayesha", done = done
+    )
+
+    @Test
+    fun `shared list detail shows items and the add card`() {
+        render(
+            sharedListItemsOverride = listOf(
+                sharedListItem(),
+                sharedListItem(id = "i-2", text = "Rice 10 kg", addedByUid = "user-2", done = true)
+            ),
+            initialSelectedGroup = group(),
+            initialSelectedSharedList = sharedList()
+        )
+
+        composeRule.onNodeWithTag("shared_list_detail_backbar").assertExists()
+        composeRule.onNodeWithText("Monthly shopping").assertExists()
+        composeRule.onNodeWithText("Milk 2 L").assertExists()
+        composeRule.onNodeWithText("Rice 10 kg").assertExists()
+        composeRule.onNodeWithText("ADD AN ITEM").assertExists()
+        composeRule.onNodeWithTag("add_shared_list_item_field").assertExists()
+        composeRule.onNodeWithTag("add_shared_list_item_submit").assertExists()
+        composeRule.onNodeWithText("Activity history").assertExists()
+        composeRule.onNodeWithText("No activity yet.").assertExists()
+    }
+
+    @Test
+    fun `shared list detail checkbox toggles through the callback`() {
+        val toggled = mutableListOf<Triple<String, String, SharedListItemEntity>>()
+        render(
+            sharedListItemsOverride = listOf(sharedListItem()),
+            onToggleSharedListItem = { groupId, listId, item ->
+                toggled += Triple(groupId, listId, item)
+            },
+            initialSelectedGroup = group(),
+            initialSelectedSharedList = sharedList()
+        )
+
+        composeRule.onAllNodesWithRole(Role.Checkbox)[0].performClick()
+        composeRule.waitForIdle()
+
+        assertEquals(listOf(Triple("g-1", "l-1", sharedListItem())), toggled)
+    }
+
+    @Test
+    fun `add shared list item calls the callback and clears the field when it lands`() {
+        val added = mutableListOf<Triple<String, String, String>>()
+        val itemsFlow = MutableStateFlow<List<SharedListItemEntity>>(emptyList())
+        render(
+            sharedListItemsFlowOverride = itemsFlow,
+            onAddSharedListItem = { groupId, listId, text ->
+                added += Triple(groupId, listId, text)
+            },
+            initialSelectedGroup = group(),
+            initialSelectedSharedList = sharedList()
+        )
+
+        composeRule.onNodeWithTag("add_shared_list_item_field").performScrollTo()
+        composeRule.onNodeWithTag("add_shared_list_item_field").assertIsDisplayed()
+        composeRule.onNodeWithTag("add_shared_list_item_field").performTextInput("Milk 2 L")
+        composeRule.onNodeWithTag("add_shared_list_item_submit").performScrollTo().performClick()
+        composeRule.waitForIdle()
+
+        assertEquals(listOf(Triple("g-1", "l-1", "Milk 2 L")), added)
+        // The item has not landed in the flow yet, so the field keeps
+        // its text (the error case behaves the same — the field only
+        // clears on a real new row).
+        composeRule.onNodeWithTag("add_shared_list_item_submit").assertIsEnabled()
+
+        itemsFlow.value = listOf(sharedListItem())
+        // The placeholder only renders when the field is empty, so
+        // waiting for it is waiting for the clear itself (the item
+        // text "Milk 2 L" would match the field's typed text too).
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("e.g. Milk 2 L")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        // The field cleared once the item landed, so Add is disabled.
+        composeRule.onNodeWithTag("add_shared_list_item_submit").assertIsNotEnabled()
+    }
+
+    @Test
+    fun `delete icon shows only for the adder or the creator`() {
+        // memberUser (user-2) added i-2 but not i-1 (added by user-1,
+        // the group creator) — only i-2 shows the icon.
+        render(
+            sharedListItemsOverride = listOf(
+                sharedListItem(),
+                sharedListItem(id = "i-2", text = "Rice 10 kg", addedByUid = "user-2")
+            ),
+            initialSelectedGroup = group(),
+            initialSelectedSharedList = sharedList()
+        )
+
+        composeRule.onNodeWithTag("delete_shared_list_item_i-1").assertDoesNotExist()
+        composeRule.onNodeWithTag("delete_shared_list_item_i-2").assertExists()
+    }
+
+    @Test
+    fun `delete icon shows for the group creator on every item`() {
+        render(
+            user = creator,
+            sharedListItemsOverride = listOf(
+                sharedListItem(),
+                sharedListItem(id = "i-2", text = "Rice 10 kg", addedByUid = "user-2")
+            ),
+            initialSelectedGroup = group(),
+            initialSelectedSharedList = sharedList()
+        )
+
+        composeRule.onNodeWithTag("delete_shared_list_item_i-1").assertExists()
+        composeRule.onNodeWithTag("delete_shared_list_item_i-2").assertExists()
+    }
+
+    @Test
+    fun `shared list detail activity shows only this lists entries`() {
+        render(
+            activityOverride = listOf(
+                GroupActivityEntry(
+                    id = "a-1", groupId = "g-1", actorUid = "user-1", actorName = "Ayesha",
+                    type = GroupActivityType.LIST_CREATED, itemId = "l-1",
+                    itemTitle = "Monthly shopping",
+                    createdAtEpochMillis = 1_700_000_000_000L
+                ),
+                GroupActivityEntry(
+                    id = "a-2", groupId = "g-1", actorUid = "user-1", actorName = "Ayesha",
+                    type = GroupActivityType.LIST_ITEM_ADDED, itemId = "i-1",
+                    itemTitle = "Milk 2 L",
+                    createdAtEpochMillis = 1_700_000_000_000L
+                ),
+                GroupActivityEntry(
+                    id = "a-3", groupId = "g-1", actorUid = "user-2", actorName = "Tanvir",
+                    type = GroupActivityType.LIST_CREATED, itemId = "l-2",
+                    itemTitle = "Other list",
+                    createdAtEpochMillis = 1_700_000_000_000L
+                )
+            ),
+            sharedListItemsOverride = listOf(sharedListItem()),
+            initialSelectedGroup = group(),
+            initialSelectedSharedList = sharedList()
+        )
+
+        composeRule.onNodeWithText("Ayesha created list \u201CMonthly shopping\u201D").assertExists()
+        composeRule.onNodeWithText("Ayesha added \u201CMilk 2 L\u201D").assertExists()
+        composeRule.onNodeWithText("Tanvir created list \u201COther list\u201D").assertDoesNotExist()
     }
 
     private fun groupEvent(
