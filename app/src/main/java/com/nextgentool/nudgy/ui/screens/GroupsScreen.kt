@@ -83,6 +83,7 @@ import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.SharedListEntity
+import com.nextgentool.nudgy.data.local.entity.SharedListItemEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
