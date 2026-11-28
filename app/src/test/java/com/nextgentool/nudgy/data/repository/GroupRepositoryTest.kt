@@ -20,7 +20,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
-import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -44,51 +43,6 @@ class GroupRepositoryTest {
     private lateinit var db: NudgyDatabase
     private lateinit var fake: FakeGroupRemoteGateway
     private lateinit var repo: GroupRepository
-
-    // TEMPORARY DIAGNOSTIC (micro-task 4, run 1085) — delete once the
-    // leaker is named. Run 1085 failed `queryGroupNoticesSince...` with
-    // UncaughtExceptionsBeforeTest and the CI log hides the underlying
-    // exception. This per-method rule runs BEFORE each test and
-    // reflectively reads the coroutines-test ExceptionCollector's
-    // `unprocessedExceptions` buffer; if non-empty it RE-THROWS the
-    // first buffered exception, so the CI log shows THAT exception's
-    // type + throw site (the leaker) instead of the wrapper. Pattern
-    // from S4-1 round 10 (BoardDragTest ClassRule), adapted to a
-    // per-method rule because the leaker may be an earlier method in
-    // THIS class.
-    @get:Rule
-    val revealLeakRule = object : org.junit.rules.TestRule {
-        override fun apply(
-            base: org.junit.runners.model.Statement,
-            description: org.junit.runner.Description
-        ): org.junit.runners.model.Statement {
-            return object : org.junit.runners.model.Statement() {
-                override fun evaluate() {
-                    val buffered = readUnprocessedExceptions()
-                    if (buffered.isNotEmpty()) {
-                        throw buffered.first()
-                    }
-                    base.evaluate()
-                }
-            }
-        }
-    }
-
-    private fun readUnprocessedExceptions(): List<Throwable> {
-        return try {
-            val clazz =
-                Class.forName("kotlinx.coroutines.test.internal.ExceptionCollector")
-            val instanceField = clazz.getDeclaredField("INSTANCE")
-            instanceField.isAccessible = true
-            val instance = instanceField.get(null)
-            val listField = clazz.getDeclaredField("unprocessedExceptions")
-            listField.isAccessible = true
-            @Suppress("UNCHECKED_CAST")
-            (listField.get(instance) as? List<Throwable>)?.toList().orEmpty()
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
 
     @Before
     fun setUp() {
