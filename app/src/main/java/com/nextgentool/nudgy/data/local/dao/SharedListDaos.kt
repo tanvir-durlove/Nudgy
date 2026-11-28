@@ -95,6 +95,9 @@ interface SharedListCommentDao {
     @Query("SELECT * FROM shared_list_comments WHERE itemId = :itemId ORDER BY createdAtEpochMillis ASC")
     suspend fun getCommentsOnce(itemId: String): List<SharedListCommentEntity>
 
+    @Query("SELECT * FROM shared_list_comments WHERE id = :commentId LIMIT 1")
+    suspend fun getCommentById(commentId: String): SharedListCommentEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertComment(comment: SharedListCommentEntity)
 

@@ -3,6 +3,7 @@ package com.nextgentool.nudgy.data.repository
 import android.util.Log
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentChange
+import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
@@ -183,6 +184,96 @@ interface GroupRemoteGateway {
 
     /** Every activity entry of a group as (doc id, fields) pairs, newest first. */
     suspend fun getActivity(groupId: String): List<Pair<String, Map<String, Any?>>>
+
+    // ---- shared lists (micro-task 2) ----
+
+    /**
+     * Writes one shared-list doc. [merge] selects set-with-merge
+     * (the rename path — the name only; the rules reject any other
+     * changed key) vs plain set (the create path, where the gateway
+     * stamps createdAt). No group-doc bump: nothing reads it, and
+     * members may only touch lastUpdatedAt there.
+     */
+    suspend fun writeSharedList(
+        groupId: String,
+        listId: String,
+        fields: Map<String, Any>,
+        merge: Boolean
+    )
+
+    /**
+     * Deletes a whole list remotely: every comment, then every item,
+     * then the list doc — the rules do not cascade (same pattern as
+     * [deleteGroupDocs]). Chunked at 400 writes per batch.
+     */
+    suspend fun deleteSharedListDocs(groupId: String, listId: String)
+
+    /**
+     * Every shared list of a group, oldest first. A FULL fetch —
+     * list docs carry no updatedAt, so there is no since-query.
+     */
+    suspend fun getSharedLists(groupId: String): List<SharedListDoc>
+
+    /**
+     * Writes one shared-list item doc; [merge] selects set-with-merge
+     * (done/assign path — the changed keys must stay inside the
+     * rules' done/assignee set + updatedAt) vs plain set (create
+     * path). The caller passes the server timestamps in [fields]
+     * (same pattern as [writeGroupItem]).
+     */
+    suspend fun writeSharedListItem(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        fields: Map<String, Any>,
+        merge: Boolean
+    )
+
+    /** Deletes one shared-list item remotely: its comments first, then the item doc. */
+    suspend fun deleteSharedListItemDocs(groupId: String, listId: String, itemId: String)
+
+    /** All item ids of one list, bounded (reconciliation input). */
+    suspend fun getSharedListItemIds(groupId: String, listId: String, limit: Long): List<String>
+
+    /** Items of one list changed since [lastSeenMs], with the 60s overlap window applied here (never in the caller). */
+    suspend fun querySharedListItemsSince(
+        groupId: String,
+        listId: String,
+        lastSeenMs: Long
+    ): List<SharedListItemDoc>
+
+    /** Writes one comment doc (create only — comments are never edited; the gateway stamps createdAt). */
+    suspend fun writeSharedListComment(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        commentId: String,
+        fields: Map<String, Any>
+    )
+
+    /** Deletes one comment doc. */
+    suspend fun deleteSharedListComment(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        commentId: String
+    )
+
+    /** All comment ids of one item, bounded (reconciliation input). */
+    suspend fun getSharedListCommentIds(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        limit: Long
+    ): List<String>
+
+    /** Comments of one item created since [lastSeenMs], with the 60s overlap window applied here (never in the caller). */
+    suspend fun querySharedListCommentsSince(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        lastSeenMs: Long
+    ): List<SharedListCommentDoc>
 
     // ---- listeners ----
 
@@ -527,6 +618,170 @@ class FirestoreGroupRemoteGateway(
             .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .limit(ACTIVITY_QUERY_LIMIT)
             .get().await().documents.map { it.id to normalizeFields(it.data ?: emptyMap()) }
+
+    // ---- shared lists (micro-task 2) ----
+
+    private fun sharedListsRef(groupId: String) =
+        firestore().collection("groups").document(groupId).collection("sharedLists")
+
+    private fun sharedListItemsRef(groupId: String, listId: String) =
+        sharedListsRef(groupId).document(listId).collection("items")
+
+    private fun sharedListCommentsRef(groupId: String, listId: String, itemId: String) =
+        sharedListItemsRef(groupId, listId).document(itemId).collection("comments")
+
+    override suspend fun writeSharedList(
+        groupId: String,
+        listId: String,
+        fields: Map<String, Any>,
+        merge: Boolean
+    ) {
+        val ref = sharedListsRef(groupId).document(listId)
+        if (merge) {
+            // Rename only: the payload is the name alone (the rules
+            // reject any other changed key) — never stamp createdAt
+            // here, or the update itself would violate the rule.
+            ref.set(fields, SetOptions.merge()).await()
+        } else {
+            ref.set(fields + timestampFields("createdAt")).await()
+        }
+    }
+
+    override suspend fun deleteSharedListDocs(groupId: String, listId: String) {
+        val fs = firestore()
+        val listRef = sharedListsRef(groupId).document(listId)
+        val itemIds = listRef.collection("items")
+            .limit(500).get().await().documents.map { it.id }
+        val deleteRefs = mutableListOf<DocumentReference>()
+        for (itemId in itemIds) {
+            val commentIds = listRef.collection("items").document(itemId)
+                .collection("comments")
+                .limit(500).get().await().documents.map { it.id }
+            deleteRefs += commentIds.map {
+                listRef.collection("items").document(itemId)
+                    .collection("comments").document(it)
+            }
+        }
+        deleteRefs += itemIds.map { listRef.collection("items").document(it) }
+        for (chunk in deleteRefs.chunked(400)) {
+            val batch = fs.batch()
+            for (ref in chunk) batch.delete(ref)
+            batch.commit().await()
+        }
+        // List doc LAST: its items are already gone, so a mid-flight
+        // failure leaves an empty list, never orphaned items.
+        listRef.delete().await()
+    }
+
+    override suspend fun getSharedLists(groupId: String): List<SharedListDoc> =
+        sharedListsRef(groupId)
+            .get().await().documents.mapNotNull { doc ->
+                sharedListDocFromFields(doc.id, groupId, normalizeFields(doc.data ?: emptyMap()))
+            }.sortedBy { it.createdAtEpochMillis }
+
+    override suspend fun writeSharedListItem(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        fields: Map<String, Any>,
+        merge: Boolean
+    ) {
+        val ref = sharedListItemsRef(groupId, listId).document(itemId)
+        if (merge) ref.set(fields, SetOptions.merge()).await()
+        else ref.set(fields).await()
+    }
+
+    override suspend fun deleteSharedListItemDocs(
+        groupId: String,
+        listId: String,
+        itemId: String
+    ) {
+        val fs = firestore()
+        val itemRef = sharedListItemsRef(groupId, listId).document(itemId)
+        val commentIds = itemRef.collection("comments")
+            .limit(500).get().await().documents.map { it.id }
+        val batch = fs.batch()
+        for (commentId in commentIds) {
+            batch.delete(itemRef.collection("comments").document(commentId))
+        }
+        batch.delete(itemRef)
+        batch.commit().await()
+    }
+
+    override suspend fun getSharedListItemIds(
+        groupId: String,
+        listId: String,
+        limit: Long
+    ): List<String> =
+        sharedListItemsRef(groupId, listId)
+            .limit(limit)
+            .get().await().documents.map { it.id }
+
+    override suspend fun querySharedListItemsSince(
+        groupId: String,
+        listId: String,
+        lastSeenMs: Long
+    ): List<SharedListItemDoc> =
+        sharedListItemsRef(groupId, listId)
+            .whereGreaterThan(
+                "updatedAt",
+                Timestamp(Date(lastSeenMs - POLL_OVERLAP_MS))
+            )
+            .limit(POLL_QUERY_LIMIT)
+            .get().await().documents.mapNotNull { doc ->
+                sharedListItemDocFromFields(
+                    doc.id, listId, groupId, normalizeFields(doc.data ?: emptyMap())
+                )
+            }
+
+    override suspend fun writeSharedListComment(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        commentId: String,
+        fields: Map<String, Any>
+    ) {
+        sharedListCommentsRef(groupId, listId, itemId).document(commentId)
+            .set(fields + timestampFields("createdAt")).await()
+    }
+
+    override suspend fun deleteSharedListComment(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        commentId: String
+    ) {
+        sharedListCommentsRef(groupId, listId, itemId).document(commentId).delete().await()
+    }
+
+    override suspend fun getSharedListCommentIds(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        limit: Long
+    ): List<String> =
+        sharedListCommentsRef(groupId, listId, itemId)
+            .limit(limit)
+            .get().await().documents.map { it.id }
+
+    override suspend fun querySharedListCommentsSince(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        lastSeenMs: Long
+    ): List<SharedListCommentDoc> =
+        sharedListCommentsRef(groupId, listId, itemId)
+            .whereGreaterThan(
+                "createdAt",
+                Timestamp(Date(lastSeenMs - POLL_OVERLAP_MS))
+            )
+            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.ASCENDING)
+            .limit(POLL_QUERY_LIMIT)
+            .get().await().documents.mapNotNull { doc ->
+                sharedListCommentDocFromFields(
+                    doc.id, itemId, listId, groupId, normalizeFields(doc.data ?: emptyMap())
+                )
+            }
 
     // ---- listeners ----
 

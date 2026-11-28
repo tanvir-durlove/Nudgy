@@ -308,13 +308,28 @@ object GroupActivityType {
     const val TASK_ASSIGNED = "task_assigned"
     const val TASK_UNASSIGNED = "task_unassigned"
     const val NOTICE_SENT = "notice_sent"
+    // Shared list (micro-task 1 rules, micro-task 2 data path):
+    // every member-doable list action has a type. These are MEMBER
+    // actions (any member records their own — the rules' activity
+    // create allow-list names all seven for members), so they do NOT
+    // belong in CREATOR_ONLY below. recordActivity itself performs
+    // no CREATOR_ONLY check; the rules enforce the boundary.
+    const val LIST_CREATED = "list_created"
+    const val LIST_ITEM_ADDED = "list_item_added"
+    const val LIST_ITEM_COMPLETED = "list_item_completed"
+    const val LIST_ITEM_REOPENED = "list_item_reopened"
+    const val LIST_ITEM_ASSIGNED = "list_item_assigned"
+    const val LIST_ITEM_COMMENTED = "list_item_commented"
+    const val LIST_DELETED = "list_deleted"
 
     /** Every type the rules accept — the create rule rejects anything outside this set. */
     val ALL: Set<String> = setOf(
         GROUP_CREATED, MEMBER_JOINED, MEMBER_LEFT,
         TASK_CREATED, SCHEDULE_CREATED, TASK_EDITED, TASK_DELETED,
         SCHEDULE_DELETED, TASK_COMPLETED, TASK_REOPENED, TASK_ASSIGNED, TASK_UNASSIGNED,
-        NOTICE_SENT
+        NOTICE_SENT,
+        LIST_CREATED, LIST_ITEM_ADDED, LIST_ITEM_COMPLETED, LIST_ITEM_REOPENED,
+        LIST_ITEM_ASSIGNED, LIST_ITEM_COMMENTED, LIST_DELETED
     )
 
     /** Types only the creator may record (they mirror creator-only actions). */
@@ -400,6 +415,162 @@ fun activityDisplayText(entry: GroupActivityEntry): String {
         }
         GroupActivityType.TASK_UNASSIGNED -> "$actor unassigned$title"
         GroupActivityType.NOTICE_SENT -> "$actor sent a notice"
+        GroupActivityType.LIST_CREATED -> "$actor created list$title"
+        GroupActivityType.LIST_ITEM_ADDED -> "$actor added$title"
+        GroupActivityType.LIST_ITEM_COMPLETED -> "$actor completed$title"
+        GroupActivityType.LIST_ITEM_REOPENED -> "$actor reopened$title"
+        GroupActivityType.LIST_ITEM_ASSIGNED -> {
+            val assignee = entry.assigneeName?.ifBlank { "Member" } ?: "Member"
+            "$actor assigned$title to $assignee"
+        }
+        GroupActivityType.LIST_ITEM_COMMENTED -> "$actor commented on$title"
+        GroupActivityType.LIST_DELETED -> "$actor deleted list$title"
         else -> "$actor did something"
     }
+}
+
+// ---------------------------------------------------------------- shared lists (micro-task 2)
+
+/**
+ * One shared-list doc, as the app sees it — the plain representation
+ * the gateway hands the repository (poll path). The Firestore
+ * [DocumentSnapshot] never crosses into the repository.
+ *
+ * A list doc has NO updatedAt (the rules allow a list update to
+ * change only the name), so the poll fetches the full list set every
+ * tick instead of a since-query — see GroupPollWorker.
+ */
+data class SharedListDoc(
+    val id: String,
+    val groupId: String,
+    val name: String,
+    val createdByUid: String,
+    val createdByName: String,
+    val createdAtEpochMillis: Long
+)
+
+/** Pure: the list fields to write on create (no id, no createdAt — the gateway stamps that). */
+fun sharedListToFields(
+    name: String,
+    createdByUid: String,
+    createdByName: String
+): Map<String, Any> = mapOf(
+    "name" to name,
+    "createdByUid" to createdByUid,
+    "createdByName" to createdByName
+)
+
+/** Pure: reads a list doc's field map. Null when the name or creator is missing — a list without a name is not a list. */
+fun sharedListDocFromFields(id: String, groupId: String, fields: Map<String, Any?>): SharedListDoc? {
+    val name = fields["name"] as? String ?: return null
+    if (name.isBlank()) return null
+    val createdByUid = fields["createdByUid"] as? String ?: return null
+    return SharedListDoc(
+        id = id,
+        groupId = groupId,
+        name = name,
+        createdByUid = createdByUid,
+        createdByName = fields["createdByName"] as? String ?: "",
+        createdAtEpochMillis = (fields["createdAt"] as? Number)?.toLong() ?: 0L
+    )
+}
+
+/** One shared-list item doc, as the app sees it (plain gateway → repository shape). */
+data class SharedListItemDoc(
+    val id: String,
+    val listId: String,
+    val groupId: String,
+    val text: String,
+    val addedByUid: String,
+    val addedByName: String,
+    val done: Boolean = false,
+    val doneByUid: String? = null,
+    val assigneeUid: String? = null,
+    val assigneeName: String? = null,
+    val createdAtEpochMillis: Long = 0L,
+    val updatedAtEpochMillis: Long = 0L
+)
+
+/** Pure: the item fields to write on create (no id, no timestamps — the gateway stamps those). */
+fun sharedListItemToFields(
+    text: String,
+    addedByUid: String,
+    addedByName: String
+): Map<String, Any> = mapOf(
+    "text" to text,
+    "addedByUid" to addedByUid,
+    "addedByName" to addedByName,
+    "done" to false
+)
+
+/** Pure: reads an item doc's field map. Null when the text or adder is missing — an item without text is not an item. */
+fun sharedListItemDocFromFields(
+    id: String,
+    listId: String,
+    groupId: String,
+    fields: Map<String, Any?>
+): SharedListItemDoc? {
+    val text = fields["text"] as? String ?: return null
+    if (text.isBlank()) return null
+    val addedByUid = fields["addedByUid"] as? String ?: return null
+    return SharedListItemDoc(
+        id = id,
+        listId = listId,
+        groupId = groupId,
+        text = text,
+        addedByUid = addedByUid,
+        addedByName = fields["addedByName"] as? String ?: "",
+        done = fields["done"] as? Boolean ?: false,
+        doneByUid = fields["doneByUid"] as? String,
+        assigneeUid = fields["assigneeUid"] as? String,
+        assigneeName = fields["assigneeName"] as? String,
+        createdAtEpochMillis = (fields["createdAt"] as? Number)?.toLong() ?: 0L,
+        updatedAtEpochMillis = (fields["updatedAt"] as? Number)?.toLong() ?: 0L
+    )
+}
+
+/** One shared-list comment doc, as the app sees it (plain gateway → repository shape). Comments are never edited — only created and deleted. */
+data class SharedListCommentDoc(
+    val id: String,
+    val itemId: String,
+    val listId: String,
+    val groupId: String,
+    val authorUid: String,
+    val authorName: String,
+    val text: String,
+    val createdAtEpochMillis: Long = 0L
+)
+
+/** Pure: the comment fields to write (no id, no createdAt — the gateway stamps that). */
+fun sharedListCommentToFields(
+    authorUid: String,
+    authorName: String,
+    text: String
+): Map<String, Any> = mapOf(
+    "authorUid" to authorUid,
+    "authorName" to authorName,
+    "text" to text
+)
+
+/** Pure: reads a comment doc's field map. Null when the text or author is missing — a comment without text is not a comment. */
+fun sharedListCommentDocFromFields(
+    id: String,
+    itemId: String,
+    listId: String,
+    groupId: String,
+    fields: Map<String, Any?>
+): SharedListCommentDoc? {
+    val text = fields["text"] as? String ?: return null
+    if (text.isBlank()) return null
+    val authorUid = fields["authorUid"] as? String ?: return null
+    return SharedListCommentDoc(
+        id = id,
+        itemId = itemId,
+        listId = listId,
+        groupId = groupId,
+        authorUid = authorUid,
+        authorName = fields["authorName"] as? String ?: "",
+        text = text,
+        createdAtEpochMillis = (fields["createdAt"] as? Number)?.toLong() ?: 0L
+    )
 }

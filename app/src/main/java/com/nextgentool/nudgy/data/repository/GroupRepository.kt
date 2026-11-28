@@ -8,6 +8,9 @@ import com.nextgentool.nudgy.data.local.NudgyDatabase
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.GroupMemberEntity
+import com.nextgentool.nudgy.data.local.entity.SharedListCommentEntity
+import com.nextgentool.nudgy.data.local.entity.SharedListEntity
+import com.nextgentool.nudgy.data.local.entity.SharedListItemEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
@@ -73,6 +76,11 @@ class GroupRepository(
     private val groupMemberDao = database.groupMemberDao()
     private val taskDao = database.taskDao()
     private val calendarDao = database.calendarDao()
+    // Shared lists (micro-task 2): the local mirror of
+    // groups/{gid}/sharedLists (+ items + comments).
+    private val sharedListDao = database.sharedListDao()
+    private val sharedListItemDao = database.sharedListItemDao()
+    private val sharedListCommentDao = database.sharedListCommentDao()
     private val reminderManager = ReminderManager(context)
     private val dbId = context.getString(R.string.firestore_database_id)
     private val remote: GroupRemoteGateway =
@@ -306,6 +314,23 @@ class GroupRepository(
         if (local.creatorUid != uid) {
             return GroupResult.Err("Only the creator can change group tasks.")
         }
+        return GroupResult.Ok(Unit)
+    }
+
+    /**
+     * Shared list (micro-task 2, Q1=(a)): any MEMBER may act on a
+     * list — create, add, flip done, assign, comment. The local
+     * group row is the check (same proxy as [requireCreator]: a
+     * missing row means "not a member here"); the rules enforce
+     * membership remotely too. Creator/admin-only actions (rename,
+     * delete) check the list row + group row themselves.
+     */
+    private suspend fun requireMember(groupId: String, uid: String): GroupResult<Unit> {
+        if (uid == AuthManager.GUEST_USER_ID) {
+            return GroupResult.Err("তালিকা ব্যবহার করতে সাইন ইন করো।")
+        }
+        groupDao.getGroupById(groupId)
+            ?: return GroupResult.Err("গ্রুপটি পাওয়া যায়নি।")
         return GroupResult.Ok(Unit)
     }
 
@@ -1011,6 +1036,11 @@ class GroupRepository(
             } catch (e: Exception) {
                 Log.w(TAG, "purgeLocalGroup reconcile failed: ${e.message}")
             }
+            // Shared lists (micro-task 2): the group's lists go too —
+            // Room CASCADE deletes their items + comments. Without
+            // this a purged group's lists would linger locally with
+            // no group row left to show them under.
+            sharedListDao.deleteListsByGroupId(groupId)
             groupDao.deleteGroupById(groupId)
             groupMemberDao.deleteMembersByGroupId(groupId)
             stopGroupListener(groupId)
@@ -1392,6 +1422,649 @@ class GroupRepository(
             reminderManager.scheduleReminder(task.id, task.title, trigger)
         } else {
             reminderManager.cancelReminder(task.id)
+        }
+    }
+
+    // ---------------------------------------------------------------- Shared lists (micro-task 2)
+
+    /**
+     * Any member may create a list (Q1=(a)). Remote-first, then the
+     * local row, then the history entry — a remote failure writes
+     * nothing locally. The list doc carries no updatedAt (the rules
+     * allow a list update to change only the name), so the local row
+     * stamps its own createdAt.
+     */
+    suspend fun createSharedList(
+        groupId: String,
+        userId: String,
+        displayName: String,
+        rawName: String
+    ): GroupResult<SharedListEntity> = withContext(Dispatchers.IO) {
+        val memberCheck = requireMember(groupId, userId)
+        if (memberCheck is GroupResult.Err) return@withContext memberCheck
+        val name = rawName.trim()
+        if (name.isEmpty()) {
+            return@withContext GroupResult.Err("তালিকার নাম লেখো।")
+        }
+        val listId = UUID.randomUUID().toString()
+        try {
+            remote.writeSharedList(
+                groupId, listId,
+                sharedListToFields(name, userId, displayName),
+                merge = false
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "createSharedList failed: ${e.message}")
+            return@withContext GroupResult.Err(
+                "তালিকাটি বানানো যায়নি। সংযোগ যাচাই করে আবার চেষ্টা করো।"
+            )
+        }
+        val now = System.currentTimeMillis()
+        val entity = SharedListEntity(
+            id = listId,
+            groupId = groupId,
+            name = name,
+            createdByUid = userId,
+            createdByName = displayName,
+            createdAtEpochMillis = now
+        )
+        sharedListDao.insertList(entity)
+        recordActivity(
+            groupId,
+            GroupActivityType.LIST_CREATED,
+            userId,
+            displayName,
+            itemId = listId,
+            itemTitle = name
+        )
+        GroupResult.Ok(entity)
+    }
+
+    /**
+     * Rename only — the list creator or the group creator (the local
+     * list row + group row are the check; the rules enforce it
+     * remotely too). The payload is the name alone: the rules reject
+     * any other changed key, so updatedAt is never sent. No history
+     * entry — the seven list activity types have no rename.
+     */
+    suspend fun renameSharedList(
+        groupId: String,
+        userId: String,
+        listId: String,
+        rawName: String
+    ): GroupResult<Unit> = withContext(Dispatchers.IO) {
+        val memberCheck = requireMember(groupId, userId)
+        if (memberCheck is GroupResult.Err) return@withContext memberCheck
+        val name = rawName.trim()
+        if (name.isEmpty()) {
+            return@withContext GroupResult.Err("তালিকার নাম লেখো।")
+        }
+        val local = sharedListDao.getListById(listId)
+            ?: return@withContext GroupResult.Err("তালিকাটি পাওয়া যায়নি।")
+        if (local.groupId != groupId) {
+            return@withContext GroupResult.Err("তালিকাটি এই গ্রুপের নয়।")
+        }
+        val group = groupDao.getGroupById(groupId)
+        if (local.createdByUid != userId && group?.creatorUid != userId) {
+            return@withContext GroupResult.Err(
+                "শুধু তালিকার বানানো ব্যক্তি বা গ্রুপের creator নাম বদলাতে পারে।"
+            )
+        }
+        try {
+            remote.writeSharedList(groupId, listId, mapOf("name" to name), merge = true)
+        } catch (e: Exception) {
+            Log.w(TAG, "renameSharedList failed: ${e.message}")
+            return@withContext GroupResult.Err(
+                "নাম বদলানো যায়নি। সংযোগ যাচাই করে আবার চেষ্টা করো।"
+            )
+        }
+        sharedListDao.insertList(local.copy(name = name))
+        GroupResult.Ok(Unit)
+    }
+
+    /**
+     * Deletes a whole list — the list creator or the group creator.
+     * The rules do not cascade, so the remote cascade deletes every
+     * comment, then every item, then the list doc; the local Room
+     * CASCADE deletes the items + comments with the list row.
+     */
+    suspend fun deleteSharedList(
+        groupId: String,
+        userId: String,
+        listId: String
+    ): GroupResult<Unit> = withContext(Dispatchers.IO) {
+        val memberCheck = requireMember(groupId, userId)
+        if (memberCheck is GroupResult.Err) return@withContext memberCheck
+        val local = sharedListDao.getListById(listId)
+            ?: return@withContext GroupResult.Err("তালিকাটি পাওয়া যায়নি।")
+        if (local.groupId != groupId) {
+            return@withContext GroupResult.Err("তালিকাটি এই গ্রুপের নয়।")
+        }
+        val group = groupDao.getGroupById(groupId)
+        if (local.createdByUid != userId && group?.creatorUid != userId) {
+            return@withContext GroupResult.Err(
+                "শুধু তালিকার বানানো ব্যক্তি বা গ্রুপের creator তালিকা মুছতে পারে।"
+            )
+        }
+        // The name is needed for the history entry — read it before
+        // the local row is deleted below.
+        val title = local.name
+        try {
+            remote.deleteSharedListDocs(groupId, listId)
+        } catch (e: Exception) {
+            Log.w(TAG, "deleteSharedList failed: ${e.message}")
+            return@withContext GroupResult.Err(
+                "তালিকাটি মোছা যায়নি। সংযোগ যাচাই করে আবার চেষ্টা করো।"
+            )
+        }
+        sharedListDao.deleteListById(listId)
+        recordActivity(
+            groupId,
+            GroupActivityType.LIST_DELETED,
+            userId,
+            resolveMemberName(groupId, userId),
+            itemId = listId,
+            itemTitle = title
+        )
+        GroupResult.Ok(Unit)
+    }
+
+    /** Any member may add an item (Q1=(a)). Text must not be blank. */
+    suspend fun addSharedListItem(
+        groupId: String,
+        listId: String,
+        userId: String,
+        displayName: String,
+        rawText: String
+    ): GroupResult<SharedListItemEntity> = withContext(Dispatchers.IO) {
+        val memberCheck = requireMember(groupId, userId)
+        if (memberCheck is GroupResult.Err) return@withContext memberCheck
+        val text = rawText.trim()
+        if (text.isEmpty()) {
+            return@withContext GroupResult.Err("আইটেমের নাম লেখো।")
+        }
+        val list = sharedListDao.getListById(listId)
+            ?: return@withContext GroupResult.Err("তালিকাটি পাওয়া যায়নি।")
+        if (list.groupId != groupId) {
+            return@withContext GroupResult.Err("তালিকাটি এই গ্রুপের নয়।")
+        }
+        val itemId = UUID.randomUUID().toString()
+        val payload = sharedListItemToFields(text, userId, displayName).toMutableMap()
+        payload["createdAt"] = FieldValue.serverTimestamp()
+        payload["updatedAt"] = FieldValue.serverTimestamp()
+        try {
+            remote.writeSharedListItem(groupId, listId, itemId, payload, merge = false)
+        } catch (e: Exception) {
+            Log.w(TAG, "addSharedListItem failed: ${e.message}")
+            return@withContext GroupResult.Err(
+                "আইটেমটি যোগ করা যায়নি। সংযোগ যাচাই করে আবার চেষ্টা করো।"
+            )
+        }
+        val now = System.currentTimeMillis()
+        val entity = SharedListItemEntity(
+            id = itemId,
+            listId = listId,
+            groupId = groupId,
+            text = text,
+            addedByUid = userId,
+            addedByName = displayName,
+            done = false,
+            doneByUid = null,
+            createdAtEpochMillis = now,
+            updatedAtEpochMillis = now
+        )
+        sharedListItemDao.insertItem(entity)
+        recordActivity(
+            groupId,
+            GroupActivityType.LIST_ITEM_ADDED,
+            userId,
+            displayName,
+            itemId = itemId,
+            itemTitle = text
+        )
+        GroupResult.Ok(entity)
+    }
+
+    /**
+     * Any member may flip done (Q1=(a)). The remote write changes
+     * ONLY done/doneByUid/updatedAt — the rules' hasOnly rejects
+     * anything else from a non-adder member, so the text is never
+     * in this payload.
+     */
+    suspend fun setSharedListItemDone(
+        groupId: String,
+        listId: String,
+        userId: String,
+        itemId: String,
+        done: Boolean
+    ): GroupResult<Unit> = withContext(Dispatchers.IO) {
+        val memberCheck = requireMember(groupId, userId)
+        if (memberCheck is GroupResult.Err) return@withContext memberCheck
+        val local = sharedListItemDao.getItemById(itemId)
+            ?: return@withContext GroupResult.Err("আইটেমটি পাওয়া যায়নি।")
+        if (local.listId != listId || local.groupId != groupId) {
+            return@withContext GroupResult.Err("আইটেমটি এই তালিকার নয়।")
+        }
+        val payload = mutableMapOf<String, Any>(
+            "done" to done,
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        if (done) payload["doneByUid"] = userId
+        else payload["doneByUid"] = FieldValue.delete()
+        try {
+            remote.writeSharedListItem(groupId, listId, itemId, payload, merge = true)
+        } catch (e: Exception) {
+            Log.w(TAG, "setSharedListItemDone failed: ${e.message}")
+            return@withContext GroupResult.Err(
+                "আইটেমটি আপডেট করা যায়নি। সংযোগ যাচাই করে আবার চেষ্টা করো।"
+            )
+        }
+        sharedListItemDao.insertItem(
+            local.copy(
+                done = done,
+                doneByUid = if (done) userId else null,
+                updatedAtEpochMillis = System.currentTimeMillis()
+            )
+        )
+        recordActivity(
+            groupId,
+            if (done) GroupActivityType.LIST_ITEM_COMPLETED
+            else GroupActivityType.LIST_ITEM_REOPENED,
+            userId,
+            resolveMemberName(groupId, userId),
+            itemId = itemId,
+            itemTitle = local.text
+        )
+        GroupResult.Ok(Unit)
+    }
+
+    /**
+     * Any member may assign — to any member, or to themselves
+     * (Q1=(a)). Null unassigns. The assignee must be a current
+     * member (one remote refresh on a stale cache, same as
+     * [assignGroupTask]). Unassign records no history entry — the
+     * seven list activity types have no unassign.
+     */
+    suspend fun assignSharedListItem(
+        groupId: String,
+        listId: String,
+        userId: String,
+        itemId: String,
+        assigneeUid: String?
+    ): GroupResult<Unit> = withContext(Dispatchers.IO) {
+        val memberCheck = requireMember(groupId, userId)
+        if (memberCheck is GroupResult.Err) return@withContext memberCheck
+        val local = sharedListItemDao.getItemById(itemId)
+            ?: return@withContext GroupResult.Err("আইটেমটি পাওয়া যায়নি।")
+        if (local.listId != listId || local.groupId != groupId) {
+            return@withContext GroupResult.Err("আইটেমটি এই তালিকার নয়।")
+        }
+        val assigneeName: String? = if (assigneeUid == null) {
+            null
+        } else {
+            var member = groupMemberDao.getMembersOnce(groupId)
+                .firstOrNull { it.uid == assigneeUid }
+            if (member == null) {
+                // Stale cache (a member joined on another device): one
+                // remote refresh before refusing.
+                try {
+                    refreshGroupMembers(groupId)
+                } catch (e: Exception) {
+                    Log.w(TAG, "assignSharedListItem member refresh failed: ${e.message}")
+                }
+                member = groupMemberDao.getMembersOnce(groupId)
+                    .firstOrNull { it.uid == assigneeUid }
+            }
+            member?.displayName
+                ?: return@withContext GroupResult.Err("ওই মেম্বার গ্রুপে নেই।")
+        }
+        val payload = mutableMapOf<String, Any>(
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        if (assigneeUid == null) {
+            payload["assigneeUid"] = FieldValue.delete()
+            payload["assigneeName"] = FieldValue.delete()
+        } else {
+            payload["assigneeUid"] = assigneeUid
+            payload["assigneeName"] = assigneeName ?: ""
+        }
+        try {
+            remote.writeSharedListItem(groupId, listId, itemId, payload, merge = true)
+        } catch (e: Exception) {
+            Log.w(TAG, "assignSharedListItem failed: ${e.message}")
+            return@withContext GroupResult.Err(
+                "আইটেমটি দেওয়া যায়নি। সংযোগ যাচাই করে আবার চেষ্টা করো।"
+            )
+        }
+        sharedListItemDao.insertItem(
+            local.copy(
+                assigneeUid = assigneeUid,
+                assigneeName = assigneeName,
+                updatedAtEpochMillis = System.currentTimeMillis()
+            )
+        )
+        if (assigneeUid != null) {
+            recordActivity(
+                groupId = groupId,
+                type = GroupActivityType.LIST_ITEM_ASSIGNED,
+                actorUid = userId,
+                actorName = resolveMemberName(groupId, userId),
+                itemId = itemId,
+                itemTitle = local.text,
+                assigneeUid = assigneeUid,
+                assigneeName = assigneeName
+            )
+        }
+        GroupResult.Ok(Unit)
+    }
+
+    /**
+     * Deletes one item — only the adder or the group creator. The
+     * remote cascade deletes the item's comments first; the local
+     * Room CASCADE deletes them with the item row. No history entry
+     * (the seven list activity types have no item delete).
+     */
+    suspend fun deleteSharedListItem(
+        groupId: String,
+        listId: String,
+        userId: String,
+        itemId: String
+    ): GroupResult<Unit> = withContext(Dispatchers.IO) {
+        val memberCheck = requireMember(groupId, userId)
+        if (memberCheck is GroupResult.Err) return@withContext memberCheck
+        val local = sharedListItemDao.getItemById(itemId)
+            ?: return@withContext GroupResult.Err("আইটেমটি পাওয়া যায়নি।")
+        if (local.listId != listId || local.groupId != groupId) {
+            return@withContext GroupResult.Err("আইটেমটি এই তালিকার নয়।")
+        }
+        val group = groupDao.getGroupById(groupId)
+        if (local.addedByUid != userId && group?.creatorUid != userId) {
+            return@withContext GroupResult.Err(
+                "শুধু আইটেমের যোগ করা ব্যক্তি বা গ্রুপের creator আইটেম মুছতে পারে।"
+            )
+        }
+        try {
+            remote.deleteSharedListItemDocs(groupId, listId, itemId)
+        } catch (e: Exception) {
+            Log.w(TAG, "deleteSharedListItem failed: ${e.message}")
+            return@withContext GroupResult.Err(
+                "আইটেমটি মোছা যায়নি। সংযোগ যাচাই করে আবার চেষ্টা করো।"
+            )
+        }
+        sharedListItemDao.deleteItemById(itemId)
+        GroupResult.Ok(Unit)
+    }
+
+    /** Any member may comment (Q1=(a)). Blank text is rejected. */
+    suspend fun addSharedListComment(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        userId: String,
+        displayName: String,
+        rawText: String
+    ): GroupResult<SharedListCommentEntity> = withContext(Dispatchers.IO) {
+        val memberCheck = requireMember(groupId, userId)
+        if (memberCheck is GroupResult.Err) return@withContext memberCheck
+        val text = rawText.trim()
+        if (text.isEmpty()) {
+            return@withContext GroupResult.Err("মন্তব্য লেখো।")
+        }
+        val item = sharedListItemDao.getItemById(itemId)
+            ?: return@withContext GroupResult.Err("আইটেমটি পাওয়া যায়নি।")
+        if (item.listId != listId || item.groupId != groupId) {
+            return@withContext GroupResult.Err("আইটেমটি এই তালিকার নয়।")
+        }
+        val commentId = UUID.randomUUID().toString()
+        try {
+            remote.writeSharedListComment(
+                groupId, listId, itemId, commentId,
+                sharedListCommentToFields(userId, displayName, text)
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "addSharedListComment failed: ${e.message}")
+            return@withContext GroupResult.Err(
+                "মন্তব্যটি পাঠানো যায়নি। সংযোগ যাচাই করে আবার চেষ্টা করো।"
+            )
+        }
+        val entity = SharedListCommentEntity(
+            id = commentId,
+            itemId = itemId,
+            listId = listId,
+            groupId = groupId,
+            authorUid = userId,
+            authorName = displayName,
+            text = text,
+            createdAtEpochMillis = System.currentTimeMillis()
+        )
+        sharedListCommentDao.insertComment(entity)
+        recordActivity(
+            groupId,
+            GroupActivityType.LIST_ITEM_COMMENTED,
+            userId,
+            displayName,
+            itemId = itemId,
+            itemTitle = item.text
+        )
+        GroupResult.Ok(entity)
+    }
+
+    /**
+     * Deletes one comment — only the author or the group creator.
+     * Comments are never edited (the rules allow no update), only
+     * deleted. No history entry.
+     */
+    suspend fun deleteSharedListComment(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        userId: String,
+        commentId: String
+    ): GroupResult<Unit> = withContext(Dispatchers.IO) {
+        val memberCheck = requireMember(groupId, userId)
+        if (memberCheck is GroupResult.Err) return@withContext memberCheck
+        val local = sharedListCommentDao.getCommentById(commentId)
+            ?: return@withContext GroupResult.Err("মন্তব্যটি পাওয়া যায়নি।")
+        if (local.itemId != itemId || local.listId != listId || local.groupId != groupId) {
+            return@withContext GroupResult.Err("মন্তব্যটি এই আইটেমের নয়।")
+        }
+        val group = groupDao.getGroupById(groupId)
+        if (local.authorUid != userId && group?.creatorUid != userId) {
+            return@withContext GroupResult.Err(
+                "শুধু মন্তব্যের লেখক বা গ্রুপের creator মন্তব্য মুছতে পারে।"
+            )
+        }
+        try {
+            remote.deleteSharedListComment(groupId, listId, itemId, commentId)
+        } catch (e: Exception) {
+            Log.w(TAG, "deleteSharedListComment failed: ${e.message}")
+            return@withContext GroupResult.Err(
+                "মন্তব্যটি মোছা যায়নি। সংযোগ যাচাই করে আবার চেষ্টা করো।"
+            )
+        }
+        sharedListCommentDao.deleteCommentById(commentId)
+        GroupResult.Ok(Unit)
+    }
+
+    // ---- shared-list observes (the UI reads these; micro-tasks 3–5) ----
+
+    /** The lists of a group, oldest first. */
+    fun observeSharedLists(groupId: String): Flow<List<SharedListEntity>> =
+        sharedListDao.getListsFlow(groupId)
+
+    /** The items of one list, oldest first. */
+    fun observeSharedListItems(listId: String): Flow<List<SharedListItemEntity>> =
+        sharedListItemDao.getItemsFlow(listId)
+
+    /** The comments of one item, oldest first. */
+    fun observeSharedListComments(itemId: String): Flow<List<SharedListCommentEntity>> =
+        sharedListCommentDao.getCommentsFlow(itemId)
+
+    /** "N items" for a list row (group detail). */
+    suspend fun getSharedListItemCount(listId: String): Int =
+        withContext(Dispatchers.IO) { sharedListItemDao.getItemCount(listId) }
+
+    /** "M done" for a list row (group detail). */
+    suspend fun getSharedListDoneCount(listId: String): Int =
+        withContext(Dispatchers.IO) { sharedListItemDao.getDoneCount(listId) }
+
+    // ---- shared-list polling (GroupPollWorker) ----
+
+    /** Every shared list of a group — a FULL fetch (list docs carry no updatedAt). */
+    suspend fun querySharedLists(groupId: String): List<SharedListDoc> =
+        withContext(Dispatchers.IO) { remote.getSharedLists(groupId) }
+
+    /** Items of one list changed since [lastSeenMs] (60s overlap window in the gateway). */
+    suspend fun querySharedListItemsSince(
+        groupId: String,
+        listId: String,
+        lastSeenMs: Long
+    ): List<SharedListItemDoc> =
+        withContext(Dispatchers.IO) { remote.querySharedListItemsSince(groupId, listId, lastSeenMs) }
+
+    /** Comments of one item created since [lastSeenMs] (60s overlap window in the gateway). */
+    suspend fun querySharedListCommentsSince(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        lastSeenMs: Long
+    ): List<SharedListCommentDoc> =
+        withContext(Dispatchers.IO) {
+            remote.querySharedListCommentsSince(groupId, listId, itemId, lastSeenMs)
+        }
+
+    /** All item ids of one list, bounded (reconciliation input). */
+    suspend fun querySharedListItemIds(groupId: String, listId: String): List<String> =
+        withContext(Dispatchers.IO) { remote.getSharedListItemIds(groupId, listId, RECONCILE_LIMIT) }
+
+    /** All comment ids of one item, bounded (reconciliation input). */
+    suspend fun querySharedListCommentIds(
+        groupId: String,
+        listId: String,
+        itemId: String
+    ): List<String> =
+        withContext(Dispatchers.IO) {
+            remote.getSharedListCommentIds(groupId, listId, itemId, RECONCILE_LIMIT)
+        }
+
+    /** The local items of one list (the worker iterates them for the comments since-query). */
+    suspend fun getSharedListItemsOnce(listId: String): List<SharedListItemEntity> =
+        withContext(Dispatchers.IO) { sharedListItemDao.getItemsOnce(listId) }
+
+    /**
+     * Applies polled shared-list docs through REPLACE upserts (the
+     * same convention as the group items poll). Shared-list rows
+     * carry no local-only state (no status, no board order —
+     * everything on the row is remote-driven), so a plain upsert is
+     * safe. Lists apply first, then items, then comments — the Room
+     * foreign keys demand that order (an item whose list row is
+     * missing is skipped and retried on the next tick, never
+     * crashed). Returns the count of genuinely NEW item ids — ids
+     * already in Room are updates, not new arrivals, so the overlap
+     * window can never re-notify.
+     */
+    suspend fun applyPolledSharedListDocs(
+        groupId: String,
+        lists: List<SharedListDoc>,
+        items: List<SharedListItemDoc>,
+        comments: List<SharedListCommentDoc>
+    ): Int = withContext(Dispatchers.IO) {
+        for (doc in lists) {
+            val existing = sharedListDao.getListById(doc.id)
+            sharedListDao.insertList(
+                SharedListEntity(
+                    id = doc.id,
+                    groupId = groupId,
+                    name = doc.name,
+                    createdByUid = doc.createdByUid,
+                    createdByName = doc.createdByName,
+                    createdAtEpochMillis = if (doc.createdAtEpochMillis > 0) doc.createdAtEpochMillis
+                    else existing?.createdAtEpochMillis ?: System.currentTimeMillis()
+                )
+            )
+        }
+        var newCount = 0
+        for (doc in items) {
+            if (sharedListItemDao.getItemById(doc.id) == null) newCount++
+            if (sharedListDao.getListById(doc.listId) == null) {
+                // Cross-call race (the list doc vanished between the
+                // lists fetch and this items fetch): skip, never
+                // crash on the foreign key — the next tick retries.
+                Log.w(TAG, "applyPolledSharedListDocs: skipping item ${doc.id} — list ${doc.listId} missing locally")
+                continue
+            }
+            sharedListItemDao.insertItem(
+                SharedListItemEntity(
+                    id = doc.id,
+                    listId = doc.listId,
+                    groupId = groupId,
+                    text = doc.text,
+                    addedByUid = doc.addedByUid,
+                    addedByName = doc.addedByName,
+                    done = doc.done,
+                    doneByUid = doc.doneByUid,
+                    assigneeUid = doc.assigneeUid,
+                    assigneeName = doc.assigneeName,
+                    createdAtEpochMillis = if (doc.createdAtEpochMillis > 0) doc.createdAtEpochMillis else System.currentTimeMillis(),
+                    updatedAtEpochMillis = if (doc.updatedAtEpochMillis > 0) doc.updatedAtEpochMillis else System.currentTimeMillis()
+                )
+            )
+        }
+        for (doc in comments) {
+            if (sharedListItemDao.getItemById(doc.itemId) == null) {
+                Log.w(TAG, "applyPolledSharedListDocs: skipping comment ${doc.id} — item ${doc.itemId} missing locally")
+                continue
+            }
+            sharedListCommentDao.insertComment(
+                SharedListCommentEntity(
+                    id = doc.id,
+                    itemId = doc.itemId,
+                    listId = doc.listId,
+                    groupId = groupId,
+                    authorUid = doc.authorUid,
+                    authorName = doc.authorName,
+                    text = doc.text,
+                    createdAtEpochMillis = if (doc.createdAtEpochMillis > 0) doc.createdAtEpochMillis else System.currentTimeMillis()
+                )
+            )
+        }
+        newCount
+    }
+
+    /**
+     * Deletes local lists no longer present remotely. Only ever
+     * called with a fresh full fetch — never with a partial set.
+     * Room CASCADE deletes each list's items + comments.
+     */
+    suspend fun reconcileSharedLists(groupId: String, remoteIds: Set<String>) {
+        withContext(Dispatchers.IO) {
+            for (list in sharedListDao.getListsOnce(groupId)) {
+                if (list.id !in remoteIds) {
+                    sharedListDao.deleteListById(list.id)
+                }
+            }
+        }
+    }
+
+    /** Deletes local items of one list no longer present remotely. Room CASCADE deletes each item's comments. */
+    suspend fun reconcileSharedListItems(listId: String, remoteIds: Set<String>) {
+        withContext(Dispatchers.IO) {
+            for (item in sharedListItemDao.getItemsOnce(listId)) {
+                if (item.id !in remoteIds) {
+                    sharedListItemDao.deleteItemById(item.id)
+                }
+            }
+        }
+    }
+
+    /** Deletes local comments of one item no longer present remotely. */
+    suspend fun reconcileSharedListComments(itemId: String, remoteIds: Set<String>) {
+        withContext(Dispatchers.IO) {
+            for (comment in sharedListCommentDao.getCommentsOnce(itemId)) {
+                if (comment.id !in remoteIds) {
+                    sharedListCommentDao.deleteCommentById(comment.id)
+                }
+            }
         }
     }
 
