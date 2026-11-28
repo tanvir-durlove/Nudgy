@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import com.nextgentool.nudgy.data.local.entity.SharedListCommentEntity
 import com.nextgentool.nudgy.data.local.entity.SharedListEntity
 import com.nextgentool.nudgy.data.local.entity.SharedListItemEntity
@@ -15,6 +16,14 @@ import kotlinx.coroutines.flow.Flow
  * upsert everywhere (the group DAO convention): the sync pass writes
  * remote docs over local rows, and a local create writes the same row
  * before the remote write lands.
+ *
+ * REPLACE WARNING (micro-task 2 follow-up, run 1077): REPLACE on a row
+ * that already exists DELETES it first, and the delete fires the
+ * ON DELETE CASCADE — re-inserting a list wipes its items + comments,
+ * re-inserting an item wipes its comments. So insertList/insertItem
+ * are for rows known to be NEW only (fresh-UUID creates, first poll
+ * apply). Re-writing an existing row MUST go through [updateList] /
+ * [updateItem] (@Update = UPDATE in place, no delete, no cascade).
  */
 @Dao
 interface SharedListDao {
@@ -30,6 +39,10 @@ interface SharedListDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertList(list: SharedListEntity)
+
+    /** Re-writes an EXISTING list row in place (rename, poll re-apply) — never REPLACE. */
+    @Update
+    suspend fun updateList(list: SharedListEntity)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLists(lists: List<SharedListEntity>)
@@ -68,6 +81,10 @@ interface SharedListItemDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertItem(item: SharedListItemEntity)
+
+    /** Re-writes an EXISTING item row in place (done flip, assign, poll re-apply) — never REPLACE. */
+    @Update
+    suspend fun updateItem(item: SharedListItemEntity)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertItems(items: List<SharedListItemEntity>)

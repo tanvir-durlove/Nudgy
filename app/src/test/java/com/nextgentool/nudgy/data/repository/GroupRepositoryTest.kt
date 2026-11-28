@@ -1242,6 +1242,39 @@ class GroupRepositoryTest {
     }
 
     @Test
+    fun `renameSharedList keeps the list items and comments`() = runTest {
+        // REPLACE regression (run 1077): re-inserting the existing list
+        // row deleted it and CASCADE-wiped its items + comments.
+        val group = createTestGroup()
+        val list = (repo.createSharedList(group.groupId, "user-1", "Creator", "Monthly shopping") as GroupResult.Ok).value
+        val item = (repo.addSharedListItem(group.groupId, list.id, "user-1", "Creator", "Milk 2 L") as GroupResult.Ok).value
+        (repo.addSharedListComment(group.groupId, list.id, item.id, "user-1", "Creator", "Full-cream") as GroupResult.Ok)
+        assertTrue(repo.renameSharedList(group.groupId, "user-1", list.id, "Eid shopping") is GroupResult.Ok)
+        assertEquals("Eid shopping", db.sharedListDao().getListById(list.id)?.name)
+        assertEquals("Milk 2 L", db.sharedListItemDao().getItemById(item.id)?.text)
+        assertEquals(
+            "Full-cream",
+            db.sharedListCommentDao().getCommentsOnce(item.id).singleOrNull()?.text
+        )
+    }
+
+    @Test
+    fun `setSharedListItemDone keeps the item comments`() = runTest {
+        // REPLACE regression (run 1077): re-inserting the existing item
+        // row deleted it and CASCADE-wiped its comments.
+        val group = createTestGroup()
+        val list = (repo.createSharedList(group.groupId, "user-1", "Creator", "Monthly shopping") as GroupResult.Ok).value
+        val item = (repo.addSharedListItem(group.groupId, list.id, "user-1", "Creator", "Milk 2 L") as GroupResult.Ok).value
+        (repo.addSharedListComment(group.groupId, list.id, item.id, "user-1", "Creator", "Full-cream") as GroupResult.Ok)
+        assertTrue(repo.setSharedListItemDone(group.groupId, list.id, "user-1", item.id, true) is GroupResult.Ok)
+        assertTrue(db.sharedListItemDao().getItemById(item.id)?.done == true)
+        assertEquals(
+            "Full-cream",
+            db.sharedListCommentDao().getCommentsOnce(item.id).singleOrNull()?.text
+        )
+    }
+
+    @Test
     fun `renameSharedList only allows the list creator or the group creator`() = runTest {
         val group = createTestGroup()
         val list = (repo.createSharedList(group.groupId, "user-1", "Creator", "Monthly shopping") as GroupResult.Ok).value

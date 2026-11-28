@@ -1518,7 +1518,9 @@ class GroupRepository(
                 "নাম বদলানো যায়নি। সংযোগ যাচাই করে আবার চেষ্টা করো।"
             )
         }
-        sharedListDao.insertList(local.copy(name = name))
+        // @Update, not insertList: REPLACE on the existing row would
+        // delete it and CASCADE-wipe the list's items + comments.
+        sharedListDao.updateList(local.copy(name = name))
         GroupResult.Ok(Unit)
     }
 
@@ -1659,7 +1661,9 @@ class GroupRepository(
                 "আইটেমটি আপডেট করা যায়নি। সংযোগ যাচাই করে আবার চেষ্টা করো।"
             )
         }
-        sharedListItemDao.insertItem(
+        // @Update, not insertItem: REPLACE on the existing row would
+        // delete it and CASCADE-wipe the item's comments.
+        sharedListItemDao.updateItem(
             local.copy(
                 done = done,
                 doneByUid = if (done) userId else null,
@@ -1736,7 +1740,9 @@ class GroupRepository(
                 "আইটেমটি দেওয়া যায়নি। সংযোগ যাচাই করে আবার চেষ্টা করো।"
             )
         }
-        sharedListItemDao.insertItem(
+        // @Update, not insertItem: REPLACE on the existing row would
+        // delete it and CASCADE-wipe the item's comments.
+        sharedListItemDao.updateItem(
             local.copy(
                 assigneeUid = assigneeUid,
                 assigneeName = assigneeName,
@@ -1971,21 +1977,24 @@ class GroupRepository(
     ): Int = withContext(Dispatchers.IO) {
         for (doc in lists) {
             val existing = sharedListDao.getListById(doc.id)
-            sharedListDao.insertList(
-                SharedListEntity(
-                    id = doc.id,
-                    groupId = groupId,
-                    name = doc.name,
-                    createdByUid = doc.createdByUid,
-                    createdByName = doc.createdByName,
-                    createdAtEpochMillis = if (doc.createdAtEpochMillis > 0) doc.createdAtEpochMillis
-                    else existing?.createdAtEpochMillis ?: System.currentTimeMillis()
-                )
+            val entity = SharedListEntity(
+                id = doc.id,
+                groupId = groupId,
+                name = doc.name,
+                createdByUid = doc.createdByUid,
+                createdByName = doc.createdByName,
+                createdAtEpochMillis = if (doc.createdAtEpochMillis > 0) doc.createdAtEpochMillis
+                else existing?.createdAtEpochMillis ?: System.currentTimeMillis()
             )
+            // Insert-or-update, never REPLACE: re-inserting an existing
+            // list row deletes it and CASCADE-wipes its items +
+            // comments (run 1077: the second apply re-inserted the list,
+            // the item vanished, and the apply counted it "new" again).
+            if (existing == null) sharedListDao.insertList(entity)
+            else sharedListDao.updateList(entity)
         }
         var newCount = 0
         for (doc in items) {
-            if (sharedListItemDao.getItemById(doc.id) == null) newCount++
             if (sharedListDao.getListById(doc.listId) == null) {
                 // Cross-call race (the list doc vanished between the
                 // lists fetch and this items fetch): skip, never
@@ -1993,22 +2002,31 @@ class GroupRepository(
                 Log.w(TAG, "applyPolledSharedListDocs: skipping item ${doc.id} — list ${doc.listId} missing locally")
                 continue
             }
-            sharedListItemDao.insertItem(
-                SharedListItemEntity(
-                    id = doc.id,
-                    listId = doc.listId,
-                    groupId = groupId,
-                    text = doc.text,
-                    addedByUid = doc.addedByUid,
-                    addedByName = doc.addedByName,
-                    done = doc.done,
-                    doneByUid = doc.doneByUid,
-                    assigneeUid = doc.assigneeUid,
-                    assigneeName = doc.assigneeName,
-                    createdAtEpochMillis = if (doc.createdAtEpochMillis > 0) doc.createdAtEpochMillis else System.currentTimeMillis(),
-                    updatedAtEpochMillis = if (doc.updatedAtEpochMillis > 0) doc.updatedAtEpochMillis else System.currentTimeMillis()
-                )
+            // Count ONLY items that are really inserted: a skipped item
+            // is not a new arrival, and an already-present item is an
+            // update. (Run 1077: the count ran before this list check.)
+            val entity = SharedListItemEntity(
+                id = doc.id,
+                listId = doc.listId,
+                groupId = groupId,
+                text = doc.text,
+                addedByUid = doc.addedByUid,
+                addedByName = doc.addedByName,
+                done = doc.done,
+                doneByUid = doc.doneByUid,
+                assigneeUid = doc.assigneeUid,
+                assigneeName = doc.assigneeName,
+                createdAtEpochMillis = if (doc.createdAtEpochMillis > 0) doc.createdAtEpochMillis else System.currentTimeMillis(),
+                updatedAtEpochMillis = if (doc.updatedAtEpochMillis > 0) doc.updatedAtEpochMillis else System.currentTimeMillis()
             )
+            // Insert-or-update, never REPLACE: re-inserting an existing
+            // item row deletes it and CASCADE-wipes its comments.
+            if (sharedListItemDao.getItemById(doc.id) == null) {
+                newCount++
+                sharedListItemDao.insertItem(entity)
+            } else {
+                sharedListItemDao.updateItem(entity)
+            }
         }
         for (doc in comments) {
             if (sharedListItemDao.getItemById(doc.itemId) == null) {
