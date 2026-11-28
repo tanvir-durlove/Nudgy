@@ -818,7 +818,12 @@ class GroupsScreenTest {
         composeRule.onNodeWithTag("shared_list_item_checkbox_i-1").performClick()
         composeRule.waitForIdle()
 
-        assertEquals(listOf(Triple("g-1", "l-1", sharedListItem())), toggled)
+        // Compare ids only: sharedListItem() defaults createdAt/updatedAt
+        // to System.currentTimeMillis(), so two calls never equal.
+        assertEquals(
+            listOf(Triple("g-1", "l-1", "i-1")),
+            toggled.map { Triple(it.first, it.second, it.third.id) }
+        )
     }
 
     @Test
