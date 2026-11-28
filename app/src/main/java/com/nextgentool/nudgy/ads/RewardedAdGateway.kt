@@ -14,14 +14,13 @@ import kotlinx.coroutines.flow.StateFlow
  * tests pass a fake that records show calls and fires the reward on
  * demand — no AdMob SDK in unit tests.
  *
- * Known gap, NOT hidden: [NudgyAds.initialize] is never called in the
- * rebuild (ads init was knowingly dropped in Sprint 1-0), and nothing
- * feeds the Remote Config rewarded unit id into NudgyAds — so in the
- * real app no rewarded ad is preloaded yet, and [show] returns false
- * (triggering a load that fails until the SDK is initialised). The cap
- * state, the offer UI, the grant path and the retry path are all wired
- * here and work end to end the moment the ads-init track lands; the
- * init itself is a separate product decision, not part of S3-4.
+ * Step 2-3 — the gap is closed: MainActivity calls
+ * [NudgyAds.initialize] once at app start and feeds the Remote
+ * Config rewarded unit id (only a real, non-test id — see
+ * [NudgyAds.feedRewardedUnitId]) whenever the config changes, so a
+ * rewarded ad is preloaded in the real app and [show] can return
+ * true. Until the fetch completes the button stays disabled
+ * ("Loading ad…"), exactly as before.
  */
 interface RewardedAdGateway {
     /** True when a rewarded ad is preloaded and ready to show. */

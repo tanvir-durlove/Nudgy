@@ -112,10 +112,10 @@ import javax.inject.Inject
  * "+1 answer" offer appears when the 5 free turns are spent.
  * [watchRewardedAd] shows the preloaded ad through the
  * [RewardedAdGateway] and grants the +1 turn ONLY inside the reward
- * callback. Known gap (see RewardedAdGateway): NudgyAds.initialize is
- * never called in the rebuild yet, so no ad is preloaded until the
- * ads-init track lands — the offer, the grant path and the retry path
- * are wired and work the moment it does.
+ * callback. Step 2-3 wired the ads init (MainActivity calls
+ * NudgyAds.initialize and feeds the Remote Config rewarded unit id),
+ * so a rewarded ad is preloaded in the real app — the offer, the
+ * grant path and the retry path work end to end.
  *
  * Sprint 3-2 (Q2 = (a)) — draft-then-confirm: the prefilter never
  * saves directly. A creation returns [PreFilterResult.PendingDraft]

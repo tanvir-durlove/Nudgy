@@ -169,8 +169,9 @@ object TaskModule {
     /**
      * Sprint 3-4 — the rewarded-ad seam for the Chat cap entry. The
      * production gateway delegates to the NudgyAds singleton; tests
-     * substitute a fake. See RewardedAdGateway for the known ads-init
-     * gap (NudgyAds.initialize is never called in the rebuild yet).
+     * substitute a fake. Step 2-3 wired the ads init (MainActivity
+     * calls NudgyAds.initialize once and feeds the Remote Config
+     * rewarded unit id), so a rewarded ad is preloaded in the real app.
      */
     @Provides
     @Singleton

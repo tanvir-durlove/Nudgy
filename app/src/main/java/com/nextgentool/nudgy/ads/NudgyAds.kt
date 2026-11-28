@@ -131,15 +131,52 @@ object NudgyAds {
         try {
             MobileAds.initialize(context.applicationContext) {
                 loadInterstitial(context, currentUnitId)
-                // Rewarded is preloaded here too — nothing else triggers a
-                // first load (the MainActivity effect only reloads when the
-                // Remote Config ID changes, and the Chat button is disabled
-                // while no ad is ready).
-                loadRewarded(context, currentRewardedUnitId)
+                // Step 2-3 — rewarded is preloaded here ONLY when a real
+                // unit id is already known (fed from Remote Config before
+                // init). A test id must never load in production: the RC
+                // defaults ARE the test ids, so with the default id the
+                // first load waits for the MainActivity RC feed, which
+                // calls loadRewarded once the fetched id arrives. Until
+                // then the Chat button stays disabled ("Loading ad…") —
+                // the same state as before init existed at all.
+                if (isRealRewardedUnitId(currentRewardedUnitId)) {
+                    loadRewarded(context, currentRewardedUnitId)
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "MobileAds init failed: ${e.message}")
         }
+    }
+
+    /**
+     * Step 2-3 — true only for a real (non-test) rewarded unit id: a
+     * well-formed AdMob id that is NOT Google's public rewarded test
+     * id. The Remote Config defaults ARE the test ids, so this is how
+     * the production feed tells "fetch completed with a real id" from
+     * "fetch pending/failed, still on defaults". Pure function, unit
+     * tested (NudgyAdsTest).
+     */
+    fun isRealRewardedUnitId(unitId: String): Boolean =
+        UNIT_ID_REGEX.matches(unitId) && unitId != TEST_REWARDED_UNIT_ID
+
+    /**
+     * Step 2-3 — the Remote Config rewarded feed (called from
+     * MainActivity whenever the RC values change, and once at app
+     * start with the current value). Loads a rewarded ad ONLY for a
+     * real id: a test/blank/malformed id is skipped with a warning,
+     * never loaded — a test ad must never be shown in production, and
+     * a failed/pending RC fetch must never strand the app on a test
+     * load. The load itself is [loadRewarded]'s: a preloaded ad for
+     * the same id is a no-op, a stale id is dropped and reloaded.
+     * Retries after a failed load keep using the stored real id (see
+     * [reloadRewarded]), never the test fallback.
+     */
+    fun feedRewardedUnitId(context: Context, unitId: String) {
+        if (!isRealRewardedUnitId(unitId)) {
+            Log.w(TAG, "Skipping rewarded preload: no real unit id yet (RC fetch pending/failed, or test id)")
+            return
+        }
+        loadRewarded(context, unitId)
     }
 
     /**

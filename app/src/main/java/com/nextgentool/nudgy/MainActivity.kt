@@ -34,6 +34,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.lifecycleScope
+import com.nextgentool.nudgy.ads.NudgyAds
 import com.nextgentool.nudgy.auth.AuthManager
 import com.nextgentool.nudgy.auth.GroupAuth
 import com.nextgentool.nudgy.auth.SignInScreen
@@ -51,6 +52,7 @@ import com.nextgentool.nudgy.work.GroupPollWorker
 import com.nextgentool.nudgy.work.MorningBriefWorker
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 /**
@@ -212,6 +214,28 @@ class MainActivity : FragmentActivity() {
         // Sprint 5 fix round — restore a returning Google session at
         // startup (v1 MainActivity did the same); a guest stays guest.
         groupAuth.attemptSilentSignIn(lifecycleScope)
+        // Step 2-3 — ads init (Chat rewarded +1 offer, spec §10.14):
+        // NudgyAds.initialize was never called in the rebuild (ads was
+        // knowingly dropped in Sprint 1-0), so no rewarded ad was ever
+        // preloaded and the Chat "Watch ad" button sat disabled on
+        // "Loading ad…" forever. initialize() is idempotent, so a
+        // rotation (a second onCreate) is a no-op; the UMP consent
+        // flow runs inside it. The Remote Config rewarded id is fed
+        // once here (the fetch usually completed during the splash)
+        // and again on every config change — but ONLY for a real id
+        // (see NudgyAds.feedRewardedUnitId): the RC defaults ARE the
+        // test ids, so a pending/failed fetch must never trigger a
+        // test-ad load. No test launches this Activity (see
+        // MainActivitySplashTest), so this wiring is verified by CI
+        // compile + the batch-end device test, not by a unit test.
+        val remoteConfig = (application as NudgyApplication).remoteConfig
+        NudgyAds.feedRewardedUnitId(this, remoteConfig.configState.value.adRewardedUnitId)
+        NudgyAds.initialize(this)
+        lifecycleScope.launch {
+            remoteConfig.configState.collect { values ->
+                NudgyAds.feedRewardedUnitId(this@MainActivity, values.adRewardedUnitId)
+            }
+        }
         handleIncomingIntent(intent)
         // Step 5a-wire — the launch splash shows only on a cold
         // start (see shouldShowSplash): never on rotation, resume,
