@@ -3,8 +3,8 @@ package com.nextgentool.nudgy.ui.screens
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasRole
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithRole
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -814,7 +814,9 @@ class GroupsScreenTest {
             initialSelectedSharedList = sharedList()
         )
 
-        composeRule.onAllNodesWithRole(Role.Checkbox)[0].performClick()
+        // onAllNodes is a rule MEMBER in Compose 1.7 (importing it
+        // fails to compile) — hasRole builds the matcher.
+        composeRule.onAllNodes(hasRole(Role.Checkbox))[0].performClick()
         composeRule.waitForIdle()
 
         assertEquals(listOf(Triple("g-1", "l-1", sharedListItem())), toggled)
