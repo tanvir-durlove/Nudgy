@@ -427,6 +427,13 @@ class GroupModelsTest {
         assertEquals("Ayesha assigned \u201CHomework\u201D to Bob", activityDisplayText(activityEntry(GroupActivityType.TASK_ASSIGNED)))
         assertEquals("Ayesha unassigned \u201CHomework\u201D", activityDisplayText(activityEntry(GroupActivityType.TASK_UNASSIGNED)))
         assertEquals("Ayesha sent a notice", activityDisplayText(activityEntry(GroupActivityType.NOTICE_SENT)))
+        assertEquals("Ayesha created list \u201CHomework\u201D", activityDisplayText(activityEntry(GroupActivityType.LIST_CREATED)))
+        assertEquals("Ayesha added \u201CHomework\u201D", activityDisplayText(activityEntry(GroupActivityType.LIST_ITEM_ADDED)))
+        assertEquals("Ayesha completed \u201CHomework\u201D", activityDisplayText(activityEntry(GroupActivityType.LIST_ITEM_COMPLETED)))
+        assertEquals("Ayesha reopened \u201CHomework\u201D", activityDisplayText(activityEntry(GroupActivityType.LIST_ITEM_REOPENED)))
+        assertEquals("Ayesha assigned \u201CHomework\u201D to Bob", activityDisplayText(activityEntry(GroupActivityType.LIST_ITEM_ASSIGNED)))
+        assertEquals("Ayesha commented on \u201CHomework\u201D", activityDisplayText(activityEntry(GroupActivityType.LIST_ITEM_COMMENTED)))
+        assertEquals("Ayesha deleted list \u201CHomework\u201D", activityDisplayText(activityEntry(GroupActivityType.LIST_DELETED)))
         val blankActor = activityFromDoc(
             "a-1", "g-1", activityFields(GroupActivityType.TASK_COMPLETED, actorName = "")
         )

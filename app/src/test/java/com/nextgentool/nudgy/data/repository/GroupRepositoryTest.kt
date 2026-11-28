@@ -1168,4 +1168,143 @@ class GroupRepositoryTest {
         assertEquals("user-2", local.assigneeUid)
         assertEquals("Bob", local.assigneeName)
     }
+
+    // ---------------------------------------------------------------- shared lists (micro-task 2)
+
+    @Test
+    fun `createSharedList and addSharedListItem round-trip locally and remotely, and done flips`() = runTest {
+        val group = createTestGroup()
+        val listResult = repo.createSharedList(group.groupId, "user-1", "Creator", "Monthly shopping")
+        val list = (listResult as GroupResult.Ok).value
+        assertEquals("Monthly shopping", fake.sharedLists[group.groupId]?.get(list.id)?.get("name"))
+        assertEquals("user-1", fake.sharedLists[group.groupId]?.get(list.id)?.get("createdByUid"))
+        checkNotNull(db.sharedListDao().getListById(list.id))
+        assertTrue(repo.observeSharedLists(group.groupId).first().any { it.id == list.id })
+
+        val itemResult = repo.addSharedListItem(
+            group.groupId, list.id, "user-1", "Creator", "Milk 2 L"
+        )
+        val item = (itemResult as GroupResult.Ok).value
+        assertEquals("Milk 2 L", fake.sharedItems[group.groupId]?.get(list.id)?.get(item.id)?.get("text"))
+        checkNotNull(db.sharedListItemDao().getItemById(item.id))
+        assertEquals(1, repo.getSharedListItemCount(list.id))
+        assertEquals(0, repo.getSharedListDoneCount(list.id))
+
+        assertTrue(repo.setSharedListItemDone(group.groupId, list.id, "user-1", item.id, true) is GroupResult.Ok)
+        val done = db.sharedListItemDao().getItemById(item.id)
+        checkNotNull(done)
+        assertTrue(done.done)
+        assertEquals("user-1", done.doneByUid)
+        assertEquals(true, fake.sharedItems[group.groupId]?.get(list.id)?.get(item.id)?.get("done"))
+        assertEquals(1, repo.getSharedListDoneCount(list.id))
+        assertTrue(
+            fake.activity[group.groupId]?.values?.any { it["type"] == "list_item_completed" } == true
+        )
+    }
+
+    @Test
+    fun `applyPolledSharedListDocs upserts remote docs into local rows and reconciles them away`() = runTest {
+        val group = createTestGroup()
+        val now = System.currentTimeMillis()
+        val list = SharedListDoc(
+            id = "l-1", groupId = group.groupId, name = "Monthly shopping",
+            createdByUid = "user-2", createdByName = "Bob", createdAtEpochMillis = now
+        )
+        val item = SharedListItemDoc(
+            id = "i-1", listId = "l-1", groupId = group.groupId, text = "Milk 2 L",
+            addedByUid = "user-2", addedByName = "Bob",
+            createdAtEpochMillis = now, updatedAtEpochMillis = now
+        )
+        val comment = SharedListCommentDoc(
+            id = "c-1", itemId = "i-1", listId = "l-1", groupId = group.groupId,
+            authorUid = "user-2", authorName = "Bob", text = "Buy the full-cream one",
+            createdAtEpochMillis = now
+        )
+        assertEquals(
+            1,
+            repo.applyPolledSharedListDocs(group.groupId, listOf(list), listOf(item), listOf(comment))
+        )
+        // A second apply is an update, not a new arrival.
+        assertEquals(
+            0,
+            repo.applyPolledSharedListDocs(group.groupId, listOf(list), listOf(item), listOf(comment))
+        )
+        assertEquals("Monthly shopping", db.sharedListDao().getListById("l-1")?.name)
+        assertEquals("Milk 2 L", db.sharedListItemDao().getItemById("i-1")?.text)
+        assertEquals(
+            "Buy the full-cream one",
+            db.sharedListCommentDao().getCommentsOnce("i-1").singleOrNull()?.text
+        )
+        repo.reconcileSharedLists(group.groupId, emptySet())
+        assertNull(db.sharedListDao().getListById("l-1"))
+        assertNull(db.sharedListItemDao().getItemById("i-1"))
+        assertTrue(db.sharedListCommentDao().getCommentsOnce("i-1").isEmpty())
+    }
+
+    @Test
+    fun `renameSharedList keeps the list items and comments`() = runTest {
+        // REPLACE regression (run 1077): re-inserting the existing list
+        // row deleted it and CASCADE-wiped its items + comments.
+        val group = createTestGroup()
+        val list = (repo.createSharedList(group.groupId, "user-1", "Creator", "Monthly shopping") as GroupResult.Ok).value
+        val item = (repo.addSharedListItem(group.groupId, list.id, "user-1", "Creator", "Milk 2 L") as GroupResult.Ok).value
+        (repo.addSharedListComment(group.groupId, list.id, item.id, "user-1", "Creator", "Full-cream") as GroupResult.Ok)
+        assertTrue(repo.renameSharedList(group.groupId, "user-1", list.id, "Eid shopping") is GroupResult.Ok)
+        assertEquals("Eid shopping", db.sharedListDao().getListById(list.id)?.name)
+        assertEquals("Milk 2 L", db.sharedListItemDao().getItemById(item.id)?.text)
+        assertEquals(
+            "Full-cream",
+            db.sharedListCommentDao().getCommentsOnce(item.id).singleOrNull()?.text
+        )
+    }
+
+    @Test
+    fun `setSharedListItemDone keeps the item comments`() = runTest {
+        // REPLACE regression (run 1077): re-inserting the existing item
+        // row deleted it and CASCADE-wiped its comments.
+        val group = createTestGroup()
+        val list = (repo.createSharedList(group.groupId, "user-1", "Creator", "Monthly shopping") as GroupResult.Ok).value
+        val item = (repo.addSharedListItem(group.groupId, list.id, "user-1", "Creator", "Milk 2 L") as GroupResult.Ok).value
+        (repo.addSharedListComment(group.groupId, list.id, item.id, "user-1", "Creator", "Full-cream") as GroupResult.Ok)
+        assertTrue(repo.setSharedListItemDone(group.groupId, list.id, "user-1", item.id, true) is GroupResult.Ok)
+        assertTrue(db.sharedListItemDao().getItemById(item.id)?.done == true)
+        assertEquals(
+            "Full-cream",
+            db.sharedListCommentDao().getCommentsOnce(item.id).singleOrNull()?.text
+        )
+    }
+
+    @Test
+    fun `renameSharedList only allows the list creator or the group creator`() = runTest {
+        val group = createTestGroup()
+        val list = (repo.createSharedList(group.groupId, "user-1", "Creator", "Monthly shopping") as GroupResult.Ok).value
+        // user-2 is neither the list creator nor the group creator.
+        assertTrue(
+            repo.renameSharedList(group.groupId, "user-2", list.id, "Eid shopping") is GroupResult.Err
+        )
+        assertEquals("Monthly shopping", db.sharedListDao().getListById(list.id)?.name)
+        assertTrue(
+            repo.renameSharedList(group.groupId, "user-1", list.id, "Eid shopping") is GroupResult.Ok
+        )
+        assertEquals("Eid shopping", db.sharedListDao().getListById(list.id)?.name)
+        assertEquals("Eid shopping", fake.sharedLists[group.groupId]?.get(list.id)?.get("name"))
+    }
+
+    @Test
+    fun `deleteSharedList removes remote docs and local rows`() = runTest {
+        val group = createTestGroup()
+        val list = (repo.createSharedList(group.groupId, "user-1", "Creator", "Monthly shopping") as GroupResult.Ok).value
+        val item = (repo.addSharedListItem(group.groupId, list.id, "user-1", "Creator", "Milk 2 L") as GroupResult.Ok).value
+        (repo.addSharedListComment(group.groupId, list.id, item.id, "user-1", "Creator", "Full-cream") as GroupResult.Ok)
+        assertTrue(repo.deleteSharedList(group.groupId, "user-1", list.id) is GroupResult.Ok)
+        assertTrue(fake.sharedLists[group.groupId]?.containsKey(list.id) != true)
+        assertTrue(fake.sharedItems[group.groupId]?.get(list.id).isNullOrEmpty())
+        assertTrue(fake.sharedComments[item.id].isNullOrEmpty())
+        assertNull(db.sharedListDao().getListById(list.id))
+        assertNull(db.sharedListItemDao().getItemById(item.id))
+        assertTrue(db.sharedListCommentDao().getCommentsOnce(item.id).isEmpty())
+        assertTrue(
+            fake.activity[group.groupId]?.values?.any { it["type"] == "list_deleted" } == true
+        )
+    }
 }

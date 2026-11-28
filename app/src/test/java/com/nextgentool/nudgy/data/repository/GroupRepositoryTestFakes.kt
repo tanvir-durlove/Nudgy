@@ -28,6 +28,13 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
     val items = mutableMapOf<String, MutableMap<String, MutableMap<String, Any?>>>()
     val notices = mutableMapOf<String, MutableMap<String, MutableMap<String, Any?>>>()
     val activity = mutableMapOf<String, MutableMap<String, MutableMap<String, Any?>>>()
+    // Shared lists (micro-task 2): same map shape as the Firestore
+    // collections — lists keyed by group, items by (group, list),
+    // comments by item id (item ids are UUIDs, unique across lists).
+    val sharedLists = mutableMapOf<String, MutableMap<String, MutableMap<String, Any?>>>()
+    val sharedItems =
+        mutableMapOf<String, MutableMap<String, MutableMap<String, MutableMap<String, Any?>>>>()
+    val sharedComments = mutableMapOf<String, MutableMap<String, MutableMap<String, Any?>>>()
 
     private val itemListeners =
         mutableMapOf<String, MutableList<(List<GroupItemChange>) -> Unit>>()
@@ -78,6 +85,32 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
     /** Seeds one item doc (as the real gateway would have stored it). */
     fun seedItem(groupId: String, itemId: String, fields: Map<String, Any?>) {
         items.getOrPut(groupId) { mutableMapOf() }[itemId] = fields.toMutableMap()
+    }
+
+    /** Seeds one shared-list item doc (as the real gateway would have stored it). */
+    fun seedSharedListItem(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        fields: Map<String, Any?>
+    ) {
+        sharedItems.getOrPut(groupId) { mutableMapOf() }
+            .getOrPut(listId) { mutableMapOf() }[itemId] = fields.toMutableMap()
+    }
+
+    /** Seeds one shared-list comment doc (as the real gateway would have stored it). */
+    fun seedSharedListComment(
+        itemId: String,
+        commentId: String,
+        fields: Map<String, Any?>
+    ) {
+        sharedComments.getOrPut(itemId) { mutableMapOf() }[commentId] =
+            fields.toMutableMap()
+    }
+
+    /** Seeds one shared list doc (as the real gateway would have stored it). */
+    fun seedSharedList(groupId: String, listId: String, fields: Map<String, Any?>) {
+        sharedLists.getOrPut(groupId) { mutableMapOf() }[listId] = fields.toMutableMap()
     }
 
     /** Seeds one group doc (as the real gateway would have stored it). */
@@ -319,6 +352,141 @@ class FakeGroupRemoteGateway : GroupRemoteGateway {
             ?.sortedByDescending { (_, fields) ->
                 (fields["createdAt"] as? Number)?.toLong() ?: 0L
             } ?: emptyList()
+    }
+
+    // ---- shared lists (micro-task 2) ----
+
+    override suspend fun writeSharedList(
+        groupId: String,
+        listId: String,
+        fields: Map<String, Any>,
+        merge: Boolean
+    ) {
+        maybeThrow()
+        val groupLists = sharedLists.getOrPut(groupId) { mutableMapOf() }
+        val existing = groupLists[listId]
+        groupLists[listId] = if (merge && existing != null) {
+            (existing + fields).toMutableMap()
+        } else {
+            (fields + mapOf("createdAt" to System.currentTimeMillis())).toMutableMap()
+        }
+    }
+
+    override suspend fun deleteSharedListDocs(groupId: String, listId: String) {
+        maybeThrow()
+        // The rules do not cascade — the real gateway deletes the
+        // comments, then the items, then the list doc.
+        val listItems = sharedItems[groupId]?.remove(listId)
+        for (itemId in listItems?.keys ?: emptySet()) {
+            sharedComments.remove(itemId)
+        }
+        sharedLists[groupId]?.remove(listId)
+    }
+
+    override suspend fun getSharedLists(groupId: String): List<SharedListDoc> {
+        maybeThrow()
+        return sharedLists[groupId]?.mapNotNull { (listId, fields) ->
+            sharedListDocFromFields(listId, groupId, fields)
+        }?.sortedBy { it.createdAtEpochMillis } ?: emptyList()
+    }
+
+    override suspend fun writeSharedListItem(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        fields: Map<String, Any>,
+        merge: Boolean
+    ) {
+        maybeThrow()
+        val listItems = sharedItems.getOrPut(groupId) { mutableMapOf() }
+            .getOrPut(listId) { mutableMapOf() }
+        val existing = listItems[itemId]
+        listItems[itemId] = if (merge && existing != null) {
+            (existing + fields).toMutableMap()
+        } else {
+            fields.toMutableMap()
+        }
+    }
+
+    override suspend fun deleteSharedListItemDocs(
+        groupId: String,
+        listId: String,
+        itemId: String
+    ) {
+        maybeThrow()
+        sharedComments.remove(itemId)
+        sharedItems[groupId]?.get(listId)?.remove(itemId)
+    }
+
+    override suspend fun getSharedListItemIds(
+        groupId: String,
+        listId: String,
+        limit: Long
+    ): List<String> {
+        maybeThrow()
+        return sharedItems[groupId]?.get(listId)?.keys?.take(limit.toInt()) ?: emptyList()
+    }
+
+    override suspend fun querySharedListItemsSince(
+        groupId: String,
+        listId: String,
+        lastSeenMs: Long
+    ): List<SharedListItemDoc> {
+        maybeThrow()
+        val cutoff = lastSeenMs - 60_000L
+        return sharedItems[groupId]?.get(listId)?.mapNotNull { (itemId, fields) ->
+            val updatedAt = (fields["updatedAt"] as? Number)?.toLong()
+                ?: System.currentTimeMillis()
+            if (updatedAt <= cutoff) return@mapNotNull null
+            sharedListItemDocFromFields(itemId, listId, groupId, fields)
+        } ?: emptyList()
+    }
+
+    override suspend fun writeSharedListComment(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        commentId: String,
+        fields: Map<String, Any>
+    ) {
+        maybeThrow()
+        sharedComments.getOrPut(itemId) { mutableMapOf() }[commentId] =
+            (fields + mapOf("createdAt" to System.currentTimeMillis())).toMutableMap()
+    }
+
+    override suspend fun deleteSharedListComment(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        commentId: String
+    ) {
+        maybeThrow()
+        sharedComments[itemId]?.remove(commentId)
+    }
+
+    override suspend fun getSharedListCommentIds(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        limit: Long
+    ): List<String> {
+        maybeThrow()
+        return sharedComments[itemId]?.keys?.take(limit.toInt()) ?: emptyList()
+    }
+
+    override suspend fun querySharedListCommentsSince(
+        groupId: String,
+        listId: String,
+        itemId: String,
+        lastSeenMs: Long
+    ): List<SharedListCommentDoc> {
+        maybeThrow()
+        val cutoff = lastSeenMs - 60_000L
+        return sharedComments[itemId]?.mapNotNull { (commentId, fields) ->
+            val createdAt = (fields["createdAt"] as? Number)?.toLong() ?: 0L
+            if (createdAt <= cutoff) return@mapNotNull null
+            sharedListCommentDocFromFields(commentId, itemId, listId, groupId, fields)
+        }?.sortedBy { it.createdAtEpochMillis } ?: emptyList()
     }
 
     override fun addItemsListener(

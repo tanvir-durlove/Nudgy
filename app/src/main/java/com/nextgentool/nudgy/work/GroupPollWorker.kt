@@ -20,6 +20,8 @@ import com.nextgentool.nudgy.R
 import com.nextgentool.nudgy.auth.AuthManager
 import com.nextgentool.nudgy.data.repository.GroupNotice
 import com.nextgentool.nudgy.data.repository.GroupRepository
+import com.nextgentool.nudgy.data.repository.SharedListCommentDoc
+import com.nextgentool.nudgy.data.repository.SharedListItemDoc
 import com.nextgentool.nudgy.data.repository.filterNewNotices
 import com.nextgentool.nudgy.data.repository.groupPollSummaryText
 import java.util.Calendar
@@ -177,6 +179,12 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
                 .apply()
             lastDeleteAt = signal
         }
+        // Shared lists (micro-task 2): runs on EVERY tick including
+        // the baseline below — shared-list arrivals post no
+        // notification, so there is no flood to avoid, and a fresh
+        // member's lists must appear on the first poll, not the
+        // second.
+        pollSharedLists(repo, prefs, groupId, now)
         val lastSeenKey = KEY_LAST_SEEN_PREFIX + groupId
         val lastSeen = prefs.getLong(lastSeenKey, 0L)
         if (lastSeen == 0L) {
@@ -247,6 +255,113 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
                 .putLong(reconcileKey, now)
                 .putLong(processedKey, lastDeleteAt.coerceAtLeast(0L))
                 .apply()
+        }
+    }
+
+    /**
+     * Shared lists (micro-task 2) — one poll tick for a group.
+     *
+     * - Lists: a FULL fetch every tick + reconcile the same tick.
+     *   List docs carry no updatedAt (the rules allow a list update
+     *   to change only the name), so there is no since-query for
+     *   them; lists are few, so the full fetch costs the same as
+     *   the reconcile id fetch it replaces.
+     * - Items: since-query on their own updatedAt watermark. The
+     *   BASELINE tick fetches everything (lastSeen 0) instead of
+     *   skipping — there is no listener for shared lists, so a skip
+     *   would lose pre-existing items forever. Later ticks query
+     *   since the watermark and advance it to the max returned
+     *   updatedAt (empty query leaves it alone, same as group
+     *   items). A per-list id fetch + reconcile runs every tick:
+     *   item deletes leave no trace in the since-query, and unlike
+     *   group tasks there is no lastDeleteAt signal a member can
+     *   bump (the group-doc rule lets members update only
+     *   lastUpdatedAt).
+     * - Comments: the same shape on their own createdAt watermark
+     *   (baseline fetches everything, per-item id fetch + reconcile
+     *   every tick).
+     * - Notifications: NONE. Shared-list arrivals sync silently —
+     *   postSummaryNotification keeps counting group items +
+     *   notices only (a list notification is a separate product
+     *   decision). No snapshot listeners are added — the spec's
+     *   sync is polling.
+     */
+    private suspend fun pollSharedLists(
+        repo: GroupRepository,
+        prefs: android.content.SharedPreferences,
+        groupId: String,
+        now: Long
+    ) {
+        val lists = repo.querySharedLists(groupId)
+        repo.applyPolledSharedListDocs(groupId, lists, emptyList(), emptyList())
+        repo.reconcileSharedLists(groupId, lists.map { it.id }.toSet())
+
+        val itemsSeenKey = KEY_LAST_SEEN_SHARED_ITEMS_PREFIX + groupId
+        val lastSeenItems = prefs.getLong(itemsSeenKey, 0L)
+        val changedItems = mutableListOf<SharedListItemDoc>()
+        if (lastSeenItems == 0L) {
+            for (list in lists) {
+                changedItems += repo.querySharedListItemsSince(groupId, list.id, 0L)
+            }
+            prefs.edit().putLong(itemsSeenKey, now).apply()
+        } else {
+            for (list in lists) {
+                changedItems += repo.querySharedListItemsSince(groupId, list.id, lastSeenItems)
+            }
+            if (changedItems.isNotEmpty()) {
+                var maxUpdatedAt = lastSeenItems
+                for (doc in changedItems) {
+                    if (doc.updatedAtEpochMillis > maxUpdatedAt) {
+                        maxUpdatedAt = doc.updatedAtEpochMillis
+                    }
+                }
+                prefs.edit().putLong(itemsSeenKey, maxUpdatedAt).apply()
+            }
+        }
+        repo.applyPolledSharedListDocs(groupId, emptyList(), changedItems, emptyList())
+        val itemIdsByList = mutableMapOf<String, List<String>>()
+        for (list in lists) {
+            val remoteIds = repo.querySharedListItemIds(groupId, list.id)
+            repo.reconcileSharedListItems(list.id, remoteIds.toSet())
+            itemIdsByList[list.id] = remoteIds
+        }
+
+        val commentsSeenKey = KEY_LAST_SEEN_SHARED_COMMENTS_PREFIX + groupId
+        val lastSeenComments = prefs.getLong(commentsSeenKey, 0L)
+        val changedComments = mutableListOf<SharedListCommentDoc>()
+        if (lastSeenComments == 0L) {
+            for ((listId, itemIds) in itemIdsByList) {
+                for (itemId in itemIds) {
+                    changedComments += repo.querySharedListCommentsSince(
+                        groupId, listId, itemId, 0L
+                    )
+                }
+            }
+            prefs.edit().putLong(commentsSeenKey, now).apply()
+        } else {
+            for ((listId, itemIds) in itemIdsByList) {
+                for (itemId in itemIds) {
+                    changedComments += repo.querySharedListCommentsSince(
+                        groupId, listId, itemId, lastSeenComments
+                    )
+                }
+            }
+            if (changedComments.isNotEmpty()) {
+                var maxCreatedAt = lastSeenComments
+                for (doc in changedComments) {
+                    if (doc.createdAtEpochMillis > maxCreatedAt) {
+                        maxCreatedAt = doc.createdAtEpochMillis
+                    }
+                }
+                prefs.edit().putLong(commentsSeenKey, maxCreatedAt).apply()
+            }
+        }
+        repo.applyPolledSharedListDocs(groupId, emptyList(), emptyList(), changedComments)
+        for ((listId, itemIds) in itemIdsByList) {
+            for (itemId in itemIds) {
+                val remoteIds = repo.querySharedListCommentIds(groupId, listId, itemId)
+                repo.reconcileSharedListComments(itemId, remoteIds.toSet())
+            }
         }
     }
 
@@ -324,6 +439,8 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
         private const val KEY_LAST_POLL = "last_poll_epoch_ms"
         private const val KEY_LAST_SEEN_PREFIX = "last_seen_"
         private const val KEY_LAST_SEEN_NOTICE_PREFIX = "last_seen_notice_"
+        private const val KEY_LAST_SEEN_SHARED_ITEMS_PREFIX = "last_seen_shared_items_"
+        private const val KEY_LAST_SEEN_SHARED_COMMENTS_PREFIX = "last_seen_shared_comments_"
         private const val KEY_SEEN_NOTICE_IDS_PREFIX = "seen_notice_ids_"
         private const val KEY_LAST_RECONCILE_PREFIX = "last_reconcile_"
         private const val KEY_LAST_EXISTENCE_CHECK_PREFIX = "last_existence_check_"
@@ -379,6 +496,8 @@ class GroupPollWorker(appContext: Context, params: WorkerParameters) :
             prefs.edit()
                 .remove(KEY_LAST_SEEN_PREFIX + groupId)
                 .remove(KEY_LAST_SEEN_NOTICE_PREFIX + groupId)
+                .remove(KEY_LAST_SEEN_SHARED_ITEMS_PREFIX + groupId)
+                .remove(KEY_LAST_SEEN_SHARED_COMMENTS_PREFIX + groupId)
                 .remove(KEY_SEEN_NOTICE_IDS_PREFIX + groupId)
                 .remove(KEY_LAST_RECONCILE_PREFIX + groupId)
                 .remove(KEY_LAST_EXISTENCE_CHECK_PREFIX + groupId)
