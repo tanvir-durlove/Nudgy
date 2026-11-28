@@ -9,6 +9,7 @@ import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.SharedListEntity
+import com.nextgentool.nudgy.data.local.entity.SharedListItemEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
@@ -149,6 +150,54 @@ class GroupsViewModel @Inject constructor(
     suspend fun getSharedListCounts(listId: String): Pair<Int, Int> =
         groupRepository.getSharedListItemCount(listId) to
             groupRepository.getSharedListDoneCount(listId)
+
+    /** The items of one shared list, oldest first (live — the Room flow; the poll worker feeds it). */
+    fun observeSharedListItems(listId: String): Flow<List<SharedListItemEntity>> =
+        groupRepository.observeSharedListItems(listId)
+
+    /**
+     * Shared lists (micro-task 4, Q1=(a)): any member may add an item.
+     * The repo enforces the blank-text + guest guards; an Err surfaces
+     * on [groupTaskError] and the inline field keeps its text (the
+     * screen only clears the field when the new item lands in the flow).
+     */
+    fun addSharedListItem(groupId: String, listId: String, text: String) {
+        viewModelScope.launch {
+            val result = groupRepository.addSharedListItem(
+                groupId, listId, userId, currentUser.displayName, text
+            )
+            if (result is GroupResult.Err) _groupTaskError.emit(result.message)
+        }
+    }
+
+    /**
+     * Shared lists (micro-task 4, Q1=(a)): any member may flip done.
+     * The repo enforces the member guard; an Err surfaces on
+     * [groupTaskError].
+     */
+    fun toggleSharedListItem(groupId: String, listId: String, item: SharedListItemEntity) {
+        viewModelScope.launch {
+            val result = groupRepository.setSharedListItemDone(
+                groupId, listId, userId, item.id, !item.done
+            )
+            if (result is GroupResult.Err) _groupTaskError.emit(result.message)
+        }
+    }
+
+    /**
+     * Shared lists (micro-task 4): only the adder or the group creator
+     * may delete an item — the repo enforces it (the screen only shows
+     * the delete icon to those two). An Err surfaces on
+     * [groupTaskError].
+     */
+    fun deleteSharedListItem(groupId: String, listId: String, itemId: String) {
+        viewModelScope.launch {
+            val result = groupRepository.deleteSharedListItem(
+                groupId, listId, userId, itemId
+            )
+            if (result is GroupResult.Err) _groupTaskError.emit(result.message)
+        }
+    }
 
     /** One-shot activity refresh for the detail (warms the flow before the listener fires). */
     suspend fun refreshActivity(groupId: String): List<GroupActivityEntry> =

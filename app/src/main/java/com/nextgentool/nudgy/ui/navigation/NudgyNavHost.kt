@@ -767,6 +767,12 @@ fun NudgyNavHost(
                 onObserveSharedLists = { groupId -> groupsViewModel.observeSharedLists(groupId) },
                 onCreateSharedList = { groupId, name -> groupsViewModel.createSharedList(groupId, name) },
                 onGetSharedListCounts = { listId -> groupsViewModel.getSharedListCounts(listId) },
+                // Shared lists (micro-task 4): the list detail screen
+                // (items + add + toggle + delete + activity).
+                onObserveSharedListItems = { listId -> groupsViewModel.observeSharedListItems(listId) },
+                onAddSharedListItem = { groupId, listId, text -> groupsViewModel.addSharedListItem(groupId, listId, text) },
+                onToggleSharedListItem = { groupId, listId, item -> groupsViewModel.toggleSharedListItem(groupId, listId, item) },
+                onDeleteSharedListItem = { groupId, listId, itemId -> groupsViewModel.deleteSharedListItem(groupId, listId, itemId) },
                 openGroupId = pendingOpenGroupId ?: searchOpenGroupId,
                 onOpenGroupIdConsumed = {
                     // Sprint 6-4 (step 2c) — the search tap's id is

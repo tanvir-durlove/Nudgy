@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -244,7 +245,10 @@ fun NudgyTopBar(
 fun NudgyCheckbox(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // Optional test tag (null = none) — the shared-list item rows
+    // tag their checkbox so the toggle is tappable in tests.
+    testTag: String? = null
 ) {
     val bgColor by animateColorAsState(
         targetValue = if (checked) Color(0xFF2E7D32) else Color.Transparent,
@@ -263,6 +267,7 @@ fun NudgyCheckbox(
             .clip(RoundedCornerShape(7.dp))
             .background(bgColor)
             .border(1.5.dp, borderColor, RoundedCornerShape(7.dp))
+            .then(if (testTag != null) Modifier.testTag(testTag) else Modifier)
             .clickable(role = Role.Checkbox) { onCheckedChange(!checked) },
         contentAlignment = Alignment.Center
     ) {

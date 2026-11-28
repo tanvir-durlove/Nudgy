@@ -83,6 +83,7 @@ import com.nextgentool.nudgy.auth.NudgyUser
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.local.entity.GroupEntity
 import com.nextgentool.nudgy.data.local.entity.SharedListEntity
+import com.nextgentool.nudgy.data.local.entity.SharedListItemEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
 import com.nextgentool.nudgy.data.model.Priority
 import com.nextgentool.nudgy.data.model.TaskCategory
@@ -238,6 +239,16 @@ fun GroupsScreen(
     onObserveSharedLists: (groupId: String) -> Flow<List<SharedListEntity>> = { flowOf(emptyList()) },
     onCreateSharedList: (groupId: String, name: String) -> Unit = { _, _ -> },
     onGetSharedListCounts: suspend (listId: String) -> Pair<Int, Int> = { 0 to 0 },
+    // Shared lists (micro-task 4): the list detail screen lives
+    // inside GroupsScreen as selectedSharedList state (same pattern
+    // as selectedGroup — no new NavHost route, no BackHandler).
+    // Item toggle/delete are any-member actions (Q1=(a)); the repo
+    // enforces the delete rule (adder or group creator) and the
+    // screen only shows the delete icon to those two.
+    onObserveSharedListItems: (listId: String) -> Flow<List<SharedListItemEntity>> = { flowOf(emptyList()) },
+    onAddSharedListItem: (groupId: String, listId: String, text: String) -> Unit = { _, _, _ -> },
+    onToggleSharedListItem: (groupId: String, listId: String, item: SharedListItemEntity) -> Unit = { _, _, _ -> },
+    onDeleteSharedListItem: (groupId: String, listId: String, itemId: String) -> Unit = { _, _, _ -> },
     // Sprint 5-3 — notification tap: opens the detail for this group
     // (the worker puts the group id in the launch intent; MainActivity
     // feeds it through NudgyApp → NavHost). Consumed once — even when
@@ -254,6 +265,10 @@ fun GroupsScreen(
     // tap code), so the tap itself is verified on the device (§10) and
     // CI verifies the detail rendering through this entry point.
     initialSelectedGroup: GroupEntity? = null,
+    // Shared list detail entry (micro-task 4): same reason as
+    // initialSelectedGroup — CI opens the list detail through this
+    // entry point; the row tap is verified on the device.
+    initialSelectedSharedList: SharedListEntity? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -306,6 +321,9 @@ fun GroupsScreen(
     var assignTask by remember { mutableStateOf<TaskEntity?>(null) }
     var schedulePendingDelete by remember { mutableStateOf<CalendarEventEntity?>(null) }
     var taskPendingDelete by remember { mutableStateOf<TaskEntity?>(null) }
+    // Shared lists (micro-task 4): the shared-list item awaiting its
+    // delete confirm dialog (same pattern as taskPendingDelete).
+    var sharedListItemPendingDelete by remember { mutableStateOf<SharedListItemEntity?>(null) }
     var deleteGroupTarget by remember { mutableStateOf<GroupEntity?>(null) }
     var leaveGroupTarget by remember { mutableStateOf<GroupEntity?>(null) }
     // Members for the selected group, observed declaratively:
@@ -414,6 +432,30 @@ fun GroupsScreen(
             pendingSharedListTotal = null
         }
     }
+    // Shared list detail (micro-task 4): same state pattern as
+    // selectedGroup — the detail lives inside GroupsScreen, no new
+    // NavHost route. The items are observed declaratively (same
+    // pattern as notices/activity); the add field clears only when
+    // the new item actually lands in the flow (same pending-total
+    // pattern as the create card above).
+    var selectedSharedList by remember(selectedGroupId) {
+        mutableStateOf(initialSelectedSharedList)
+    }
+    val selectedSharedListId = selectedSharedList?.id
+    val sharedListItemsFlow = remember(selectedSharedListId) {
+        if (selectedSharedListId == null) flowOf(emptyList())
+        else onObserveSharedListItems(selectedSharedListId)
+    }
+    val sharedListItems by sharedListItemsFlow.collectAsState(initial = emptyList())
+    var newSharedListItemText by remember(selectedSharedListId) { mutableStateOf("") }
+    var pendingSharedListItemTotal by remember(selectedSharedListId) { mutableStateOf<Int?>(null) }
+    LaunchedEffect(sharedListItems, pendingSharedListItemTotal) {
+        val pending = pendingSharedListItemTotal ?: return@LaunchedEffect
+        if (sharedListItems.size > pending) {
+            newSharedListItemText = ""
+            pendingSharedListItemTotal = null
+        }
+    }
     // Sprint 5-3 — notification tap: open the detail once the group
     // list has loaded (a stale id is consumed without opening).
     LaunchedEffect(openGroupId, groups) {
@@ -428,6 +470,7 @@ fun GroupsScreen(
         val selected = selectedGroup
         if (selected != null && groups.none { it.groupId == selected.groupId }) {
             selectedGroup = null
+            selectedSharedList = null
         }
     }
 
@@ -888,7 +931,7 @@ fun GroupsScreen(
             // Reserved banner slot: empty space only (no ad SDK) so a future
             // banner slots in without layout shift.
             Spacer(modifier = Modifier.height(64.dp))
-        } else {
+        } else if (selectedSharedList == null) {
             // ------------------------------------------------ detail view
             val isCreator = group.creatorUid == user.uid
             val groupTasks = allTasks.filter { it.groupId == group.groupId }
@@ -907,7 +950,10 @@ fun GroupsScreen(
                     .testTag("group_detail_backbar")
             ) {
                 IconButton(
-                    onClick = { selectedGroup = null },
+                    onClick = {
+                        selectedGroup = null
+                        selectedSharedList = null
+                    },
                     modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
@@ -1559,9 +1605,10 @@ fun GroupsScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                // Micro-task 4 wires the detail
-                                // screen — no-op until then.
-                                .clickable { }
+                                // Micro-task 4: opens the list detail
+                                // (selectedSharedList state below); the
+                                // item sheet lands in micro-task 5.
+                                .clickable { selectedSharedList = sharedList }
                                 .padding(14.dp)
                         ) {
                             Box(
@@ -1862,6 +1909,270 @@ fun GroupsScreen(
                 modifier = Modifier.padding(start = 2.dp)
             )
             }
+        } else {
+            // --------------------------------------- shared list detail
+            // Shared lists (micro-task 4, prototype scr-shared-list):
+            // backbar + intro + items card + ADD AN ITEM card +
+            // Activity history. selectedGroup stays set, so back
+            // returns to the group detail. The live list row wins
+            // over the captured entity (a rename on another device
+            // shows up); the captured entity is the fallback when
+            // the list has not landed in the flow yet.
+            val listState = selectedSharedList
+            if (listState != null) {
+                val sharedList = sharedLists.firstOrNull { it.id == listState.id } ?: listState
+                val listItemIds = sharedListItems.map { it.id }.toSet()
+                val listActivity = activity.filter {
+                    it.itemId == sharedList.id || it.itemId in listItemIds
+                }
+                // Backbar (prototype scr-shared-list): back + list
+                // name 21sp/800 + "{group} group" tagchip.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .testTag("shared_list_detail_backbar")
+                ) {
+                    IconButton(
+                        onClick = { selectedSharedList = null },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back to group",
+                            tint = NudgyCharcoal,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Text(
+                        text = sharedList.name,
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontSize = 21.sp, fontWeight = FontWeight.ExtraBold
+                        ),
+                        color = NudgyCharcoal,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    DetailTagChip(text = "${group.name} group")
+                }
+                // Intro (prototype scr-shared-list, "attach a file"
+                // left out on purpose — attachments are parked to
+                // Phase 2, Q2).
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = buildAnnotatedString {
+                        append("A shared list everyone in ${group.name} can edit. ")
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                            append("Tap an item")
+                        }
+                        append(" to assign it to someone, read or add comments, and see its history.")
+                    },
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    color = NudgyMuted,
+                    modifier = Modifier.padding(start = 2.dp, bottom = 12.dp)
+                )
+                // Items card (prototype scr-shared-list): checkbox +
+                // text per row; done mirrors the group task row
+                // (muted + strikethrough). The row body tap is a
+                // no-op — the item sheet lands in micro-task 5.
+                Surface(
+                    shape = NudgyTokens.cardRadius,
+                    color = NudgyCard,
+                    shadowElevation = 2.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("shared_list_items_card")
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        if (sharedListItems.isEmpty()) {
+                            Text(
+                                text = "No items yet.",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                                color = NudgyMuted,
+                                modifier = Modifier.padding(top = 12.dp)
+                            )
+                        } else {
+                            sharedListItems.forEachIndexed { index, item ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { }
+                                        .padding(vertical = 12.dp)
+                                ) {
+                                    NudgyCheckbox(
+                                        checked = item.done,
+                                        onCheckedChange = {
+                                            onToggleSharedListItem(
+                                                group.groupId, sharedList.id, item
+                                            )
+                                        },
+                                        testTag = "shared_list_item_checkbox_${item.id}"
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = item.text,
+                                            style = MaterialTheme.typography.titleMedium.copy(
+                                                fontWeight = FontWeight.SemiBold, fontSize = 14.sp
+                                            ),
+                                            color = if (item.done) NudgyMuted else NudgyCharcoal,
+                                            textDecoration = if (item.done) {
+                                                TextDecoration.LineThrough
+                                            } else {
+                                                TextDecoration.None
+                                            }
+                                        )
+                                    }
+                                    // Delete is adder-or-creator only
+                                    // (the repo enforces it too); anyone
+                                    // else never sees the icon.
+                                    if (item.addedByUid == user.uid || group.creatorUid == user.uid) {
+                                        IconButton(
+                                            onClick = { sharedListItemPendingDelete = item },
+                                            modifier = Modifier
+                                                .size(32.dp)
+                                                .testTag("delete_shared_list_item_${item.id}")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.DeleteOutline,
+                                                contentDescription = "Delete item",
+                                                tint = NudgyMuted,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                if (index != sharedListItems.lastIndex) {
+                                    HorizontalDivider(
+                                        color = NudgyBorder,
+                                        thickness = 1.dp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                // ADD AN ITEM card (prototype scr-shared-list): always
+                // visible, below the items card.
+                Spacer(modifier = Modifier.height(14.dp))
+                Surface(
+                    shape = NudgyTokens.cardRadius,
+                    color = NudgyCard,
+                    shadowElevation = 2.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(
+                            text = "ADD AN ITEM",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = 13.sp, fontWeight = FontWeight.Bold
+                            ),
+                            color = NudgyMuted,
+                            modifier = Modifier.padding(bottom = 9.dp)
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = newSharedListItemText,
+                                onValueChange = { newSharedListItemText = it },
+                                placeholder = { Text("e.g. Milk 2 L") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(16.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = teal,
+                                    unfocusedBorderColor = NudgyFieldBorder
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("add_shared_list_item_field")
+                            )
+                            Button(
+                                onClick = {
+                                    val text = newSharedListItemText.trim()
+                                    if (text.isEmpty()) return@Button
+                                    pendingSharedListItemTotal = sharedListItems.size
+                                    onAddSharedListItem(group.groupId, sharedList.id, text)
+                                },
+                                enabled = newSharedListItemText.isNotBlank(),
+                                colors = ButtonDefaults.buttonColors(containerColor = teal),
+                                shape = RoundedCornerShape(100.dp),
+                                modifier = Modifier.testTag("add_shared_list_item_submit")
+                            ) {
+                                Text(
+                                    text = "Add",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    }
+                }
+                // Activity history for THIS list only (prototype
+                // scr-shared-list): the sentence comes from
+                // activityDisplayText — the screen never invents
+                // wording. LIST_CREATED / LIST_DELETED carry the
+                // list id; item actions carry the item id.
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    text = "Activity history",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = 17.sp, fontWeight = FontWeight.Bold
+                    ),
+                    color = NudgyCharcoal,
+                    modifier = Modifier.padding(start = 2.dp, bottom = 10.dp)
+                )
+                Surface(
+                    shape = NudgyTokens.cardRadius,
+                    color = NudgyCard,
+                    shadowElevation = 2.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("shared_list_activity_card")
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        if (listActivity.isEmpty()) {
+                            Text(
+                                text = "No activity yet.",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                                color = NudgyMuted,
+                                modifier = Modifier.padding(top = 12.dp)
+                            )
+                        } else {
+                            Column {
+                                listActivity.forEachIndexed { index, entry ->
+                                    Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                                        Text(
+                                            text = activityDisplayText(entry),
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                                            color = NudgyCharcoal
+                                        )
+                                        if (entry.createdAtEpochMillis > 0L) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = taskDateFormatter.format(entry.createdAtEpochMillis),
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                                color = NudgyMuted
+                                            )
+                                        }
+                                    }
+                                    if (index != listActivity.lastIndex) {
+                                        HorizontalDivider(
+                                            color = NudgyBorder,
+                                            thickness = 1.dp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -2067,6 +2378,34 @@ fun GroupsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { taskPendingDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+    // Shared lists (micro-task 4): the item delete confirm. The ids
+    // come from the item itself (groupId + listId), so the dialog
+    // needs no selected state.
+    sharedListItemPendingDelete?.let { item ->
+        AlertDialog(
+            onDismissRequest = { sharedListItemPendingDelete = null },
+            title = { Text("Delete this item?") },
+            text = {
+                Text(
+                    "\"${item.text}\" will be removed from the list. " +
+                        "This cannot be undone."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDeleteSharedListItem(item.groupId, item.listId, item.id)
+                    sharedListItemPendingDelete = null
+                }) {
+                    Text("Delete", color = Color(0xFFB3261E))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { sharedListItemPendingDelete = null }) {
                     Text("Cancel")
                 }
             }
