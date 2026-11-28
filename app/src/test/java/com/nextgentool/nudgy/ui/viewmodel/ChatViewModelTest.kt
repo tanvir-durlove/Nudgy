@@ -84,7 +84,8 @@ import java.util.Calendar
  *
  * The Main dispatcher is set per test (CalendarViewModelTest pattern):
  * StandardTestDispatcher(testScheduler), ViewModel built after setMain,
- * assertions via `messages.first { ... }`, resetMain() in finally.
+ * assertions via `messages.first { ... }`, resetMainAfterDrain()
+ * in finally (run-1071 fix: the drain must precede resetMain).
  * Calendar permissions are deliberately NOT granted: the chat flow
  * never syncs, and blockFocusTime's Google export no-ops without them
  * while the local event is still inserted.
@@ -275,6 +276,30 @@ class ChatViewModelTest {
         context.getSharedPreferences("nudgy_settings", Context.MODE_PRIVATE).edit().clear().apply()
     }
 
+    /**
+     * Run-1071 fix — the resetMain race, shared by all 61 tests below.
+     * resetMain() must be the LAST step, not the first: the ViewModel is
+     * still alive in a test's finally, and its init coroutines dispatch
+     * Room work to real Dispatchers.IO threads, which resume back onto
+     * Main from those threads. resetMain() while such a resume is in
+     * flight throws "Dispatchers.Main is used concurrently with setting
+     * it" — the two run-1071 failures on merge head cc004507 (different
+     * victim tests each time; the same tree passed PR run 1070, so it is
+     * a race, not a product bug). Cancel the scope first, then drain the
+     * real IO the same way tearDown used to — the drain lived in
+     * tearDown, after resetMain: too late to protect it. Same proven
+     * pattern as FocusViewModelTest (PR #128) and SettingsViewModelTest
+     * (PR #133); PR #133 round 3 had already applied it inline at TWO
+     * sites in this file, which is why the race survived at the other
+     * 59. tearDown keeps its own idempotent clear + drain + DB close
+     * as the safety net.
+     */
+    private fun resetMainAfterDrain() {
+        viewModelStore.clear()
+        Thread.sleep(500)
+        Dispatchers.resetMain()
+    }
+
     private fun newViewModel(fakeAuth: GroupAuth? = null) = ChatViewModel(
         chatRepository, preFilter, taskRepository, calendarRepository,
         fakeVoice, fakeSound,
@@ -316,7 +341,7 @@ class ChatViewModelTest {
             // The welcome seed is silent — no reply sound for it.
             assertEquals(0, fakeSound.playCount)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -336,7 +361,7 @@ class ChatViewModelTest {
             assertTrue(taskRepository.getAllTasksOnce(userId).isEmpty())
             assertEquals(1, fakeSound.playCount)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -374,7 +399,7 @@ class ChatViewModelTest {
             assertNull(viewModel.pendingDraft.value)
             assertEquals(2, fakeSound.playCount)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -393,7 +418,7 @@ class ChatViewModelTest {
             assertEquals("call tasnim at 5pm", messages[1].text)
             assertFalse(messages[1].isVoice)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -417,7 +442,7 @@ class ChatViewModelTest {
             testScheduler.advanceUntilIdle()
             assertEquals(4, viewModel.messages.value.size)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -439,7 +464,7 @@ class ChatViewModelTest {
             assertEquals(1, tasks.size)
             assertEquals("Call Tasnim about the launch", tasks.single().title)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -465,7 +490,7 @@ class ChatViewModelTest {
             assertTrue(taskRepository.getAllTasksOnce(userId).isEmpty())
             assertEquals(5, viewModel.messages.value.size)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -483,7 +508,7 @@ class ChatViewModelTest {
             assertTrue(taskRepository.getAllTasksOnce(userId).isEmpty())
             assertEquals(1, fakeSound.playCount)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -499,7 +524,7 @@ class ChatViewModelTest {
             assertTrue(messages[2].text.contains("বুঝতে পারিনি"))
             assertTrue(taskRepository.getAllTasksOnce(userId).isEmpty())
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -542,7 +567,7 @@ class ChatViewModelTest {
             assertEquals(9, hourOf(tasks.single().dueDateEpochMillis))
             assertNull(viewModel.pendingDraft.value)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -565,7 +590,7 @@ class ChatViewModelTest {
             assertEquals(0, freeTurnsUsed())
             assertEquals(1, recordingGemini.restCalls)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -585,7 +610,7 @@ class ChatViewModelTest {
             assertEquals(0, recordingGemini.restCalls)
             assertEquals(0, recordingGemini.aiLogicCalls)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -606,7 +631,7 @@ class ChatViewModelTest {
             assertEquals(0, recordingGemini.restCalls)
             assertEquals(0, recordingGemini.aiLogicCalls)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -623,7 +648,7 @@ class ChatViewModelTest {
             // A reply arrived and the mascot still never talks (§4.4).
             assertFalse(viewModel.isSpeaking.value)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -659,7 +684,7 @@ class ChatViewModelTest {
             }
             assertTrue(updated.any { it.id == proposal.id && it.focusActionCompleted })
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -676,7 +701,7 @@ class ChatViewModelTest {
             assertEquals(1, viewModel.messages.value.size)
             assertEquals(0, fakeSound.playCount)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -728,7 +753,7 @@ class ChatViewModelTest {
             // No LLM turn was spent: every piece parsed locally.
             assertEquals(0, freeTurnsUsed())
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -754,7 +779,7 @@ class ChatViewModelTest {
             assertFalse(messages[0].isVoice)
             assertFalse(messages[2].isVoice)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -779,7 +804,7 @@ class ChatViewModelTest {
             assertTrue(events.any { it.title.contains("doctor", ignoreCase = true) })
             assertTrue(viewModel.pendingBrainDumpDrafts.value.isEmpty())
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -801,7 +826,7 @@ class ChatViewModelTest {
             assertEquals(1, tasks.size)
             assertTrue(tasks.single().title.contains("buy milk", ignoreCase = true))
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -818,7 +843,7 @@ class ChatViewModelTest {
             assertTrue(taskRepository.getAllTasksOnce(userId).isEmpty())
             assertTrue(viewModel.pendingBrainDumpDrafts.value.isEmpty())
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -839,7 +864,7 @@ class ChatViewModelTest {
             assertNull(viewModel.pendingBrainDumpMessageId.value)
             assertTrue(taskRepository.getAllTasksOnce(userId).isEmpty())
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -867,7 +892,7 @@ class ChatViewModelTest {
             // gate closed: a local answer, zero turns spent.
             assertEquals(0, freeTurnsUsed())
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -895,17 +920,7 @@ class ChatViewModelTest {
             assertFalse(preFilter.hasPendingClarification())
             assertTrue(taskRepository.getAllTasksOnce(userId).isEmpty())
         } finally {
-            // PR #133 fix round 3 — the Focus/Settings resetMain race:
-            // this ViewModel is still alive (tearDown clears the store
-            // only after the test returns), and its init coroutines do
-            // Room work on real Dispatchers.IO threads and resume back
-            // onto Main from those threads. resetMain() while such a
-            // resume is in flight throws "Dispatchers.Main is used
-            // concurrently with setting it". Cancel the scope and drain
-            // the real-thread IO BEFORE resetMain.
-            viewModelStore.clear()
-            Thread.sleep(500)
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -934,7 +949,7 @@ class ChatViewModelTest {
             assertEquals(1, viewModel.pendingBrainDumpDrafts.value.size)
             assertEquals(1, fakeVoice.stopCalls)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -952,7 +967,7 @@ class ChatViewModelTest {
             viewModel.messages.first { it.size == 3 }
             assertEquals(1, viewModel.pendingBrainDumpDrafts.value.size)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -970,7 +985,7 @@ class ChatViewModelTest {
             assertTrue(viewModel.pendingBrainDumpDrafts.value.isEmpty())
             assertTrue(taskRepository.getAllTasksOnce(userId).isEmpty())
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -990,7 +1005,7 @@ class ChatViewModelTest {
             assertEquals(2, viewModel.pendingBrainDumpDrafts.value.size)
             assertEquals(0, freeTurnsUsed())
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1007,7 +1022,7 @@ class ChatViewModelTest {
             assertTrue(viewModel.pendingBrainDumpDrafts.value.isEmpty())
             assertNull(viewModel.pendingBrainDumpMessageId.value)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1041,7 +1056,7 @@ class ChatViewModelTest {
             viewModel.retryRewardedAd()
             assertEquals(1, fakeRewarded.retryCalls)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1101,7 +1116,7 @@ class ChatViewModelTest {
             // The detail sheet's progress label reads this: 0 done of 3.
             assertEquals(0 to 3, taskRepository.subtaskProgress(parent.id))
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1122,7 +1137,7 @@ class ChatViewModelTest {
             assertEquals(0, recordingGemini.restCalls)
             assertEquals(0, recordingGemini.aiLogicCalls)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1141,7 +1156,7 @@ class ChatViewModelTest {
             assertEquals(0, recordingGemini.restCalls)
             assertEquals(0, freeTurnsUsed())
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1162,7 +1177,7 @@ class ChatViewModelTest {
             assertNull(viewModel.pendingDraft.value)
             assertEquals(0, recordingGemini.restCalls)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1181,17 +1196,7 @@ class ChatViewModelTest {
             assertNull(viewModel.pendingDraft.value)
             assertEquals(0, recordingGemini.restCalls)
         } finally {
-            // PR #133 fix round 3 — the Focus/Settings resetMain race:
-            // this ViewModel is still alive (tearDown clears the store
-            // only after the test returns), and its init coroutines do
-            // Room work on real Dispatchers.IO threads and resume back
-            // onto Main from those threads. resetMain() while such a
-            // resume is in flight throws "Dispatchers.Main is used
-            // concurrently with setting it". Cancel the scope and drain
-            // the real-thread IO BEFORE resetMain.
-            viewModelStore.clear()
-            Thread.sleep(500)
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1220,7 +1225,7 @@ class ChatViewModelTest {
             assertEquals(3, taskRepository.observeSubtasks(parent.id).first().size)
             assertEquals(0 to 3, taskRepository.subtaskProgress(parent.id))
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1248,7 +1253,7 @@ class ChatViewModelTest {
             assertNull(viewModel.pendingDraft.value)
             assertEquals(0, recordingGemini.restCalls)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1269,7 +1274,7 @@ class ChatViewModelTest {
             assertNull(viewModel.pendingDraft.value)
             assertTrue(taskRepository.observeSubtasks(parent.id).first().isEmpty())
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1298,7 +1303,7 @@ class ChatViewModelTest {
             val messages = viewModel.messages.first { it.size == 4 }
             assertTrue(messages[3].text.contains("nothing was created"))
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1327,7 +1332,7 @@ class ChatViewModelTest {
             assertEquals(listOf("ময়দা কেনা", "ময়দা মাখা"), subtasks.map { it.title })
             assertEquals(0 to 2, taskRepository.subtaskProgress(parent.id))
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1437,7 +1442,7 @@ class ChatViewModelTest {
             // Nothing is in the DB yet — the preview is only a question.
             assertTrue(calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first().isEmpty())
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1465,7 +1470,7 @@ class ChatViewModelTest {
             }
             assertTrue(calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first().size == 1)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1504,7 +1509,7 @@ class ChatViewModelTest {
                 assertEquals(at(0, 10), after.plannedStartEpochMillis)
             }
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1540,7 +1545,7 @@ class ChatViewModelTest {
                 assertEquals("Write report", drafts.single().title)
             }
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1563,7 +1568,7 @@ class ChatViewModelTest {
             assertTrue(messages[2].text.contains("No free slot"))
             assertEquals(ChatActionType.NONE, messages[2].actionType)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1580,7 +1585,7 @@ class ChatViewModelTest {
             assertTrue(messages[2].text.contains("Nothing to schedule"))
             assertTrue(calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first().isEmpty())
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1623,7 +1628,7 @@ class ChatViewModelTest {
             )
             assertTrue(viewModel.pendingPlanDrafts.value.isEmpty())
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1667,7 +1672,7 @@ class ChatViewModelTest {
                 .filter { it.eventType == "FOCUS_TIME" }
             assertEquals(listOf("Keep me"), events.map { it.title })
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1702,7 +1707,7 @@ class ChatViewModelTest {
             assertTrue(calendarRepository.observeEventsForDay(userId, System.currentTimeMillis()).first().isEmpty())
             assertTrue(viewModel.pendingPlanDrafts.value.isEmpty())
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1754,7 +1759,7 @@ class ChatViewModelTest {
             )
             assertNull(viewModel.pendingPriorityOrder.value)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1802,7 +1807,7 @@ class ChatViewModelTest {
             val freeLine = replyText.lines().first { it.contains("Free task") }
             assertTrue(!freeLine.contains("ধাক্কা খায়"))
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1817,7 +1822,7 @@ class ChatViewModelTest {
             assertEquals(1, viewModel.messages.value.size)
             assertNull(viewModel.pendingPriorityOrder.value)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1833,7 +1838,7 @@ class ChatViewModelTest {
             assertNull(viewModel.pendingPriorityOrder.value)
             assertTrue(messages[2].text.contains("Nothing to order"))
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1860,7 +1865,7 @@ class ChatViewModelTest {
             // survives a configuration change by construction — the
             // screen re-collects the same flow after rotation.
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1900,7 +1905,7 @@ class ChatViewModelTest {
             assertEquals(0, freeTurnsUsed())
             assertEquals(0, recordingGemini.restCalls)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1921,7 +1926,7 @@ class ChatViewModelTest {
             assertTrue(taskRepository.getAllTasksOnce(userId).isEmpty())
             assertEquals(0, recordingGemini.restCalls)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1943,7 +1948,7 @@ class ChatViewModelTest {
             assertTrue(taskRepository.getAllTasksOnce(userId).isEmpty())
             assertEquals(0, recordingGemini.restCalls)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -1988,7 +1993,7 @@ class ChatViewModelTest {
             )
             assertNull(viewModel.pendingPriorityOrder.value)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -2036,7 +2041,7 @@ class ChatViewModelTest {
                 assertEquals(expected, events.size)
             }
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -2071,7 +2076,7 @@ class ChatViewModelTest {
             assertEquals(1, created.size)
             assertTrue(created.single().title.contains("বাজার"))
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 
@@ -2115,7 +2120,7 @@ class ChatViewModelTest {
             assertEquals(userId, signedInUser.uid)
             assertEquals("Ayesha", signedInUser.displayName)
         } finally {
-            Dispatchers.resetMain()
+            resetMainAfterDrain()
         }
     }
 }
