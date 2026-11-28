@@ -413,8 +413,8 @@ class CalendarScreenTest {
 
     @Test
     fun `tapping a grid day selects it`() {
-        val plusTwo = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, 2) }
-        val plusTwoStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(plusTwo.time)
+        val plusOne = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, 1) }
+        val plusOneStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(plusOne.time)
         var selectedDay = -1L
         composeRule.setContent {
             CalendarScreen(
@@ -434,7 +434,7 @@ class CalendarScreenTest {
         // all three cases. performClick is also the path the
         // sync-pill and seg tests use on this screen. The selection
         // assertion below is unchanged.
-        composeRule.onNodeWithTag("calendar_month_day_$plusTwoStr").performClick()
+        composeRule.onNodeWithTag("calendar_month_day_$plusOneStr").performClick()
         // MICRO-PROBE (temporary, diagnostic only): this wait timed out
         // twice on merge run 1063 and once more on PR #156's run 1064
         // even with waitForIdle + 10 s, while the identical tree passed
@@ -449,7 +449,7 @@ class CalendarScreenTest {
         try {
             composeRule.waitUntil(timeoutMillis = 10_000) {
                 selectedDay != -1L &&
-                    startOfDayMillis(selectedDay) == startOfDayMillis(plusTwo.timeInMillis)
+                    startOfDayMillis(selectedDay) == startOfDayMillis(plusOne.timeInMillis)
             }
             reached = true
         } catch (_: Throwable) {
@@ -460,7 +460,7 @@ class CalendarScreenTest {
         }
         val stuckDay = if (selectedDay == -1L) "never-called" else dateStringOf(selectedDay)
         assertTrue(
-            "PROBE selectedDay=$stuckDay expected=$plusTwoStr",
+            "PROBE selectedDay=$stuckDay expected=$plusOneStr",
             reached
         )
     }
