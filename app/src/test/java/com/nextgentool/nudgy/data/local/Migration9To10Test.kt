@@ -298,10 +298,10 @@ class Migration9To10Test {
     }
 
     private fun openMigratedDatabase(): NudgyDatabase {
-        // Opening with the v10 entities + MIGRATION_9_10 runs the
-        // migration and validates the whole schema. Any mismatch throws here.
+        // Opening with the CURRENT (v15) entities + the chain from
+        // MIGRATION_9_10 runs the migration and validates the whole schema. Any mismatch throws here.
         return Room.databaseBuilder(context, NudgyDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
+            .addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
             .allowMainThreadQueries()
             .build()
     }

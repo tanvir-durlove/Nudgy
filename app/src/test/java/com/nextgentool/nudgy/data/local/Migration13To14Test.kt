@@ -386,10 +386,10 @@ class Migration13To14Test {
     }
 
     private fun openMigratedDatabase(): NudgyDatabase {
-        // Opening with the v14 entities + MIGRATION_13_14 runs the
-        // migration and validates the whole schema. Any mismatch throws here.
+        // Opening with the CURRENT (v15) entities + the chain from
+        // MIGRATION_13_14 runs the migration and validates the whole schema. Any mismatch throws here.
         return Room.databaseBuilder(context, NudgyDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_13_14)
+            .addMigrations(MIGRATION_13_14, MIGRATION_14_15)
             .allowMainThreadQueries()
             .build()
     }
