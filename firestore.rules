@@ -197,6 +197,63 @@ service cloud.firestore {
         get(/databases/$(database)/documents/groups/$(gid)).data.creatorUid == request.auth.uid;
     }
 
+    // Shared list (spec s7-shared-list-scope-spec, Q1=(a), micro-task 1):
+    // any group member may create a list, add items, flip done,
+    // (re)assign and comment — deliberately unlike group tasks
+    // (Sprint 5-2 Q3=(b), creator-only). Deletes stay with the creator
+    // of the thing or the group creator. A comment is never edited,
+    // only deleted (same as notices).
+    match /groups/{gid}/sharedLists/{listId} {
+      allow read: if request.auth != null && isGroupMember(gid);
+      allow create: if isGroupMember(gid) &&
+        request.resource.data.createdByUid == request.auth.uid &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() > 0;
+      // Rename only — the only list field anyone ever updates.
+      allow update: if request.auth != null &&
+        (resource.data.createdByUid == request.auth.uid ||
+         get(/databases/$(database)/documents/groups/$(gid)).data.creatorUid == request.auth.uid) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name']);
+      allow delete: if request.auth != null &&
+        (resource.data.createdByUid == request.auth.uid ||
+         get(/databases/$(database)/documents/groups/$(gid)).data.creatorUid == request.auth.uid);
+    }
+
+    match /groups/{gid}/sharedLists/{listId}/items/{itemId} {
+      allow read: if request.auth != null && isGroupMember(gid);
+      allow create: if isGroupMember(gid) &&
+        request.resource.data.addedByUid == request.auth.uid &&
+        request.resource.data.text is string &&
+        request.resource.data.text.size() > 0;
+      // Any member may flip done / (re)assign — the changed keys must
+      // be exactly the done/assignee set (+ an updatedAt bump, so the
+      // poll query sees the change). Editing the text itself needs the
+      // adder or the group creator. No update may touch anything
+      // outside the writable set (addedByUid / createdAt are immutable).
+      allow update: if request.auth != null && isGroupMember(gid) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['text', 'done', 'doneByUid', 'assigneeUid', 'assigneeName', 'updatedAt']) &&
+        (request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['done', 'doneByUid', 'assigneeUid', 'assigneeName', 'updatedAt'])
+         || resource.data.addedByUid == request.auth.uid
+         || get(/databases/$(database)/documents/groups/$(gid)).data.creatorUid == request.auth.uid);
+      allow delete: if request.auth != null &&
+        (resource.data.addedByUid == request.auth.uid ||
+         get(/databases/$(database)/documents/groups/$(gid)).data.creatorUid == request.auth.uid);
+    }
+
+    match /groups/{gid}/sharedLists/{listId}/items/{itemId}/comments/{commentId} {
+      allow read: if request.auth != null && isGroupMember(gid);
+      allow create: if isGroupMember(gid) &&
+        request.resource.data.authorUid == request.auth.uid &&
+        request.resource.data.text is string &&
+        request.resource.data.text.size() > 0;
+      allow update: if false;
+      allow delete: if request.auth != null &&
+        (resource.data.authorUid == request.auth.uid ||
+         get(/databases/$(database)/documents/groups/$(gid)).data.creatorUid == request.auth.uid);
+    }
+
     // Sprint 5-5 (feature 36): activity history. Members read it;
     // entries are written only by the member who did the action
     // (actorUid == auth.uid) with a type from the fixed set —
@@ -211,7 +268,12 @@ service cloud.firestore {
           'task_created', 'schedule_created', 'task_edited',
           'task_deleted', 'schedule_deleted', 'task_completed',
           'task_reopened', 'task_assigned', 'task_unassigned',
-          'notice_sent'] &&
+          'notice_sent',
+          // Shared list, micro-task 1 (Q1=(a)): every member-doable
+          // list action has an activity type.
+          'list_created', 'list_item_added', 'list_item_completed',
+          'list_item_reopened', 'list_item_assigned',
+          'list_item_commented', 'list_deleted'] &&
         data.createdAt is timestamp;
     }
 
@@ -220,7 +282,16 @@ service cloud.firestore {
       allow create: if request.auth != null && isGroupMember(gid) &&
         isValidActivity(request.resource.data) &&
         (request.resource.data.type in ['member_joined', 'member_left',
-           'task_completed', 'task_reopened'] ||
+           'task_completed', 'task_reopened',
+           // Shared list: a member records only their own list
+           // actions (isValidActivity already pins actorUid). The
+           // list_deleted entry is in the same set because the list
+           // creator — not only the group creator — may delete a
+           // list; the delete itself is gated by the sharedLists
+           // rule, the activity entry is only informational.
+           'list_created', 'list_item_added', 'list_item_completed',
+           'list_item_reopened', 'list_item_assigned',
+           'list_item_commented', 'list_deleted'] ||
          get(/databases/$(database)/documents/groups/$(gid)).data.creatorUid == request.auth.uid);
       allow update: if false;
       allow delete: if request.auth != null &&

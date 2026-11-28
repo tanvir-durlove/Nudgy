@@ -17,6 +17,9 @@ import com.nextgentool.nudgy.data.local.dao.HabitDao
 import com.nextgentool.nudgy.data.local.dao.MemoryDao
 import com.nextgentool.nudgy.data.local.dao.ProjectDao
 import com.nextgentool.nudgy.data.local.dao.SavedViewDao
+import com.nextgentool.nudgy.data.local.dao.SharedListCommentDao
+import com.nextgentool.nudgy.data.local.dao.SharedListDao
+import com.nextgentool.nudgy.data.local.dao.SharedListItemDao
 import com.nextgentool.nudgy.data.local.dao.TagDao
 import com.nextgentool.nudgy.data.local.dao.TaskAttachmentDao
 import com.nextgentool.nudgy.data.local.dao.TaskDao
@@ -32,6 +35,9 @@ import com.nextgentool.nudgy.data.local.entity.HabitEntity
 import com.nextgentool.nudgy.data.local.entity.NudgyMemoryEntity
 import com.nextgentool.nudgy.data.local.entity.ProjectEntity
 import com.nextgentool.nudgy.data.local.entity.SavedViewEntity
+import com.nextgentool.nudgy.data.local.entity.SharedListCommentEntity
+import com.nextgentool.nudgy.data.local.entity.SharedListEntity
+import com.nextgentool.nudgy.data.local.entity.SharedListItemEntity
 import com.nextgentool.nudgy.data.local.entity.TagEntity
 import com.nextgentool.nudgy.data.local.entity.TaskAttachmentEntity
 import com.nextgentool.nudgy.data.local.entity.TaskEntity
@@ -353,6 +359,60 @@ val MIGRATION_13_14 = object : Migration(13, 14) {
     }
 }
 
+val MIGRATION_14_15 = object : Migration(14, 15) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Shared list, micro-task 1 (spec s7-shared-list-scope-spec,
+        // approved 2026-11-27): three new tables, no column changes.
+        // No backfill — no tester install has shared-list rows yet.
+        // Every CREATE TABLE below MUST match its entity definition
+        // exactly (column order, types, FK clauses) — Room validates
+        // the migrated schema against the entities on open.
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `shared_lists` (
+                `id` TEXT NOT NULL,
+                `groupId` TEXT NOT NULL,
+                `name` TEXT NOT NULL,
+                `createdByUid` TEXT NOT NULL,
+                `createdByName` TEXT NOT NULL,
+                `createdAtEpochMillis` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `shared_list_items` (
+                `id` TEXT NOT NULL,
+                `listId` TEXT NOT NULL,
+                `groupId` TEXT NOT NULL,
+                `text` TEXT NOT NULL,
+                `addedByUid` TEXT NOT NULL,
+                `addedByName` TEXT NOT NULL,
+                `done` INTEGER NOT NULL,
+                `doneByUid` TEXT,
+                `assigneeUid` TEXT,
+                `assigneeName` TEXT,
+                `createdAtEpochMillis` INTEGER NOT NULL,
+                `updatedAtEpochMillis` INTEGER NOT NULL,
+                PRIMARY KEY(`id`),
+                FOREIGN KEY(`listId`) REFERENCES `shared_lists`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `shared_list_comments` (
+                `id` TEXT NOT NULL,
+                `itemId` TEXT NOT NULL,
+                `listId` TEXT NOT NULL,
+                `groupId` TEXT NOT NULL,
+                `authorUid` TEXT NOT NULL,
+                `authorName` TEXT NOT NULL,
+                `text` TEXT NOT NULL,
+                `createdAtEpochMillis` INTEGER NOT NULL,
+                PRIMARY KEY(`id`),
+                FOREIGN KEY(`itemId`) REFERENCES `shared_list_items`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+        """.trimIndent())
+    }
+}
+
 @Database(
     entities = [
         TaskEntity::class,
@@ -370,9 +430,12 @@ val MIGRATION_13_14 = object : Migration(13, 14) {
         TaskTemplateEntity::class,
         FocusSessionEntity::class,
         HabitEntity::class,
-        HabitCheckInEntity::class
+        HabitCheckInEntity::class,
+        SharedListEntity::class,
+        SharedListItemEntity::class,
+        SharedListCommentEntity::class
     ],
-    version = 14,
+    version = 15,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -392,6 +455,10 @@ abstract class NudgyDatabase : RoomDatabase() {
     // Sprint 4-0.
     abstract fun focusSessionDao(): FocusSessionDao
     abstract fun habitDao(): HabitDao
+    // Shared list, micro-task 1.
+    abstract fun sharedListDao(): SharedListDao
+    abstract fun sharedListItemDao(): SharedListItemDao
+    abstract fun sharedListCommentDao(): SharedListCommentDao
 
     companion object {
         @Volatile
@@ -404,7 +471,7 @@ abstract class NudgyDatabase : RoomDatabase() {
                     NudgyDatabase::class.java,
                     "nudgy_local_db"
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
                     // Public-launch policy (revisited from the pre-launch
                     // note): destructive fallback is RETIRED from v5.
                     // Every distributed install is v4 (1.0.2 was the first
