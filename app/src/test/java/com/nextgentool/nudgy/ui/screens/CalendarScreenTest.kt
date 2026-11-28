@@ -10,6 +10,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import com.nextgentool.nudgy.data.local.entity.CalendarEventEntity
 import com.nextgentool.nudgy.data.repository.FocusTimeSlot
+import com.nextgentool.nudgy.domain.dateStringOf
 import com.nextgentool.nudgy.domain.startOfDayMillis
 import com.nextgentool.nudgy.intent.IncomingIntent
 import org.junit.Assert.assertEquals
@@ -434,10 +435,31 @@ class CalendarScreenTest {
         // sync-pill and seg tests use on this screen. The selection
         // assertion below is unchanged.
         composeRule.onNodeWithTag("calendar_month_day_$plusTwoStr").performClick()
-        composeRule.waitUntil(timeoutMillis = 5_000) {
-            selectedDay != -1L &&
-                startOfDayMillis(selectedDay) == startOfDayMillis(plusTwo.timeInMillis)
+        // MICRO-PROBE (temporary, diagnostic only): this wait timed out
+        // twice on merge run 1063 and once more on PR #156's run 1064
+        // even with waitForIdle + 10 s, while the identical tree passed
+        // PR run 1062 — so the question is WHERE it sticks, not how long
+        // to wait. Catch the timeout and fail with the stuck state in the
+        // message: selectedDay -1L = onSelectDay never fired at all;
+        // selectedDay == today = the effect fired on composition but the
+        // tap never changed the selection; selectedDay == the expected
+        // day = the comparison itself is wrong. Remove this probe once
+        // the cause is known.
+        var reached = false
+        try {
+            composeRule.waitUntil(timeoutMillis = 10_000) {
+                selectedDay != -1L &&
+                    startOfDayMillis(selectedDay) == startOfDayMillis(plusTwo.timeInMillis)
+            }
+            reached = true
+        } catch (_: Exception) {
+            // Timeout: fall through to the probe failure below.
         }
+        val stuckDay = if (selectedDay == -1L) "never-called" else dateStringOf(selectedDay)
+        assertTrue(
+            "PROBE selectedDay=$stuckDay expected=$plusTwoStr",
+            reached
+        )
     }
 
     // Month-grid math (pure — no Compose needed): the Monday-start
